@@ -1,0 +1,126 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+
+	"life-dashboard/internal/config"
+	"life-dashboard/internal/database"
+	"life-dashboard/internal/scheduler"
+)
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	level, err := zerolog.ParseLevel(cfg.Log.Level)
+	if err != nil {
+		level = zerolog.DebugLevel
+	}
+	zerolog.SetGlobalLevel(level)
+
+	if cfg.Server.Env == "development" {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	}
+
+	log.Info().Str("env", cfg.Server.Env).Str("log_level", level.String()).Msg("starting life-dashboard")
+
+	ctx := context.Background()
+
+	pool, err := database.New(ctx, cfg.Database)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to connect to database")
+	}
+	defer pool.Close()
+	log.Info().Msg("database connected")
+
+	migrateURL := "pgx5://" + cfg.Database.URL[len("postgres://"):]
+	m, err := migrate.New("file://migrations", migrateURL)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to init migrations")
+	}
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		log.Fatal().Err(err).Msg("failed to run migrations")
+	}
+	log.Info().Msg("migrations applied")
+
+	sched := scheduler.New(log.Logger)
+	sched.Start()
+	defer sched.Stop()
+
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			start := time.Now()
+			ww := middleware.NewWrapResponseWriter(w, req.ProtoMajor)
+			next.ServeHTTP(ww, req)
+			log.Info().
+				Str("method", req.Method).
+				Str("path", req.URL.Path).
+				Int("status", ww.Status()).
+				Dur("duration", time.Since(start)).
+				Str("request_id", middleware.GetReqID(req.Context())).
+				Msg("request")
+		})
+	})
+
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		if err := pool.Ping(r.Context()); err != nil {
+			log.Error().Err(err).Msg("health check failed")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"status":"unhealthy"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	srv := &http.Server{
+		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler:      r,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		log.Info().Int("port", cfg.Server.Port).Msg("server listening")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err).Msg("server error")
+		}
+	}()
+
+	<-quit
+	log.Info().Msg("shutting down")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatal().Err(err).Msg("forced shutdown")
+	}
+	log.Info().Msg("server stopped")
+}

@@ -1,0 +1,16 @@
+DROP VIEW IF EXISTS timeline;
+DROP TABLE IF EXISTS sleep_stages;
+DROP TABLE IF EXISTS sleep_sessions;
+DROP TABLE IF EXISTS journal_entries;
+DROP TABLE IF EXISTS biometrics;
+DROP TABLE IF EXISTS transactions;
+DROP TABLE IF EXISTS accounts;
+DROP TABLE IF EXISTS nutrition_items;
+DROP TABLE IF EXISTS nutrition_daily;
+DROP TABLE IF EXISTS workout_sets;
+DROP TABLE IF EXISTS workouts;
+DROP TABLE IF EXISTS activities;
+DROP TABLE IF EXISTS raw_events;
+DROP TABLE IF EXISTS sync_state;
+DROP EXTENSION IF EXISTS vector;
+DROP EXTENSION IF EXISTS "uuid-ossp";

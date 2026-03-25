@@ -1,0 +1,20 @@
+# env
+.env
+*.env
+
+# Go
+backend/vendor/
+backend/server
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.next/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store

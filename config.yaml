@@ -1,0 +1,14 @@
+server:
+  port: 8080
+  env: development
+
+database:
+  max_conns: 10
+
+ai:
+  provider: ollama
+  model: llama3.1:8b
+  base_url: http://ollama:11434
+
+log:
+  level: debug
