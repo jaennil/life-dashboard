@@ -113,6 +113,18 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			if req.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, req)
+		})
+	})
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			start := time.Now()
 			ww := middleware.NewWrapResponseWriter(w, req.ProtoMajor)
 			next.ServeHTTP(ww, req)
@@ -139,6 +151,10 @@ func main() {
 
 	syncHandler := handlers.NewSync(activeConnectors, log.Logger)
 	r.Post("/api/v1/sync/{source}", syncHandler.TriggerSync)
+
+	dashboardHandler := handlers.NewDashboard(pool, log.Logger)
+	r.Get("/api/v1/dashboard/summary", dashboardHandler.GetSummary)
+	r.Get("/api/v1/dashboard/transactions", dashboardHandler.GetRecentTransactions)
 
 	if stravaConn != nil {
 		authHandler := handlers.NewAuth(stravaConn, log.Logger)
