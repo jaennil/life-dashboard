@@ -30,7 +30,34 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+export interface MonthStat {
+  month: string
+  spending: number
+  income: number
+}
+
+export interface Account {
+  id: string
+  title: string
+  type: string
+  currency: string
+  balance: number
+}
+
+export interface FinanceTransaction {
+  id: string
+  occurred_at: string
+  amount: number
+  currency: string
+  comment: string
+  payee: string | null
+}
+
 export const api = {
   getDashboardSummary: () => get<DashboardSummary>('/dashboard/summary'),
   getRecentTransactions: () => get<Transaction[]>('/dashboard/transactions'),
+  getMonthlyStats: () => get<MonthStat[]>('/finance/monthly'),
+  getAccounts: () => get<Account[]>('/finance/accounts'),
+  getTransactions: (page = 1, type = '') =>
+    get<FinanceTransaction[]>(`/finance/transactions?page=${page}&type=${type}`),
 }

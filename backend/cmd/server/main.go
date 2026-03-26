@@ -156,6 +156,11 @@ func main() {
 	r.Get("/api/v1/dashboard/summary", dashboardHandler.GetSummary)
 	r.Get("/api/v1/dashboard/transactions", dashboardHandler.GetRecentTransactions)
 
+	financeHandler := handlers.NewFinance(pool, log.Logger)
+	r.Get("/api/v1/finance/monthly", financeHandler.GetMonthly)
+	r.Get("/api/v1/finance/accounts", financeHandler.GetAccounts)
+	r.Get("/api/v1/finance/transactions", financeHandler.GetTransactions)
+
 	aiHandler := handlers.NewAI(pool, cfg.AI.BaseURL, cfg.AI.Model, cfg.AI.APIKey, log.Logger)
 	r.Post("/api/v1/ai/chat", aiHandler.Chat)
 
