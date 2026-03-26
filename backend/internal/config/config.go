@@ -70,9 +70,11 @@ func Load() (*Config, error) {
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.env", "development")
 	viper.SetDefault("database.max_conns", 10)
-	viper.SetDefault("ai.provider", "ollama")
-	viper.SetDefault("ai.model", "llama3.1:8b")
-	viper.SetDefault("ai.base_url", "http://ollama:11434")
+	viper.BindEnv("ai.base_url", "AI_BASE_URL")
+	viper.BindEnv("ai.model", "AI_MODEL")
+	viper.SetDefault("ai.provider", "claude-code-api")
+	viper.SetDefault("ai.model", "claude-sonnet-4-5-20250929")
+	viper.SetDefault("ai.base_url", "http://host.docker.internal:8000")
 	viper.SetDefault("log.level", "debug")
 
 	if err := viper.ReadInConfig(); err != nil {
