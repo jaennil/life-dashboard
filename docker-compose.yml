@@ -29,6 +29,7 @@ services:
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
       STRAVA_REDIRECT_URI: ${STRAVA_REDIRECT_URI:-http://localhost:8080/api/v1/auth/strava/callback}
+      ZENMONEY_TOKEN: ${ZENMONEY_TOKEN:-}
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./migrations:/app/migrations

@@ -11,8 +11,13 @@ type Config struct {
 }
 
 type ConnectorsConfig struct {
-	Hevy   HevyConfig   `mapstructure:"hevy"`
-	Strava StravaConfig `mapstructure:"strava"`
+	Hevy      HevyConfig      `mapstructure:"hevy"`
+	Strava    StravaConfig    `mapstructure:"strava"`
+	Zenmoney  ZenmoneyConfig  `mapstructure:"zenmoney"`
+}
+
+type ZenmoneyConfig struct {
+	Token string `mapstructure:"token"`
 }
 
 type HevyConfig struct {
@@ -59,6 +64,7 @@ func Load() (*Config, error) {
 	viper.BindEnv("connectors.strava.client_id", "STRAVA_CLIENT_ID")
 	viper.BindEnv("connectors.strava.client_secret", "STRAVA_CLIENT_SECRET")
 	viper.BindEnv("connectors.strava.redirect_uri", "STRAVA_REDIRECT_URI")
+	viper.BindEnv("connectors.zenmoney.token", "ZENMONEY_TOKEN")
 	viper.SetDefault("connectors.strava.redirect_uri", "http://localhost:8080/api/v1/auth/strava/callback")
 
 	viper.SetDefault("server.port", 8080)

@@ -74,6 +74,14 @@ func main() {
 		log.Warn().Msg("hevy connector disabled: HEVY_API_KEY not set")
 	}
 
+	if cfg.Connectors.Zenmoney.Token != "" {
+		zenmoney := connectors.NewZenmoney(cfg.Connectors.Zenmoney.Token, pool, log.Logger)
+		activeConnectors = append(activeConnectors, zenmoney)
+		log.Info().Msg("zenmoney connector enabled")
+	} else {
+		log.Warn().Msg("zenmoney connector disabled: ZENMONEY_TOKEN not set")
+	}
+
 	var stravaConn *connectors.StravaConnector
 	sc := cfg.Connectors.Strava
 	if sc.ClientID != "" && sc.ClientSecret != "" {
