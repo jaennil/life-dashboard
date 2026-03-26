@@ -87,7 +87,7 @@ func main() {
 	// Scheduler
 	sched := scheduler.New(log.Logger)
 	for _, conn := range activeConnectors {
-		if err := sched.AddJob("0 */2 * * *", conn.Name(), func() {
+		if err := sched.AddJob("0 0 */2 * * *", conn.Name(), func() {
 			if err := conn.Sync(context.Background()); err != nil {
 				log.Error().Err(err).Str("connector", conn.Name()).Msg("scheduled sync failed")
 			}

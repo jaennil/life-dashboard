@@ -25,6 +25,10 @@ services:
     environment:
       DATABASE_URL: postgres://dashboard:dashboard@postgres:5432/lifedashboard
       SERVER_ENV: development
+      HEVY_API_KEY: ${HEVY_API_KEY:-}
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
+      STRAVA_REDIRECT_URI: ${STRAVA_REDIRECT_URI:-http://localhost:8080/api/v1/auth/strava/callback}
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./migrations:/app/migrations
