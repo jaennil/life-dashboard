@@ -18,7 +18,9 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"life-dashboard/internal/config"
+	"life-dashboard/internal/connectors"
 	"life-dashboard/internal/database"
+	"life-dashboard/internal/handlers"
 	"life-dashboard/internal/scheduler"
 )
 
@@ -61,10 +63,42 @@ func main() {
 	}
 	log.Info().Msg("migrations applied")
 
+	// Connectors
+	var activeConnectors []connectors.Connector
+
+	if cfg.Connectors.Hevy.APIKey != "" {
+		hevy := connectors.NewHevy(cfg.Connectors.Hevy.APIKey, pool, log.Logger)
+		activeConnectors = append(activeConnectors, hevy)
+		log.Info().Msg("hevy connector enabled")
+	} else {
+		log.Warn().Msg("hevy connector disabled: HEVY_API_KEY not set")
+	}
+
+	var stravaConn *connectors.StravaConnector
+	sc := cfg.Connectors.Strava
+	if sc.ClientID != "" && sc.ClientSecret != "" {
+		stravaConn = connectors.NewStrava(sc.ClientID, sc.ClientSecret, sc.RedirectURI, pool, log.Logger)
+		activeConnectors = append(activeConnectors, stravaConn)
+		log.Info().Msg("strava connector enabled")
+	} else {
+		log.Warn().Msg("strava connector disabled: STRAVA_CLIENT_ID or STRAVA_CLIENT_SECRET not set")
+	}
+
+	// Scheduler
 	sched := scheduler.New(log.Logger)
+	for _, conn := range activeConnectors {
+		if err := sched.AddJob("0 */2 * * *", conn.Name(), func() {
+			if err := conn.Sync(context.Background()); err != nil {
+				log.Error().Err(err).Str("connector", conn.Name()).Msg("scheduled sync failed")
+			}
+		}); err != nil {
+			log.Fatal().Err(err).Str("connector", conn.Name()).Msg("failed to register sync job")
+		}
+	}
 	sched.Start()
 	defer sched.Stop()
 
+	// Router
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -94,6 +128,15 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
 	})
+
+	syncHandler := handlers.NewSync(activeConnectors, log.Logger)
+	r.Post("/api/v1/sync/{source}", syncHandler.TriggerSync)
+
+	if stravaConn != nil {
+		authHandler := handlers.NewAuth(stravaConn, log.Logger)
+		r.Get("/api/v1/auth/strava", authHandler.StravaAuthorize)
+		r.Get("/api/v1/auth/strava/callback", authHandler.StravaCallback)
+	}
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
