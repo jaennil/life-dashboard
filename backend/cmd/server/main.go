@@ -156,6 +156,9 @@ func main() {
 	r.Get("/api/v1/dashboard/summary", dashboardHandler.GetSummary)
 	r.Get("/api/v1/dashboard/transactions", dashboardHandler.GetRecentTransactions)
 
+	aiHandler := handlers.NewAI(pool, cfg.AI.BaseURL, cfg.AI.Model, cfg.AI.APIKey, log.Logger)
+	r.Post("/api/v1/ai/chat", aiHandler.Chat)
+
 	if stravaConn != nil {
 		authHandler := handlers.NewAuth(stravaConn, log.Logger)
 		r.Get("/api/v1/auth/strava", authHandler.StravaAuthorize)
