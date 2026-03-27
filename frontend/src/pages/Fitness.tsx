@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import { Route, Dumbbell, Flame, Heart } from 'lucide-react'
+import { Route, Dumbbell, Flame, Heart, ChevronDown, ChevronUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, type FitnessSummary, type WeekStat, type Activity, type Workout } from '@/lib/api'
 
@@ -48,6 +48,72 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       <p className="font-medium text-foreground mb-1">Нед. с {fmtWeek(label)}</p>
       <p className="text-orange-500">Активностей: {payload[0]?.value}</p>
       {payload[1]?.value > 0 && <p className="text-blue-400">Км: {payload[1]?.value?.toFixed(1)}</p>}
+    </div>
+  )
+}
+
+function WorkoutRow({ workout }: { workout: Workout }) {
+  const [open, setOpen] = useState(false)
+  const dur = workout.ended_at
+    ? Math.round((new Date(workout.ended_at).getTime() - new Date(workout.started_at).getTime()) / 60000)
+    : null
+
+  const setTypeBadge = (t: string) => {
+    if (t === 'warm-up') return <span className="text-xs text-amber-400">Разминка</span>
+    if (t === 'drop set') return <span className="text-xs text-blue-400">Drop</span>
+    if (t === 'failure') return <span className="text-xs text-rose-400">Отказ</span>
+    return null
+  }
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-5 py-3 flex items-center gap-3 hover:bg-muted/40 transition-colors text-left"
+      >
+        <div className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center text-base shrink-0">🏋️</div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-foreground">{workout.title || 'Тренировка'}</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className="text-xs text-muted-foreground">{fmtDate(workout.started_at)}</span>
+            {dur && <span className="text-xs text-muted-foreground">{fmtDuration(dur * 60)}</span>}
+            {workout.exercises.length > 0 && (
+              <span className="text-xs text-muted-foreground">{workout.exercises.length} упр.</span>
+            )}
+          </div>
+        </div>
+        {workout.exercises.length > 0 && (
+          open
+            ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" />
+            : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+        )}
+      </button>
+
+      {open && workout.exercises.length > 0 && (
+        <div className="px-5 pb-3 flex flex-col gap-3">
+          {workout.exercises.map(ex => (
+            <div key={ex.name}>
+              <p className="text-xs font-semibold text-foreground mb-1">
+                {ex.name}
+                {ex.category && <span className="font-normal text-muted-foreground ml-1">({ex.category})</span>}
+              </p>
+              <div className="flex flex-col gap-0.5">
+                {ex.sets.map(s => (
+                  <div key={s.set_index} className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="w-8 shrink-0">#{s.set_index}</span>
+                    <span className="font-medium text-foreground tabular-nums">
+                      {s.weight_kg != null ? `${s.weight_kg} кг` : '—'}
+                      {' × '}
+                      {s.reps != null ? `${s.reps}` : '—'}
+                    </span>
+                    {setTypeBadge(s.set_type)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -195,11 +261,11 @@ export function Fitness() {
         {/* Workouts */}
         <div className="rounded-xl border bg-card overflow-hidden">
           <div className="px-5 py-4 border-b">
-            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Тренировки (Hevy)</h2>
+            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Тренировки</h2>
           </div>
           {loading ? (
             <div className="divide-y">
-              {Array.from({ length: 5 }).map((_, i) => (
+              {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="px-5 py-3 flex gap-3">
                   <div className="flex-1 h-4 bg-muted rounded animate-pulse" />
                   <div className="h-4 w-16 bg-muted rounded animate-pulse" />
@@ -208,27 +274,11 @@ export function Fitness() {
             </div>
           ) : workouts.length === 0 ? (
             <div className="px-5 py-8 text-sm text-muted-foreground text-center">
-              Нет данных. Подключи Hevy в настройках.
+              Нет данных
             </div>
           ) : (
             <div className="divide-y max-h-[420px] overflow-y-auto">
-              {workouts.map(wk => {
-                const dur = wk.ended_at
-                  ? Math.round((new Date(wk.ended_at).getTime() - new Date(wk.started_at).getTime()) / 60000)
-                  : null
-                return (
-                  <div key={wk.id} className="px-5 py-3 flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center text-base shrink-0">🏋️</div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{wk.title || 'Тренировка'}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-muted-foreground">{fmtDate(wk.started_at)}</span>
-                        {dur && <span className="text-xs text-muted-foreground">{fmtDuration(dur * 60)}</span>}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
+              {workouts.map(wk => <WorkoutRow key={wk.id} workout={wk} />)}
             </div>
           )}
         </div>

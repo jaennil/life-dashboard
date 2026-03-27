@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -188,6 +190,11 @@ func (s *StravaConnector) fetchActivities(ctx context.Context, accessToken strin
 			if err := s.upsertActivity(ctx, &activities[i]); err != nil {
 				return total, fmt.Errorf("upsert activity %d: %w", activities[i].ID, err)
 			}
+			if activities[i].SportType == "WeightTraining" {
+				if err := s.syncWorkoutDetails(ctx, accessToken, &activities[i]); err != nil {
+					s.logger.Warn().Err(err).Int64("id", activities[i].ID).Msg("failed to sync workout details")
+				}
+			}
 		}
 
 		total += len(activities)
@@ -251,6 +258,150 @@ func (s *StravaConnector) upsertActivity(ctx context.Context, a *stravaActivity)
 	}
 
 	s.logger.Debug().Int64("id", a.ID).Str("type", a.SportType).Str("name", a.Name).Msg("activity upserted")
+	return nil
+}
+
+// ---- Workout parsing (Hevy via Strava description) ----
+
+type parsedSet struct {
+	Index    int
+	SetType  string
+	WeightKg float64
+	Reps     int
+}
+
+type parsedExercise struct {
+	Name     string
+	Category string
+	Sets     []parsedSet
+}
+
+var setLineRe = regexp.MustCompile(`^Set\s+(\d+):\s+([\d.]+)\s+kg\s+x\s+(\d+)(?:\s+\[([^\]]+)\])?`)
+
+func parseHevyDescription(desc string) []parsedExercise {
+	var exercises []parsedExercise
+	var current *parsedExercise
+
+	for _, rawLine := range strings.Split(desc, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "Logged with") || strings.HasPrefix(line, `"`) {
+			continue
+		}
+
+		if m := setLineRe.FindStringSubmatch(line); m != nil {
+			if current == nil {
+				continue
+			}
+			idx, _ := strconv.Atoi(m[1])
+			weight, _ := strconv.ParseFloat(m[2], 64)
+			reps, _ := strconv.Atoi(m[3])
+			setType := "normal"
+			if m[4] != "" {
+				setType = strings.ToLower(m[4])
+			}
+			current.Sets = append(current.Sets, parsedSet{
+				Index:    idx,
+				SetType:  setType,
+				WeightKg: weight,
+				Reps:     reps,
+			})
+			continue
+		}
+
+		// It's an exercise name, possibly with category in parentheses
+		exercises = append(exercises, parsedExercise{})
+		current = &exercises[len(exercises)-1]
+		if open := strings.LastIndex(line, "("); open != -1 && strings.HasSuffix(line, ")") {
+			current.Name = strings.TrimSpace(line[:open])
+			current.Category = line[open+1 : len(line)-1]
+		} else {
+			current.Name = line
+		}
+	}
+
+	return exercises
+}
+
+func (s *StravaConnector) syncWorkoutDetails(ctx context.Context, accessToken string, a *stravaActivity) error {
+	externalID := fmt.Sprintf("%d", a.ID)
+
+	// Skip if workout already stored for this activity
+	var exists bool
+	s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM workouts WHERE external_id = $1)`, externalID).Scan(&exists)
+	if exists {
+		return nil
+	}
+
+	// Fetch full activity detail from Strava
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/activities/%d", stravaBaseURL, a.ID), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return fmt.Errorf("strava rate limit exceeded")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("strava detail api returned status %d", resp.StatusCode)
+	}
+
+	var detail stravaActivity
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		return fmt.Errorf("decode activity detail: %w", err)
+	}
+
+	if detail.Description == "" {
+		return nil
+	}
+
+	exercises := parseHevyDescription(detail.Description)
+	if len(exercises) == 0 {
+		return nil
+	}
+
+	// Store workout
+	endedAt := a.StartDate.Add(time.Duration(a.ElapsedTime) * time.Second)
+	var workoutID string
+	err = s.db.QueryRow(ctx, `
+		INSERT INTO workouts (source, external_id, started_at, ended_at, title, notes)
+		VALUES ('strava', $1, $2, $3, $4, $5)
+		ON CONFLICT (external_id) DO UPDATE SET
+			started_at = EXCLUDED.started_at,
+			ended_at   = EXCLUDED.ended_at,
+			title      = EXCLUDED.title
+		RETURNING id
+	`, externalID, a.StartDate, endedAt, a.Name, detail.Description).Scan(&workoutID)
+	if err != nil {
+		return fmt.Errorf("upsert workout: %w", err)
+	}
+
+	// Delete existing sets and re-insert (clean slate on re-sync)
+	if _, err := s.db.Exec(ctx, `DELETE FROM workout_sets WHERE workout_id = $1`, workoutID); err != nil {
+		return fmt.Errorf("delete workout sets: %w", err)
+	}
+
+	for _, ex := range exercises {
+		for _, set := range ex.Sets {
+			_, err := s.db.Exec(ctx, `
+				INSERT INTO workout_sets
+					(workout_id, exercise_name, exercise_category, set_index, set_type, weight_kg, reps)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+			`, workoutID, ex.Name, ex.Category, set.Index, set.SetType, set.WeightKg, set.Reps)
+			if err != nil {
+				return fmt.Errorf("insert workout set: %w", err)
+			}
+		}
+	}
+
+	s.logger.Info().Str("name", a.Name).Int("exercises", len(exercises)).Msg("workout details synced")
 	return nil
 }
 

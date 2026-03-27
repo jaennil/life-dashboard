@@ -78,12 +78,27 @@ export interface Activity {
   avg_heart_rate: number | null
 }
 
+export interface WorkoutSet {
+  exercise_name: string
+  exercise_category: string
+  set_index: number
+  set_type: string
+  weight_kg: number | null
+  reps: number | null
+}
+
+export interface WorkoutExercise {
+  name: string
+  category: string
+  sets: WorkoutSet[]
+}
+
 export interface Workout {
   id: string
   title: string
   started_at: string
   ended_at: string | null
-  notes: string
+  exercises: WorkoutExercise[]
 }
 
 export const api = {

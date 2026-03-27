@@ -35,12 +35,27 @@ type Activity struct {
 	AvgHeartRate    *int      `json:"avg_heart_rate"`
 }
 
+type WorkoutSet struct {
+	ExerciseName     string   `json:"exercise_name"`
+	ExerciseCategory string   `json:"exercise_category"`
+	SetIndex         int      `json:"set_index"`
+	SetType          string   `json:"set_type"`
+	WeightKg         *float64 `json:"weight_kg"`
+	Reps             *int     `json:"reps"`
+}
+
+type WorkoutExercise struct {
+	Name     string       `json:"name"`
+	Category string       `json:"category"`
+	Sets     []WorkoutSet `json:"sets"`
+}
+
 type Workout struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	StartedAt time.Time `json:"started_at"`
-	EndedAt   *time.Time `json:"ended_at"`
-	Notes     string    `json:"notes"`
+	ID        string            `json:"id"`
+	Title     string            `json:"title"`
+	StartedAt time.Time         `json:"started_at"`
+	EndedAt   *time.Time        `json:"ended_at"`
+	Exercises []WorkoutExercise `json:"exercises"`
 }
 
 type FitnessSummaryResponse struct {
@@ -136,7 +151,7 @@ func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	rows, err := h.db.Query(ctx, `
-		SELECT id, COALESCE(title,''), started_at, ended_at, COALESCE(notes,'')
+		SELECT id, COALESCE(title,''), started_at, ended_at
 		FROM workouts
 		ORDER BY started_at DESC
 		LIMIT 30
@@ -151,10 +166,47 @@ func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 	workouts := make([]Workout, 0)
 	for rows.Next() {
 		var wk Workout
-		if err := rows.Scan(&wk.ID, &wk.Title, &wk.StartedAt, &wk.EndedAt, &wk.Notes); err != nil {
+		if err := rows.Scan(&wk.ID, &wk.Title, &wk.StartedAt, &wk.EndedAt); err != nil {
 			continue
 		}
 		workouts = append(workouts, wk)
+	}
+	rows.Close()
+
+	// Load exercises grouped by workout
+	for i := range workouts {
+		setRows, err := h.db.Query(ctx, `
+			SELECT exercise_name, COALESCE(exercise_category,''), set_index, COALESCE(set_type,'normal'), weight_kg, reps
+			FROM workout_sets
+			WHERE workout_id = $1
+			ORDER BY exercise_name, set_index
+		`, workouts[i].ID)
+		if err != nil {
+			continue
+		}
+
+		exMap := make(map[string]*WorkoutExercise)
+		exOrder := []string{}
+		for setRows.Next() {
+			var s WorkoutSet
+			var exName, exCat string
+			if err := setRows.Scan(&exName, &exCat, &s.SetIndex, &s.SetType, &s.WeightKg, &s.Reps); err != nil {
+				continue
+			}
+			s.ExerciseName = exName
+			s.ExerciseCategory = exCat
+			if _, ok := exMap[exName]; !ok {
+				exMap[exName] = &WorkoutExercise{Name: exName, Category: exCat, Sets: []WorkoutSet{}}
+				exOrder = append(exOrder, exName)
+			}
+			exMap[exName].Sets = append(exMap[exName].Sets, s)
+		}
+		setRows.Close()
+
+		workouts[i].Exercises = make([]WorkoutExercise, 0, len(exOrder))
+		for _, name := range exOrder {
+			workouts[i].Exercises = append(workouts[i].Exercises, *exMap[name])
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
