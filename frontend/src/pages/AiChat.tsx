@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Send, Bot, User, Loader2 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
 import { cn } from '@/lib/utils'
 
 interface Message {
@@ -144,7 +145,9 @@ export function AiChat() {
               )}>
                 {msg.loading
                   ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : <span className="whitespace-pre-wrap">{msg.content}</span>}
+                  : msg.role === 'assistant'
+                    ? <div className="prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown>{msg.content}</ReactMarkdown></div>
+                    : <span className="whitespace-pre-wrap">{msg.content}</span>}
               </div>
             </div>
           ))
