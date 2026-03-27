@@ -309,7 +309,7 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 
 	// === ПОГОДА ===
 	if h.weather != nil {
-		if wd, err := h.weather.Fetch(); err == nil {
+		if wd, err := h.weather.Fetch(0, 0, ""); err == nil {
 			sb.WriteString("\n=== ПОГОДА ===\n")
 			sb.WriteString(fmt.Sprintf("Город: %s\n", wd.City))
 			sb.WriteString(fmt.Sprintf("Сейчас: %.1f°C, ощущается %.1f°C, %s\n", wd.Temp, wd.FeelsLike, wd.Description))

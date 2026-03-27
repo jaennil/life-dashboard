@@ -1,7 +1,18 @@
-import { useEffect, useState } from 'react'
-import { Wallet, Dumbbell, TrendingUp, TrendingDown, Zap, Route, Droplets, Wind } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Wallet, Dumbbell, TrendingUp, TrendingDown, Zap, Route, Droplets, Wind, MapPin, LocateFixed, Search, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, type DashboardSummary, type Transaction, type WeatherData } from '@/lib/api'
+
+const LOC_KEY = 'weather_location'
+
+interface SavedLocation { lat: number; lon: number; city: string }
+
+function loadLocation(): SavedLocation | null {
+  try { return JSON.parse(localStorage.getItem(LOC_KEY) || 'null') } catch { return null }
+}
+function saveLocation(loc: SavedLocation) {
+  localStorage.setItem(LOC_KEY, JSON.stringify(loc))
+}
 
 function StatCard({
   title,
@@ -81,7 +92,97 @@ function fmtDayShort(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric' })
 }
 
-function WeatherCard({ weather, loading }: { weather: WeatherData | null; loading: boolean }) {
+interface GeoResult { name: string; country: string; admin1?: string; latitude: number; longitude: number }
+
+function LocationPicker({ onSelect, onClose }: {
+  onSelect: (loc: SavedLocation) => void
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<GeoResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const [geoErr, setGeoErr] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  useEffect(() => {
+    if (!query.trim()) { setResults([]); return }
+    const t = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=8&language=ru&format=json`)
+        const data = await res.json()
+        setResults(data.results ?? [])
+      } catch { setResults([]) }
+      finally { setSearching(false) }
+    }, 400)
+    return () => clearTimeout(t)
+  }, [query])
+
+  function useGeo() {
+    setGeoErr('')
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude, city: 'Моё местоположение' }
+        onSelect(loc)
+      },
+      () => setGeoErr('Геолокация недоступна или запрещена')
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div className="bg-card border rounded-xl shadow-xl w-full max-w-sm mx-4 p-4 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold text-foreground">Выбор города</span>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+
+        <button
+          onClick={useGeo}
+          className="flex items-center gap-2 text-sm text-blue-500 hover:text-blue-400 transition-colors"
+        >
+          <LocateFixed className="w-4 h-4" /> Определить моё местоположение
+        </button>
+        {geoErr && <p className="text-xs text-rose-400">{geoErr}</p>}
+
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Поиск города..."
+            className="w-full pl-9 pr-3 py-2 text-sm bg-muted rounded-lg border-0 outline-none focus:ring-2 focus:ring-ring text-foreground placeholder:text-muted-foreground"
+          />
+          {searching && <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />}
+        </div>
+
+        {results.length > 0 && (
+          <div className="flex flex-col divide-y max-h-56 overflow-y-auto rounded-lg border">
+            {results.map((r, i) => (
+              <button
+                key={i}
+                onClick={() => onSelect({ lat: r.latitude, lon: r.longitude, city: r.name })}
+                className="px-3 py-2 text-left hover:bg-muted/50 transition-colors"
+              >
+                <span className="text-sm text-foreground">{r.name}</span>
+                <span className="text-xs text-muted-foreground ml-2">{[r.admin1, r.country].filter(Boolean).join(', ')}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function WeatherCard({ weather, loading, onPickLocation }: {
+  weather: WeatherData | null
+  loading: boolean
+  onPickLocation: () => void
+}) {
   if (loading) {
     return (
       <div className="rounded-xl border bg-card p-5">
@@ -96,7 +197,13 @@ function WeatherCard({ weather, loading }: { weather: WeatherData | null; loadin
     <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs text-muted-foreground">{weather.city}</p>
+          <button
+            onClick={onPickLocation}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors group"
+          >
+            <MapPin className="w-3 h-3" />
+            <span>{weather.city}</span>
+          </button>
           <div className="flex items-end gap-2 mt-1">
             <span className="text-5xl font-bold text-foreground">{Math.round(weather.temp)}°</span>
             <span className="text-4xl mb-0.5">{wmoIcon(weather.weather_code)}</span>
@@ -110,7 +217,6 @@ function WeatherCard({ weather, loading }: { weather: WeatherData | null; loadin
         </div>
       </div>
 
-      {/* Hourly */}
       <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
         {weather.hourly.slice(0, 12).map(h => (
           <div key={h.time} className="flex flex-col items-center gap-1 shrink-0">
@@ -121,7 +227,6 @@ function WeatherCard({ weather, loading }: { weather: WeatherData | null; loadin
         ))}
       </div>
 
-      {/* Daily */}
       <div className="flex flex-col gap-1 border-t pt-3">
         {weather.daily.map(d => (
           <div key={d.date} className="flex items-center gap-3 text-sm">
@@ -152,16 +257,42 @@ export function Dashboard() {
   const [weather, setWeather] = useState<WeatherData | null>(null)
   const [loading, setLoading] = useState(true)
   const [weatherLoading, setWeatherLoading] = useState(true)
+  const [showPicker, setShowPicker] = useState(false)
+
+  function fetchWeather(loc?: SavedLocation) {
+    setWeatherLoading(true)
+    api.getWeather(loc?.lat, loc?.lon, loc?.city)
+      .then(setWeather)
+      .catch(console.error)
+      .finally(() => setWeatherLoading(false))
+  }
+
+  function handleLocationSelect(loc: SavedLocation) {
+    saveLocation(loc)
+    setShowPicker(false)
+    fetchWeather(loc)
+  }
 
   useEffect(() => {
     Promise.all([api.getDashboardSummary(), api.getRecentTransactions()])
       .then(([s, t]) => { setSummary(s); setTxs(t) })
       .catch(console.error)
       .finally(() => setLoading(false))
-    api.getWeather()
-      .then(setWeather)
-      .catch(console.error)
-      .finally(() => setWeatherLoading(false))
+
+    const saved = loadLocation()
+    fetchWeather(saved ?? undefined)
+
+    if (!saved && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude, city: 'Моё местоположение' }
+          saveLocation(loc)
+          fetchWeather(loc)
+        },
+        () => {},
+        { timeout: 5000 }
+      )
+    }
   }, [])
 
   const insights: { text: string; type: 'info' | 'warn' | 'good' }[] = []
@@ -182,6 +313,7 @@ export function Dashboard() {
 
   return (
     <div className="flex flex-col gap-6">
+      {showPicker && <LocationPicker onSelect={handleLocationSelect} onClose={() => setShowPicker(false)} />}
       <div>
         <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">
@@ -192,7 +324,7 @@ export function Dashboard() {
       {/* Weather + Stats */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-1">
-          <WeatherCard weather={weather} loading={weatherLoading} />
+          <WeatherCard weather={weather} loading={weatherLoading} onPickLocation={() => setShowPicker(true)} />
         </div>
         <div className="lg:col-span-2 grid grid-cols-2 gap-4 content-start">
           <StatCard

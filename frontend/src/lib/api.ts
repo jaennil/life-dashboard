@@ -137,5 +137,12 @@ export const api = {
   getFitnessWeekly: () => get<WeekStat[]>('/fitness/weekly'),
   getActivities: () => get<Activity[]>('/fitness/activities'),
   getWorkouts: () => get<Workout[]>('/fitness/workouts'),
-  getWeather: () => get<WeatherData>('/weather'),
+  getWeather: (lat?: number, lon?: number, city?: string) => {
+    const params = new URLSearchParams()
+    if (lat != null) params.set('lat', String(lat))
+    if (lon != null) params.set('lon', String(lon))
+    if (city) params.set('city', city)
+    const qs = params.toString()
+    return get<WeatherData>('/weather' + (qs ? '?' + qs : ''))
+  },
 }

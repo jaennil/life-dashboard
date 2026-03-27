@@ -85,14 +85,20 @@ func wmoDescription(code int) string {
 	}
 }
 
-func (h *WeatherHandler) Fetch() (*WeatherResponse, error) {
+func (h *WeatherHandler) Fetch(lat, lon float64, city string) (*WeatherResponse, error) {
+	if lat == 0 && lon == 0 {
+		lat, lon = h.lat, h.lon
+	}
+	if city == "" {
+		city = h.city
+	}
 	url := fmt.Sprintf(
 		"https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"+
 			"&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m"+
 			"&hourly=temperature_2m,weather_code"+
 			"&daily=temperature_2m_max,temperature_2m_min,weather_code"+
 			"&timezone=auto&forecast_days=5",
-		h.lat, h.lon,
+		lat, lon,
 	)
 
 	resp, err := h.client.Get(url)
@@ -155,7 +161,7 @@ func (h *WeatherHandler) Fetch() (*WeatherResponse, error) {
 	}
 
 	result := &WeatherResponse{
-		City:        h.city,
+		City:        city,
 		Temp:        raw.Current.Temperature,
 		FeelsLike:   raw.Current.ApparentTemp,
 		WeatherCode: raw.Current.WeatherCode,
@@ -171,7 +177,13 @@ func (h *WeatherHandler) Fetch() (*WeatherResponse, error) {
 }
 
 func (h *WeatherHandler) GetWeather(w http.ResponseWriter, r *http.Request) {
-	result, err := h.Fetch()
+	q := r.URL.Query()
+	var lat, lon float64
+	fmt.Sscanf(q.Get("lat"), "%f", &lat)
+	fmt.Sscanf(q.Get("lon"), "%f", &lon)
+	city := q.Get("city")
+
+	result, err := h.Fetch(lat, lon, city)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("get weather")
 		http.Error(w, "weather unavailable", http.StatusServiceUnavailable)
