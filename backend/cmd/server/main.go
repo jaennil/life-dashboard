@@ -161,6 +161,12 @@ func main() {
 	r.Get("/api/v1/finance/accounts", financeHandler.GetAccounts)
 	r.Get("/api/v1/finance/transactions", financeHandler.GetTransactions)
 
+	fitnessHandler := handlers.NewFitness(pool, log.Logger)
+	r.Get("/api/v1/fitness/summary", fitnessHandler.GetSummary)
+	r.Get("/api/v1/fitness/weekly", fitnessHandler.GetWeeklyStats)
+	r.Get("/api/v1/fitness/activities", fitnessHandler.GetActivities)
+	r.Get("/api/v1/fitness/workouts", fitnessHandler.GetWorkouts)
+
 	aiHandler := handlers.NewAI(pool, cfg.AI.BaseURL, cfg.AI.Model, cfg.AI.APIKey, log.Logger)
 	r.Post("/api/v1/ai/chat", aiHandler.Chat)
 

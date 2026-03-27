@@ -53,6 +53,39 @@ export interface FinanceTransaction {
   payee: string | null
 }
 
+export interface FitnessSummary {
+  activities_this_week: number
+  workouts_this_week: number
+  distance_km_this_week: number
+  activities_total: number
+  total_distance_km: number
+}
+
+export interface WeekStat {
+  week: string
+  count: number
+  km: number
+}
+
+export interface Activity {
+  id: string
+  type: string
+  name: string
+  started_at: string
+  duration_seconds: number | null
+  distance_meters: number | null
+  calories: number | null
+  avg_heart_rate: number | null
+}
+
+export interface Workout {
+  id: string
+  title: string
+  started_at: string
+  ended_at: string | null
+  notes: string
+}
+
 export const api = {
   getDashboardSummary: () => get<DashboardSummary>('/dashboard/summary'),
   getRecentTransactions: () => get<Transaction[]>('/dashboard/transactions'),
@@ -60,4 +93,8 @@ export const api = {
   getAccounts: () => get<Account[]>('/finance/accounts'),
   getTransactions: (page = 1, type = '') =>
     get<FinanceTransaction[]>(`/finance/transactions?page=${page}&type=${type}`),
+  getFitnessSummary: () => get<FitnessSummary>('/fitness/summary'),
+  getFitnessWeekly: () => get<WeekStat[]>('/fitness/weekly'),
+  getActivities: () => get<Activity[]>('/fitness/activities'),
+  getWorkouts: () => get<Workout[]>('/fitness/workouts'),
 }
