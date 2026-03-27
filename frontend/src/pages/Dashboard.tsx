@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Wallet, Dumbbell, TrendingUp, TrendingDown, Zap, Route } from 'lucide-react'
+import { Wallet, Dumbbell, TrendingUp, TrendingDown, Zap, Route, Droplets, Wind } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { api, type DashboardSummary, type Transaction } from '@/lib/api'
+import { api, type DashboardSummary, type Transaction, type WeatherData } from '@/lib/api'
 
 function StatCard({
   title,
@@ -58,6 +58,86 @@ function InsightCard({ text, type }: { text: string; type: 'info' | 'warn' | 'go
   )
 }
 
+function wmoIcon(code: number): string {
+  if (code === 0) return '☀️'
+  if (code === 1) return '🌤️'
+  if (code === 2) return '⛅'
+  if (code === 3) return '☁️'
+  if (code === 45 || code === 48) return '🌫️'
+  if (code >= 51 && code <= 55) return '🌦️'
+  if (code >= 61 && code <= 65) return '🌧️'
+  if (code >= 71 && code <= 77) return '🌨️'
+  if (code >= 80 && code <= 82) return '🌧️'
+  if (code === 85 || code === 86) return '🌨️'
+  if (code >= 95) return '⛈️'
+  return '🌡️'
+}
+
+function fmtHour(iso: string) {
+  return iso.slice(11, 16)
+}
+
+function fmtDayShort(iso: string) {
+  return new Date(iso).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric' })
+}
+
+function WeatherCard({ weather, loading }: { weather: WeatherData | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="rounded-xl border bg-card p-5">
+        <div className="h-5 w-24 bg-muted rounded animate-pulse mb-4" />
+        <div className="h-12 w-32 bg-muted rounded animate-pulse" />
+      </div>
+    )
+  }
+  if (!weather) return null
+
+  return (
+    <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs text-muted-foreground">{weather.city}</p>
+          <div className="flex items-end gap-2 mt-1">
+            <span className="text-5xl font-bold text-foreground">{Math.round(weather.temp)}°</span>
+            <span className="text-4xl mb-0.5">{wmoIcon(weather.weather_code)}</span>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">{weather.description}</p>
+        </div>
+        <div className="flex flex-col gap-2 text-xs text-muted-foreground shrink-0 mt-1">
+          <span>Ощущается {Math.round(weather.feels_like)}°</span>
+          <span className="flex items-center gap-1"><Droplets className="w-3 h-3" />{weather.humidity}%</span>
+          <span className="flex items-center gap-1"><Wind className="w-3 h-3" />{Math.round(weather.wind_speed)} км/ч</span>
+        </div>
+      </div>
+
+      {/* Hourly */}
+      <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
+        {weather.hourly.slice(0, 12).map(h => (
+          <div key={h.time} className="flex flex-col items-center gap-1 shrink-0">
+            <span className="text-xs text-muted-foreground">{fmtHour(h.time)}</span>
+            <span className="text-base">{wmoIcon(h.weather_code)}</span>
+            <span className="text-xs font-medium text-foreground">{Math.round(h.temp)}°</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Daily */}
+      <div className="flex flex-col gap-1 border-t pt-3">
+        {weather.daily.map(d => (
+          <div key={d.date} className="flex items-center gap-3 text-sm">
+            <span className="w-24 text-muted-foreground text-xs">{fmtDayShort(d.date)}</span>
+            <span className="text-base">{wmoIcon(d.weather_code)}</span>
+            <div className="flex-1 flex items-center justify-end gap-3">
+              <span className="text-muted-foreground text-xs">{Math.round(d.temp_min)}°</span>
+              <span className="font-medium text-foreground text-xs">{Math.round(d.temp_max)}°</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function fmt(amount: number, currency: string) {
   return new Intl.NumberFormat('ru-RU', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount)
 }
@@ -69,13 +149,19 @@ function fmtDate(iso: string) {
 export function Dashboard() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [txs, setTxs] = useState<Transaction[]>([])
+  const [weather, setWeather] = useState<WeatherData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [weatherLoading, setWeatherLoading] = useState(true)
 
   useEffect(() => {
     Promise.all([api.getDashboardSummary(), api.getRecentTransactions()])
       .then(([s, t]) => { setSummary(s); setTxs(t) })
       .catch(console.error)
       .finally(() => setLoading(false))
+    api.getWeather()
+      .then(setWeather)
+      .catch(console.error)
+      .finally(() => setWeatherLoading(false))
   }, [])
 
   const insights: { text: string; type: 'info' | 'warn' | 'good' }[] = []
@@ -103,44 +189,49 @@ export function Dashboard() {
         </p>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard
-          title="Баланс"
-          value={summary ? fmt(summary.finance.total_balance, 'RUB') : '—'}
-          sub="по всем счетам"
-          icon={Wallet}
-          color="bg-blue-500"
-          loading={loading}
-        />
-        <StatCard
-          title="Расходы за месяц"
-          value={summary ? fmt(summary.finance.monthly_spending, 'RUB') : '—'}
-          sub={summary ? `доходы: ${fmt(summary.finance.monthly_income, 'RUB')}` : 'нет данных'}
-          icon={TrendingDown}
-          color="bg-rose-500"
-          loading={loading}
-        />
-        <StatCard
-          title="Активности"
-          value={summary ? String(summary.fitness.activities_this_week) : '—'}
-          sub={summary && summary.fitness.total_distance_km > 0
-            ? `${summary.fitness.total_distance_km.toFixed(1)} км на этой неделе`
-            : 'за эту неделю'}
-          icon={Route}
-          trend={summary && summary.fitness.activities_this_week > 0 ? 'up' : undefined}
-          color="bg-orange-500"
-          loading={loading}
-        />
-        <StatCard
-          title="Тренировки"
-          value={summary ? String(summary.fitness.workouts_this_week) : '—'}
-          sub="за эту неделю"
-          icon={Dumbbell}
-          trend={summary && summary.fitness.workouts_this_week > 0 ? 'up' : undefined}
-          color="bg-violet-500"
-          loading={loading}
-        />
+      {/* Weather + Stats */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-1">
+          <WeatherCard weather={weather} loading={weatherLoading} />
+        </div>
+        <div className="lg:col-span-2 grid grid-cols-2 gap-4 content-start">
+          <StatCard
+            title="Баланс"
+            value={summary ? fmt(summary.finance.total_balance, 'RUB') : '—'}
+            sub="по всем счетам"
+            icon={Wallet}
+            color="bg-blue-500"
+            loading={loading}
+          />
+          <StatCard
+            title="Расходы за месяц"
+            value={summary ? fmt(summary.finance.monthly_spending, 'RUB') : '—'}
+            sub={summary ? `доходы: ${fmt(summary.finance.monthly_income, 'RUB')}` : 'нет данных'}
+            icon={TrendingDown}
+            color="bg-rose-500"
+            loading={loading}
+          />
+          <StatCard
+            title="Активности"
+            value={summary ? String(summary.fitness.activities_this_week) : '—'}
+            sub={summary && summary.fitness.total_distance_km > 0
+              ? `${summary.fitness.total_distance_km.toFixed(1)} км на этой неделе`
+              : 'за эту неделю'}
+            icon={Route}
+            trend={summary && summary.fitness.activities_this_week > 0 ? 'up' : undefined}
+            color="bg-orange-500"
+            loading={loading}
+          />
+          <StatCard
+            title="Тренировки"
+            value={summary ? String(summary.fitness.workouts_this_week) : '—'}
+            sub="за эту неделю"
+            icon={Dumbbell}
+            trend={summary && summary.fitness.workouts_this_week > 0 ? 'up' : undefined}
+            color="bg-violet-500"
+            loading={loading}
+          />
+        </div>
       </div>
 
       {/* AI Insights */}

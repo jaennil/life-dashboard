@@ -167,7 +167,10 @@ func main() {
 	r.Get("/api/v1/fitness/activities", fitnessHandler.GetActivities)
 	r.Get("/api/v1/fitness/workouts", fitnessHandler.GetWorkouts)
 
-	aiHandler := handlers.NewAI(pool, cfg.AI.BaseURL, cfg.AI.Model, cfg.AI.APIKey, log.Logger)
+	weatherHandler := handlers.NewWeather(cfg.Weather.Lat, cfg.Weather.Lon, cfg.Weather.City, log.Logger)
+	r.Get("/api/v1/weather", weatherHandler.GetWeather)
+
+	aiHandler := handlers.NewAI(pool, cfg.AI.BaseURL, cfg.AI.Model, cfg.AI.APIKey, weatherHandler, log.Logger)
 	r.Post("/api/v1/ai/chat", aiHandler.Chat)
 
 	if stravaConn != nil {

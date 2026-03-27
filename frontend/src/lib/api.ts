@@ -101,6 +101,31 @@ export interface Workout {
   exercises: WorkoutExercise[]
 }
 
+export interface HourlyPoint {
+  time: string
+  temp: number
+  weather_code: number
+}
+
+export interface DailyPoint {
+  date: string
+  temp_max: number
+  temp_min: number
+  weather_code: number
+}
+
+export interface WeatherData {
+  city: string
+  temp: number
+  feels_like: number
+  weather_code: number
+  description: string
+  humidity: number
+  wind_speed: number
+  hourly: HourlyPoint[]
+  daily: DailyPoint[]
+}
+
 export const api = {
   getDashboardSummary: () => get<DashboardSummary>('/dashboard/summary'),
   getRecentTransactions: () => get<Transaction[]>('/dashboard/transactions'),
@@ -112,4 +137,5 @@ export const api = {
   getFitnessWeekly: () => get<WeekStat[]>('/fitness/weekly'),
   getActivities: () => get<Activity[]>('/fitness/activities'),
   getWorkouts: () => get<Workout[]>('/fitness/workouts'),
+  getWeather: () => get<WeatherData>('/weather'),
 }

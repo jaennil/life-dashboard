@@ -8,12 +8,19 @@ type Config struct {
 	AI         AIConfig         `mapstructure:"ai"`
 	Log        LogConfig        `mapstructure:"log"`
 	Connectors ConnectorsConfig `mapstructure:"connectors"`
+	Weather    WeatherConfig    `mapstructure:"weather"`
 }
 
 type ConnectorsConfig struct {
 	Hevy      HevyConfig      `mapstructure:"hevy"`
 	Strava    StravaConfig    `mapstructure:"strava"`
 	Zenmoney  ZenmoneyConfig  `mapstructure:"zenmoney"`
+}
+
+type WeatherConfig struct {
+	Lat  float64 `mapstructure:"lat"`
+	Lon  float64 `mapstructure:"lon"`
+	City string  `mapstructure:"city"`
 }
 
 type ZenmoneyConfig struct {
@@ -76,6 +83,13 @@ func Load() (*Config, error) {
 	viper.SetDefault("ai.model", "claude-sonnet-4-5-20250929")
 	viper.SetDefault("ai.base_url", "http://host.docker.internal:8000")
 	viper.SetDefault("log.level", "debug")
+
+	viper.BindEnv("weather.lat", "WEATHER_LAT")
+	viper.BindEnv("weather.lon", "WEATHER_LON")
+	viper.BindEnv("weather.city", "WEATHER_CITY")
+	viper.SetDefault("weather.lat", 55.7522)
+	viper.SetDefault("weather.lon", 37.6156)
+	viper.SetDefault("weather.city", "Москва")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

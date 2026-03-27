@@ -19,15 +19,17 @@ type AIHandler struct {
 	baseURL string
 	model   string
 	apiKey  string
+	weather *WeatherHandler
 	logger  zerolog.Logger
 }
 
-func NewAI(db *pgxpool.Pool, baseURL, model, apiKey string, logger zerolog.Logger) *AIHandler {
+func NewAI(db *pgxpool.Pool, baseURL, model, apiKey string, weather *WeatherHandler, logger zerolog.Logger) *AIHandler {
 	return &AIHandler{
 		db:      db,
 		baseURL: strings.TrimRight(baseURL, "/"),
 		model:   model,
 		apiKey:  apiKey,
+		weather: weather,
 		logger:  logger.With().Str("handler", "ai").Logger(),
 	}
 }
@@ -300,6 +302,23 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 				sb.WriteString(fmt.Sprintf("  %s:\n", exName))
 				for _, s := range exSets[exName] {
 					sb.WriteString(fmt.Sprintf("    %s\n", s))
+				}
+			}
+		}
+	}
+
+	// === ПОГОДА ===
+	if h.weather != nil {
+		if wd, err := h.weather.Fetch(); err == nil {
+			sb.WriteString("\n=== ПОГОДА ===\n")
+			sb.WriteString(fmt.Sprintf("Город: %s\n", wd.City))
+			sb.WriteString(fmt.Sprintf("Сейчас: %.1f°C, ощущается %.1f°C, %s\n", wd.Temp, wd.FeelsLike, wd.Description))
+			sb.WriteString(fmt.Sprintf("Влажность: %d%%, ветер %.1f км/ч\n", wd.Humidity, wd.WindSpeed))
+			if len(wd.Daily) > 0 {
+				sb.WriteString("Прогноз:\n")
+				for _, d := range wd.Daily {
+					sb.WriteString(fmt.Sprintf("  %s: %s, макс %.0f°C, мин %.0f°C\n",
+						d.Date, wmoDescription(d.WeatherCode), d.TempMax, d.TempMin))
 				}
 			}
 		}
