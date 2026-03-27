@@ -240,17 +240,69 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 	sb.WriteString(fmt.Sprintf("За эту неделю: %d тренировок\n", weekWorkouts))
 
 	wRows, err := h.db.Query(ctx, `
-		SELECT started_at, title FROM workouts ORDER BY started_at DESC LIMIT 10
+		SELECT id, started_at, title FROM workouts ORDER BY started_at DESC LIMIT 10
 	`)
 	if err == nil {
+		type workoutEntry struct {
+			id       string
+			startedAt time.Time
+			title    string
+		}
+		var recentWorkouts []workoutEntry
 		for wRows.Next() {
-			var t time.Time
-			var title string
-			if err := wRows.Scan(&t, &title); err == nil {
-				sb.WriteString(fmt.Sprintf("  %s: %s\n", t.Format("02.01"), title))
+			var w workoutEntry
+			if err := wRows.Scan(&w.id, &w.startedAt, &w.title); err == nil {
+				recentWorkouts = append(recentWorkouts, w)
 			}
 		}
 		wRows.Close()
+
+		for _, w := range recentWorkouts {
+			sb.WriteString(fmt.Sprintf("\nТренировка %s: %s\n", w.startedAt.Format("02.01.2006"), w.title))
+
+			setRows, err := h.db.Query(ctx, `
+				SELECT exercise_name, exercise_category, set_index, set_type,
+				       COALESCE(weight_kg::text, '-'), COALESCE(reps::text, '-')
+				FROM workout_sets
+				WHERE workout_id = $1
+				ORDER BY exercise_name, set_index
+			`, w.id)
+			if err != nil {
+				continue
+			}
+
+			type exKey = string
+			exSets := map[exKey][]string{}
+			exOrder := []string{}
+			for setRows.Next() {
+				var exName, exCat, setIdx, setType, weightKg, reps string
+				if err := setRows.Scan(&exName, &exCat, &setIdx, &setType, &weightKg, &reps); err != nil {
+					continue
+				}
+				if _, ok := exSets[exName]; !ok {
+					label := exName
+					if exCat != "" {
+						label += " (" + exCat + ")"
+					}
+					exOrder = append(exOrder, exName)
+					exSets[exName] = []string{}
+					_ = label
+				}
+				setDesc := fmt.Sprintf("Подход %s: %s кг x %s", setIdx, weightKg, reps)
+				if setType != "normal" && setType != "" {
+					setDesc += " [" + setType + "]"
+				}
+				exSets[exName] = append(exSets[exName], setDesc)
+			}
+			setRows.Close()
+
+			for _, exName := range exOrder {
+				sb.WriteString(fmt.Sprintf("  %s:\n", exName))
+				for _, s := range exSets[exName] {
+					sb.WriteString(fmt.Sprintf("    %s\n", s))
+				}
+			}
+		}
 	}
 
 	return sb.String(), nil
