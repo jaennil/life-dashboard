@@ -1,0 +1,1 @@
+ALTER TABLE sync_state DROP COLUMN IF EXISTS enabled;

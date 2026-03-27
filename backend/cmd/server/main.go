@@ -95,9 +95,15 @@ func main() {
 	// Scheduler
 	sched := scheduler.New(log.Logger)
 	for _, conn := range activeConnectors {
-		if err := sched.AddJob("0 0 */2 * * *", conn.Name(), func() {
-			if err := conn.Sync(context.Background()); err != nil {
-				log.Error().Err(err).Str("connector", conn.Name()).Msg("scheduled sync failed")
+		connCopy := conn
+		if err := sched.AddJob("0 0 */2 * * *", connCopy.Name(), func() {
+			ctx := context.Background()
+			if !handlers.IsEnabled(ctx, pool, connCopy.Name()) {
+				log.Info().Str("connector", connCopy.Name()).Msg("skipping disabled connector")
+				return
+			}
+			if err := connCopy.Sync(ctx); err != nil {
+				log.Error().Err(err).Str("connector", connCopy.Name()).Msg("scheduled sync failed")
 			}
 		}); err != nil {
 			log.Fatal().Err(err).Str("connector", conn.Name()).Msg("failed to register sync job")
@@ -114,7 +120,7 @@ func main() {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 			if req.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -149,8 +155,17 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	syncHandler := handlers.NewSync(activeConnectors, log.Logger)
+	syncHandler := handlers.NewSync(pool, activeConnectors, log.Logger)
 	r.Post("/api/v1/sync/{source}", syncHandler.TriggerSync)
+
+	configuredMap := map[string]bool{
+		"strava":   cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
+		"hevy":     cfg.Connectors.Hevy.APIKey != "",
+		"zenmoney": cfg.Connectors.Zenmoney.Token != "",
+	}
+	integrationsHandler := handlers.NewIntegrations(pool, activeConnectors, configuredMap, log.Logger)
+	r.Get("/api/v1/integrations", integrationsHandler.GetIntegrations)
+	r.Post("/api/v1/integrations/{name}/toggle", integrationsHandler.ToggleIntegration)
 
 	dashboardHandler := handlers.NewDashboard(pool, log.Logger)
 	r.Get("/api/v1/dashboard/summary", dashboardHandler.GetSummary)

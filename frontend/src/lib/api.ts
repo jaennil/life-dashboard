@@ -126,6 +126,16 @@ export interface WeatherData {
   daily: DailyPoint[]
 }
 
+export interface Integration {
+  name: string
+  display_name: string
+  description: string
+  configured: boolean
+  enabled: boolean
+  last_sync_at: string | null
+  record_count: number
+}
+
 export const api = {
   getDashboardSummary: () => get<DashboardSummary>('/dashboard/summary'),
   getRecentTransactions: () => get<Transaction[]>('/dashboard/transactions'),
@@ -137,6 +147,16 @@ export const api = {
   getFitnessWeekly: () => get<WeekStat[]>('/fitness/weekly'),
   getActivities: () => get<Activity[]>('/fitness/activities'),
   getWorkouts: () => get<Workout[]>('/fitness/workouts'),
+  getIntegrations: () => get<Integration[]>('/integrations'),
+  toggleIntegration: (name: string, enabled: boolean) =>
+    fetch(BASE + `/integrations/${name}/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }).then(r => { if (!r.ok) throw new Error(r.statusText) }),
+  syncIntegration: (name: string) =>
+    fetch(BASE + `/sync/${name}`, { method: 'POST' })
+      .then(r => { if (!r.ok) throw new Error(r.statusText) }),
   getWeather: (lat?: number, lon?: number, city?: string) => {
     const params = new URLSearchParams()
     if (lat != null) params.set('lat', String(lat))

@@ -4,21 +4,23 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"life-dashboard/internal/connectors"
 )
 
 type SyncHandler struct {
+	db         *pgxpool.Pool
 	connectors map[string]connectors.Connector
 	logger     zerolog.Logger
 }
 
-func NewSync(conns []connectors.Connector, logger zerolog.Logger) *SyncHandler {
+func NewSync(db *pgxpool.Pool, conns []connectors.Connector, logger zerolog.Logger) *SyncHandler {
 	m := make(map[string]connectors.Connector, len(conns))
 	for _, c := range conns {
 		m[c.Name()] = c
 	}
-	return &SyncHandler{connectors: m, logger: logger.With().Str("handler", "sync").Logger()}
+	return &SyncHandler{db: db, connectors: m, logger: logger.With().Str("handler", "sync").Logger()}
 }
 
 // POST /api/v1/sync/{source}
@@ -28,6 +30,11 @@ func (h *SyncHandler) TriggerSync(w http.ResponseWriter, r *http.Request) {
 	conn, ok := h.connectors[source]
 	if !ok {
 		h.writeError(w, http.StatusNotFound, "unknown source: "+source)
+		return
+	}
+
+	if !IsEnabled(r.Context(), h.db, source) {
+		h.writeError(w, http.StatusForbidden, "integration is disabled")
 		return
 	}
 
