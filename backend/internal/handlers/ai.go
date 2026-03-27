@@ -258,7 +258,7 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 		wRows.Close()
 
 		for _, w := range recentWorkouts {
-			sb.WriteString(fmt.Sprintf("\nТренировка %s: %s\n", w.startedAt.Format("02.01.2006"), w.title))
+			sb.WriteString(fmt.Sprintf("\nТренировка %s: %s\n", w.startedAt.Format("02.01.2006 15:04"), w.title))
 
 			setRows, err := h.db.Query(ctx, `
 				SELECT exercise_name, exercise_category, set_index, set_type,
