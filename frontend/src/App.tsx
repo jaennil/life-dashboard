@@ -3,6 +3,7 @@ import { Sidebar } from '@/components/Sidebar'
 import { Dashboard } from '@/pages/Dashboard'
 import { Finance } from '@/pages/Finance'
 import { Fitness } from '@/pages/Fitness'
+import { Nutrition } from '@/pages/Nutrition'
 import { AiChat } from '@/pages/AiChat'
 import { Settings } from '@/pages/Settings'
 
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/finance" element={<Finance />} />
           <Route path="/fitness" element={<Fitness />} />
+          <Route path="/nutrition" element={<Nutrition />} />
           <Route path="/ai" element={<AiChat />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>

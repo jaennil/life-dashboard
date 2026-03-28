@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Wallet,
   Dumbbell,
+  Salad,
   MessageSquare,
   Settings,
   Sun,
@@ -16,6 +17,7 @@ const nav = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/finance', icon: Wallet, label: 'Finance' },
   { to: '/fitness', icon: Dumbbell, label: 'Fitness' },
+  { to: '/nutrition', icon: Salad, label: 'Nutrition' },
   { to: '/ai', icon: MessageSquare, label: 'AI Chat' },
 ]
 

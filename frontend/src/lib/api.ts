@@ -126,6 +126,36 @@ export interface WeatherData {
   daily: DailyPoint[]
 }
 
+export interface NutritionSummary {
+  avg_calories: number
+  avg_protein: number
+  avg_carbs: number
+  avg_fat: number
+  days_tracked: number
+  today_kcal: number
+}
+
+export interface NutritionMealItem {
+  food_name: string
+  serving: string
+  calories: number
+}
+
+export interface NutritionMeal {
+  meal_type: string
+  items: NutritionMealItem[]
+}
+
+export interface NutritionDay {
+  date: string
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+  fiber: number
+  meals: NutritionMeal[]
+}
+
 export interface Integration {
   name: string
   display_name: string
@@ -147,6 +177,8 @@ export const api = {
   getFitnessWeekly: () => get<WeekStat[]>('/fitness/weekly'),
   getActivities: () => get<Activity[]>('/fitness/activities'),
   getWorkouts: () => get<Workout[]>('/fitness/workouts'),
+  getNutritionSummary: () => get<NutritionSummary>('/nutrition/summary'),
+  getNutritionDaily: () => get<NutritionDay[]>('/nutrition/daily'),
   getIntegrations: () => get<Integration[]>('/integrations'),
   toggleIntegration: (name: string, enabled: boolean) =>
     fetch(BASE + `/integrations/${name}/toggle`, {
