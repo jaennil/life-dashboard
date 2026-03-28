@@ -26,6 +26,14 @@ type zenmoneyDiffResponse struct {
 	Instrument      []zenmoneyInstrument   `json:"instrument"`
 	Account         []zenmoneyAccount      `json:"account"`
 	Transaction     []zenmoneyTransaction  `json:"transaction"`
+	Tag             []zenmoneyTag          `json:"tag"`
+}
+
+type zenmoneyTag struct {
+	ID       string  `json:"id"`
+	Title    string  `json:"title"`
+	Parent   *string `json:"parent"`
+	Deleted  bool    `json:"deleted"`
 }
 
 type zenmoneyInstrument struct {
@@ -96,6 +104,36 @@ func (z *ZenmoneyConnector) Sync(ctx context.Context) error {
 		currencies[inst.ID] = inst.ShortTitle
 	}
 
+	// Upsert tags and build id→title map
+	tagNames := make(map[string]string)
+	for i := range resp.Tag {
+		t := &resp.Tag[i]
+		if t.Deleted {
+			z.db.Exec(ctx, `DELETE FROM zenmoney_tags WHERE id = $1`, t.ID)
+			continue
+		}
+		z.db.Exec(ctx, `
+			INSERT INTO zenmoney_tags (id, title, parent_id, updated_at)
+			VALUES ($1, $2, $3, NOW())
+			ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, parent_id = EXCLUDED.parent_id, updated_at = NOW()
+		`, t.ID, t.Title, t.Parent)
+		tagNames[t.ID] = t.Title
+	}
+	// Fill tagNames from DB for tags not in current diff
+	if len(tagNames) == 0 {
+		rows, err := z.db.Query(ctx, `SELECT id, title FROM zenmoney_tags`)
+		if err == nil {
+			for rows.Next() {
+				var id, title string
+				if rows.Scan(&id, &title) == nil {
+					tagNames[id] = title
+				}
+			}
+			rows.Close()
+		}
+	}
+	z.logger.Info().Int("count", len(resp.Tag)).Msg("tags synced")
+
 	for i := range resp.Account {
 		if err := z.upsertAccount(ctx, &resp.Account[i], currencies); err != nil {
 			return fmt.Errorf("upsert account %s: %w", resp.Account[i].ID, err)
@@ -112,13 +150,23 @@ func (z *ZenmoneyConnector) Sync(ctx context.Context) error {
 			}
 			deleted++
 		} else {
-			if err := z.upsertTransaction(ctx, tx, currencies); err != nil {
+			if err := z.upsertTransaction(ctx, tx, currencies, tagNames); err != nil {
 				return fmt.Errorf("upsert transaction %s: %w", tx.ID, err)
 			}
 			synced++
 		}
 	}
 	z.logger.Info().Int("synced", synced).Int("deleted", deleted).Msg("transactions synced")
+
+	// Backfill category for existing transactions that have tags but no category
+	z.db.Exec(ctx, `
+		UPDATE transactions t
+		SET category = zt.title
+		FROM zenmoney_tags zt
+		WHERE t.category IS NULL
+		  AND t.tags IS NOT NULL
+		  AND zt.id = t.tags[1]
+	`)
 
 	return z.updateLastServerTimestamp(ctx, resp.ServerTimestamp)
 }
@@ -189,7 +237,7 @@ func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, acc *zenmoneyAcco
 	return nil
 }
 
-func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, tx *zenmoneyTransaction, currencies map[int]string) error {
+func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, tx *zenmoneyTransaction, currencies map[int]string, tagNames map[string]string) error {
 	isTransfer := tx.Income > 0 && tx.Outcome > 0
 
 	var accountExternalID string
@@ -223,9 +271,16 @@ func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, tx *zenmoneyT
 		date = time.Now()
 	}
 
+	var category *string
+	if len(tx.Tag) > 0 {
+		if name, ok := tagNames[tx.Tag[0]]; ok {
+			category = &name
+		}
+	}
+
 	_, err = z.db.Exec(ctx, `
-		INSERT INTO transactions (external_id, account_id, occurred_at, amount, currency, payee, comment, tags, is_transfer)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO transactions (external_id, account_id, occurred_at, amount, currency, payee, comment, tags, category, is_transfer)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (external_id) DO UPDATE SET
 			account_id  = EXCLUDED.account_id,
 			occurred_at = EXCLUDED.occurred_at,
@@ -234,8 +289,9 @@ func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, tx *zenmoneyT
 			payee       = EXCLUDED.payee,
 			comment     = EXCLUDED.comment,
 			tags        = EXCLUDED.tags,
+			category    = EXCLUDED.category,
 			is_transfer = EXCLUDED.is_transfer
-	`, tx.ID, accountID, date, amount, currency, tx.Payee, tx.Comment, tx.Tag, isTransfer)
+	`, tx.ID, accountID, date, amount, currency, tx.Payee, tx.Comment, tx.Tag, category, isTransfer)
 
 	if err != nil {
 		return err
