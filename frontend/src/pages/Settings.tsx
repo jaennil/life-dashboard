@@ -7,6 +7,7 @@ const ICONS: Record<string, string> = {
   strava: '🚴',
   hevy: '🏋️',
   zenmoney: '💰',
+  myfitnesspal: '🥗',
 }
 
 function fmtDate(iso: string | null) {
