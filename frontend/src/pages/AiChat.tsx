@@ -72,7 +72,7 @@ export function AiChat() {
           if (!line.startsWith('data: ')) continue
           const data = line.slice(6)
           if (data === '[DONE]') break
-          accumulated += data
+          accumulated += data.replaceAll('\\n', '\n')
           setMessages(prev => [
             ...prev.slice(0, -1),
             { role: 'assistant', content: accumulated, loading: false },
