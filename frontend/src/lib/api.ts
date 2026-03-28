@@ -1,5 +1,16 @@
 const BASE = '/api/v1'
 
+export interface User {
+  id: string
+  username: string
+  totp_enabled: boolean
+}
+
+export interface LoginResult {
+  needs_totp?: boolean
+  user?: User
+}
+
 export interface DashboardSummary {
   finance: {
     total_balance: number
@@ -195,6 +206,42 @@ export const api = {
   syncIntegration: (name: string) =>
     fetch(BASE + `/sync/${name}`, { method: 'POST' })
       .then(r => { if (!r.ok) throw new Error(r.statusText) }),
+  me: () => get<User>('/auth/me'),
+  register: (username: string, password: string) =>
+    fetch(BASE + '/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+      return r.json() as Promise<User>
+    }),
+  login: (username: string, password: string, totp_code?: string) =>
+    fetch(BASE + '/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, totp_code: totp_code ?? '' }),
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+      return r.json() as Promise<LoginResult>
+    }),
+  logout: () =>
+    fetch(BASE + '/auth/logout', { method: 'POST' }).then(r => {
+      if (!r.ok) throw new Error(r.statusText)
+    }),
+  totpSetup: () => get<{ secret: string; qr: string }>('/auth/totp/setup'),
+  totpEnable: (code: string) =>
+    fetch(BASE + '/auth/totp/enable', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    }).then(async r => { if (!r.ok) throw new Error(await r.text()) }),
+  totpDisable: (code: string) =>
+    fetch(BASE + '/auth/totp/disable', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    }).then(async r => { if (!r.ok) throw new Error(await r.text()) }),
   getWeather: (lat?: number, lon?: number, city?: string) => {
     const params = new URLSearchParams()
     if (lat != null) params.set('lat', String(lat))

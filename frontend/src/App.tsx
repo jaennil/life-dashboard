@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Sidebar } from '@/components/Sidebar'
 import { Dashboard } from '@/pages/Dashboard'
 import { Finance } from '@/pages/Finance'
@@ -6,6 +6,9 @@ import { Fitness } from '@/pages/Fitness'
 import { Nutrition } from '@/pages/Nutrition'
 import { AiChat } from '@/pages/AiChat'
 import { Settings } from '@/pages/Settings'
+import { Login } from '@/pages/Login'
+import { Register } from '@/pages/Register'
+import { AuthProvider, useAuth } from '@/lib/auth'
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -18,19 +21,58 @@ function Layout({ children }: { children: React.ReactNode }) {
   )
 }
 
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth()
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+  if (!user) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
+
+function AppRoutes() {
+  const { user, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  return (
+    <Routes>
+      <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
+      <Route path="/*" element={
+        <ProtectedRoute>
+          <Layout>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/finance" element={<Finance />} />
+              <Route path="/fitness" element={<Fitness />} />
+              <Route path="/nutrition" element={<Nutrition />} />
+              <Route path="/ai" element={<AiChat />} />
+              <Route path="/settings" element={<Settings />} />
+            </Routes>
+          </Layout>
+        </ProtectedRoute>
+      } />
+    </Routes>
+  )
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/finance" element={<Finance />} />
-          <Route path="/fitness" element={<Fitness />} />
-          <Route path="/nutrition" element={<Nutrition />} />
-          <Route path="/ai" element={<AiChat />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
-      </Layout>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
     </BrowserRouter>
   )
 }

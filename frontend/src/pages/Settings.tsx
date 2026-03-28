@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power } from 'lucide-react'
+import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, type Integration } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 
 const ICONS: Record<string, string> = {
   strava: '🚴',
@@ -126,6 +127,181 @@ function IntegrationCard({ integration, onToggle, onSync }: {
   )
 }
 
+function TOTPSection() {
+  const { user, refresh, logout } = useAuth()
+  const [phase, setPhase] = useState<'idle' | 'setup' | 'disable'>('idle')
+  const [qr, setQr] = useState('')
+  const [secret, setSecret] = useState('')
+  const [code, setCode] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function startSetup() {
+    setLoading(true)
+    setError('')
+    try {
+      const data = await api.totpSetup()
+      setQr(data.qr)
+      setSecret(data.secret)
+      setPhase('setup')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function confirmEnable() {
+    setLoading(true)
+    setError('')
+    try {
+      await api.totpEnable(code)
+      await refresh()
+      setPhase('idle')
+      setCode('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message.trim() : 'Неверный код')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function confirmDisable() {
+    setLoading(true)
+    setError('')
+    try {
+      await api.totpDisable(code)
+      await refresh()
+      setPhase('idle')
+      setCode('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message.trim() : 'Неверный код')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (phase === 'setup') {
+    return (
+      <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+        <p className="text-sm font-semibold text-foreground">Настройка двухфакторной аутентификации</p>
+        <p className="text-xs text-muted-foreground">Отсканируй QR-код в Google Authenticator или Aegis, затем введи 6-значный код для подтверждения.</p>
+        {qr && <img src={qr} alt="TOTP QR" className="w-40 h-40 rounded-lg border self-start" />}
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-muted-foreground">Или введи ключ вручную:</p>
+          <code className="text-xs bg-muted px-2 py-1 rounded font-mono break-all">{secret}</code>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-foreground">Код подтверждения</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={6}
+            value={code}
+            onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+            placeholder="000000"
+            className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring w-32 tracking-widest text-center"
+          />
+        </div>
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        <div className="flex gap-2">
+          <button
+            onClick={confirmEnable}
+            disabled={loading || code.length !== 6}
+            className="rounded-lg bg-primary text-primary-foreground px-4 py-1.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {loading ? '...' : 'Включить 2FA'}
+          </button>
+          <button
+            onClick={() => { setPhase('idle'); setCode('') }}
+            className="rounded-lg border px-4 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Отмена
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (phase === 'disable') {
+    return (
+      <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+        <p className="text-sm font-semibold text-foreground">Отключить двухфакторную аутентификацию</p>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-foreground">Код из приложения</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={6}
+            autoFocus
+            value={code}
+            onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+            placeholder="000000"
+            className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring w-32 tracking-widest text-center"
+          />
+        </div>
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        <div className="flex gap-2">
+          <button
+            onClick={confirmDisable}
+            disabled={loading || code.length !== 6}
+            className="rounded-lg bg-destructive text-destructive-foreground px-4 py-1.5 text-sm font-medium hover:bg-destructive/90 disabled:opacity-50 transition-colors"
+          >
+            {loading ? '...' : 'Отключить 2FA'}
+          </button>
+          <button
+            onClick={() => { setPhase('idle'); setCode('') }}
+            className="rounded-lg border px-4 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Отмена
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center shrink-0">
+            {user?.totp_enabled
+              ? <ShieldCheck className="w-5 h-5 text-emerald-500" />
+              : <ShieldOff className="w-5 h-5 text-muted-foreground" />}
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-foreground">Двухфакторная аутентификация</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {user?.totp_enabled ? 'Включена (TOTP)' : 'Выключена'}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => user?.totp_enabled ? setPhase('disable') : startSetup()}
+          disabled={loading}
+          className={cn(
+            'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors shrink-0',
+            user?.totp_enabled
+              ? 'border-red-500/30 text-red-500 hover:bg-red-500/10'
+              : 'border-border text-muted-foreground hover:bg-muted/50'
+          )}
+        >
+          {loading ? '...' : user?.totp_enabled ? 'Отключить' : 'Включить'}
+        </button>
+      </div>
+      <div className="flex items-center justify-between border-t pt-3">
+        <p className="text-xs text-muted-foreground">Аккаунт: <span className="text-foreground font-medium">{user?.username}</span></p>
+        <button
+          onClick={logout}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Выйти
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function Settings() {
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [loading, setLoading] = useState(true)
@@ -155,6 +331,11 @@ export function Settings() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Настройки</h1>
         <p className="text-sm text-muted-foreground mt-1">Управление интеграциями и источниками данных</p>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Аккаунт</h2>
+        <TOTPSection />
       </div>
 
       <div>
