@@ -37,7 +37,7 @@ type integrationMeta struct {
 	countQuery  string
 }
 
-var knownIntegrations = []string{"strava", "hevy", "zenmoney"}
+var knownIntegrations = []string{"strava", "hevy", "zenmoney", "myfitnesspal", "fatsecret"}
 
 var integrationMeta_ = map[string]integrationMeta{
 	"strava": {
@@ -54,6 +54,16 @@ var integrationMeta_ = map[string]integrationMeta{
 		displayName: "ZenMoney",
 		description: "Финансы: счета и транзакции",
 		countQuery:  "SELECT COUNT(*) FROM transactions",
+	},
+	"myfitnesspal": {
+		displayName: "MyFitnessPal",
+		description: "Питание: дневник калорий и КБЖУ",
+		countQuery:  "SELECT COUNT(*) FROM nutrition_daily",
+	},
+	"fatsecret": {
+		displayName: "FatSecret",
+		description: "Питание: дневник калорий и КБЖУ (официальный OAuth2)",
+		countQuery:  "SELECT COUNT(*) FROM nutrition_daily WHERE source='fatsecret'",
 	},
 }
 
@@ -143,6 +153,44 @@ func (h *IntegrationsHandler) ToggleIntegration(w http.ResponseWriter, r *http.R
 	h.logger.Info().Str("name", name).Bool("enabled", body.Enabled).Msg("integration toggled")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"name": name, "enabled": body.Enabled})
+}
+
+func (h *IntegrationsHandler) SaveMFPToken(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		UserID       string `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.AccessToken == "" || body.RefreshToken == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	_, err := h.db.Exec(ctx, `
+		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, athlete_id, updated_at)
+		VALUES ('myfitnesspal', $1, $2, NOW() + INTERVAL '10 days', $3, NOW())
+		ON CONFLICT (source) DO UPDATE SET
+			access_token = $1, refresh_token = $2,
+			expires_at = NOW() + INTERVAL '10 days',
+			athlete_id = $3, updated_at = NOW()
+	`, body.AccessToken, body.RefreshToken, body.UserID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("save mfp token")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// also mark as configured in sync_state
+	h.db.Exec(ctx, `
+		INSERT INTO sync_state (source, enabled, updated_at) VALUES ('myfitnesspal', true, NOW())
+		ON CONFLICT (source) DO UPDATE SET enabled = true, updated_at = NOW()
+	`)
+
+	h.configured["myfitnesspal"] = true
+	h.logger.Info().Str("user_id", body.UserID).Msg("mfp token saved")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // IsEnabled checks DB state for use in scheduler/sync
