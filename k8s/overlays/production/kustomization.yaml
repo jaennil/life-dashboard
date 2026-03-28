@@ -4,16 +4,16 @@ kind: Kustomization
 namespace: life-dashboard
 
 resources:
-  - ../../base
-  - ingress.yaml
-  - postgres-sealed.yaml
-  - ghcr-sealed.yaml
-  - app-config-sealed.yaml
+- ../../base
+- ingress.yaml
+- postgres-sealed.yaml
+- ghcr-sealed.yaml
+- app-config-sealed.yaml
 
 images:
-  - name: backend
-    newName: ghcr.io/jaennil/life-dashboard/backend
-    newTag: latest
-  - name: frontend
-    newName: ghcr.io/jaennil/life-dashboard/frontend
-    newTag: latest
+- name: backend
+  newName: ghcr.io/jaennil/life-dashboard/backend
+  newTag: e63fb1da4759fdda526850feeb177f374b804e26
+- name: frontend
+  newName: ghcr.io/jaennil/life-dashboard/frontend
+  newTag: e63fb1da4759fdda526850feeb177f374b804e26
