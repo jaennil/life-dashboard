@@ -82,6 +82,16 @@ func main() {
 		log.Warn().Msg("zenmoney connector disabled: ZENMONEY_TOKEN not set")
 	}
 
+	mfpCfg := cfg.Connectors.MFP
+	mfpEnabled := mfpCfg.AccessToken != "" || (mfpCfg.Username != "" && (mfpCfg.Password != "" || mfpCfg.SessionCookie != ""))
+	if mfpEnabled {
+		mfp := connectors.NewMFP(mfpCfg.Username, mfpCfg.Password, mfpCfg.SessionCookie, mfpCfg.AccessToken, mfpCfg.UserID, pool, log.Logger)
+		activeConnectors = append(activeConnectors, mfp)
+		log.Info().Msg("myfitnesspal connector enabled")
+	} else {
+		log.Warn().Msg("myfitnesspal connector disabled: set MFP_ACCESS_TOKEN or MFP_USERNAME+credentials")
+	}
+
 	var stravaConn *connectors.StravaConnector
 	sc := cfg.Connectors.Strava
 	if sc.ClientID != "" && sc.ClientSecret != "" {
@@ -90,6 +100,16 @@ func main() {
 		log.Info().Msg("strava connector enabled")
 	} else {
 		log.Warn().Msg("strava connector disabled: STRAVA_CLIENT_ID or STRAVA_CLIENT_SECRET not set")
+	}
+
+	var fatSecretConn *connectors.FatSecretConnector
+	fsc := cfg.Connectors.FatSecret
+	if fsc.ClientID != "" && fsc.ClientSecret != "" {
+		fatSecretConn = connectors.NewFatSecret(fsc.ClientID, fsc.ClientSecret, fsc.RedirectURI, pool, log.Logger)
+		activeConnectors = append(activeConnectors, fatSecretConn)
+		log.Info().Msg("fatsecret connector enabled")
+	} else {
+		log.Warn().Msg("fatsecret connector disabled: FATSECRET_CLIENT_ID not set")
 	}
 
 	// Scheduler
@@ -159,13 +179,16 @@ func main() {
 	r.Post("/api/v1/sync/{source}", syncHandler.TriggerSync)
 
 	configuredMap := map[string]bool{
-		"strava":   cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
-		"hevy":     cfg.Connectors.Hevy.APIKey != "",
-		"zenmoney": cfg.Connectors.Zenmoney.Token != "",
+		"strava":       cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
+		"hevy":         cfg.Connectors.Hevy.APIKey != "",
+		"zenmoney":     cfg.Connectors.Zenmoney.Token != "",
+		"myfitnesspal": mfpEnabled,
+		"fatsecret":    fsc.ClientID != "" && fsc.ClientSecret != "",
 	}
 	integrationsHandler := handlers.NewIntegrations(pool, activeConnectors, configuredMap, log.Logger)
 	r.Get("/api/v1/integrations", integrationsHandler.GetIntegrations)
 	r.Post("/api/v1/integrations/{name}/toggle", integrationsHandler.ToggleIntegration)
+	r.Post("/api/v1/integrations/myfitnesspal/token", integrationsHandler.SaveMFPToken)
 
 	dashboardHandler := handlers.NewDashboard(pool, log.Logger)
 	r.Get("/api/v1/dashboard/summary", dashboardHandler.GetSummary)
@@ -188,10 +211,14 @@ func main() {
 	aiHandler := handlers.NewAI(pool, cfg.AI.BaseURL, cfg.AI.Model, cfg.AI.APIKey, weatherHandler, log.Logger)
 	r.Post("/api/v1/ai/chat", aiHandler.Chat)
 
+	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, log.Logger)
 	if stravaConn != nil {
-		authHandler := handlers.NewAuth(stravaConn, log.Logger)
 		r.Get("/api/v1/auth/strava", authHandler.StravaAuthorize)
 		r.Get("/api/v1/auth/strava/callback", authHandler.StravaCallback)
+	}
+	if fatSecretConn != nil {
+		r.Get("/api/v1/auth/fatsecret", authHandler.FatSecretAuthorize)
+		r.Get("/api/v1/auth/fatsecret/callback", authHandler.FatSecretCallback)
 	}
 
 	srv := &http.Server{

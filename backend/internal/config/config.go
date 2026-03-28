@@ -12,9 +12,25 @@ type Config struct {
 }
 
 type ConnectorsConfig struct {
-	Hevy      HevyConfig      `mapstructure:"hevy"`
-	Strava    StravaConfig    `mapstructure:"strava"`
-	Zenmoney  ZenmoneyConfig  `mapstructure:"zenmoney"`
+	Hevy       HevyConfig       `mapstructure:"hevy"`
+	Strava     StravaConfig     `mapstructure:"strava"`
+	Zenmoney   ZenmoneyConfig   `mapstructure:"zenmoney"`
+	MFP        MFPConfig        `mapstructure:"mfp"`
+	FatSecret  FatSecretConfig  `mapstructure:"fatsecret"`
+}
+
+type FatSecretConfig struct {
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	RedirectURI  string `mapstructure:"redirect_uri"`
+}
+
+type MFPConfig struct {
+	Username      string `mapstructure:"username"`
+	Password      string `mapstructure:"password"`
+	SessionCookie string `mapstructure:"session_cookie"`
+	AccessToken   string `mapstructure:"access_token"`
+	UserID        string `mapstructure:"user_id"`
 }
 
 type WeatherConfig struct {
@@ -83,6 +99,17 @@ func Load() (*Config, error) {
 	viper.SetDefault("ai.model", "claude-sonnet-4-5-20250929")
 	viper.SetDefault("ai.base_url", "http://host.docker.internal:8000")
 	viper.SetDefault("log.level", "debug")
+
+	viper.BindEnv("connectors.fatsecret.client_id", "FATSECRET_CLIENT_ID")
+	viper.BindEnv("connectors.fatsecret.client_secret", "FATSECRET_CLIENT_SECRET")
+	viper.BindEnv("connectors.fatsecret.redirect_uri", "FATSECRET_REDIRECT_URI")
+	viper.SetDefault("connectors.fatsecret.redirect_uri", "http://localhost:8080/api/v1/auth/fatsecret/callback")
+
+	viper.BindEnv("connectors.mfp.username", "MFP_USERNAME")
+	viper.BindEnv("connectors.mfp.password", "MFP_PASSWORD")
+	viper.BindEnv("connectors.mfp.session_cookie", "MFP_SESSION_COOKIE")
+	viper.BindEnv("connectors.mfp.access_token", "MFP_ACCESS_TOKEN")
+	viper.BindEnv("connectors.mfp.user_id", "MFP_USER_ID")
 
 	viper.BindEnv("weather.lat", "WEATHER_LAT")
 	viper.BindEnv("weather.lon", "WEATHER_LON")

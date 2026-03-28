@@ -26,10 +26,18 @@ services:
       DATABASE_URL: postgres://dashboard:dashboard@postgres:5432/lifedashboard
       SERVER_ENV: development
       HEVY_API_KEY: ${HEVY_API_KEY:-}
+      MFP_USERNAME: ${MFP_USERNAME:-}
+      MFP_PASSWORD: ${MFP_PASSWORD:-}
+      MFP_SESSION_COOKIE: ${MFP_SESSION_COOKIE:-}
+      MFP_ACCESS_TOKEN: ${MFP_ACCESS_TOKEN:-}
+      MFP_USER_ID: ${MFP_USER_ID:-}
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
       STRAVA_REDIRECT_URI: ${STRAVA_REDIRECT_URI:-http://localhost:8080/api/v1/auth/strava/callback}
       ZENMONEY_TOKEN: ${ZENMONEY_TOKEN:-}
+      FATSECRET_CLIENT_ID: ${FATSECRET_CLIENT_ID:-}
+      FATSECRET_CLIENT_SECRET: ${FATSECRET_CLIENT_SECRET:-}
+      FATSECRET_REDIRECT_URI: ${FATSECRET_REDIRECT_URI:-http://localhost:8080/api/v1/auth/fatsecret/callback}
       AI_BASE_URL: ${AI_BASE_URL:-http://host.docker.internal:8000}
       AI_MODEL: ${AI_MODEL:-claude-sonnet-4-5-20250929}
     extra_hosts:
