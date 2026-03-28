@@ -205,6 +205,10 @@ func main() {
 	r.Get("/api/v1/fitness/activities", fitnessHandler.GetActivities)
 	r.Get("/api/v1/fitness/workouts", fitnessHandler.GetWorkouts)
 
+	nutritionHandler := handlers.NewNutrition(pool, log.Logger)
+	r.Get("/api/v1/nutrition/summary", nutritionHandler.GetSummary)
+	r.Get("/api/v1/nutrition/daily", nutritionHandler.GetDaily)
+
 	weatherHandler := handlers.NewWeather(cfg.Weather.Lat, cfg.Weather.Lon, cfg.Weather.City, log.Logger)
 	r.Get("/api/v1/weather", weatherHandler.GetWeather)
 
