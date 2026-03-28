@@ -126,6 +126,11 @@ export interface WeatherData {
   daily: DailyPoint[]
 }
 
+export interface CategoryStat {
+  category: string
+  amount: number
+}
+
 export interface NutritionSummary {
   avg_calories: number
   avg_protein: number
@@ -177,6 +182,7 @@ export const api = {
   getFitnessWeekly: () => get<WeekStat[]>('/fitness/weekly'),
   getActivities: () => get<Activity[]>('/fitness/activities'),
   getWorkouts: () => get<Workout[]>('/fitness/workouts'),
+  getSpendingByCategory: () => get<CategoryStat[]>('/finance/categories'),
   getNutritionSummary: () => get<NutritionSummary>('/nutrition/summary'),
   getNutritionDaily: () => get<NutritionDay[]>('/nutrition/daily'),
   getIntegrations: () => get<Integration[]>('/integrations'),

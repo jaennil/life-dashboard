@@ -1,8 +1,23 @@
 import { useEffect, useState, useCallback } from 'react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts'
 import { Wallet, TrendingDown, TrendingUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { api, type MonthStat, type Account, type FinanceTransaction } from '@/lib/api'
+import { api, type MonthStat, type Account, type FinanceTransaction, type CategoryStat } from '@/lib/api'
+
+const CATEGORY_COLORS = [
+  '#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#f43f5e',
+  '#06b6d4', '#eab308', '#ec4899', '#14b8a6', '#a855f7',
+]
+
+const CategoryTooltip = ({ active, payload }: any) => {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
+      <p className="font-medium text-foreground">{payload[0]?.payload?.category}</p>
+      <p style={{ color: payload[0]?.fill }}>{fmt(payload[0]?.value, 'RUB')}</p>
+    </div>
+  )
+}
 
 const MONTH_LABELS: Record<string, string> = {
   '01': 'Янв', '02': 'Фев', '03': 'Мар', '04': 'Апр',
@@ -49,6 +64,7 @@ type FilterType = '' | 'income' | 'expense'
 export function Finance() {
   const [monthly, setMonthly] = useState<MonthStat[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [categories, setCategories] = useState<CategoryStat[]>([])
   const [txs, setTxs] = useState<FinanceTransaction[]>([])
   const [filter, setFilter] = useState<FilterType>('')
   const [page, setPage] = useState(1)
@@ -57,8 +73,8 @@ export function Finance() {
   const [txLoading, setTxLoading] = useState(false)
 
   useEffect(() => {
-    Promise.all([api.getMonthlyStats(), api.getAccounts()])
-      .then(([m, a]) => { setMonthly(m); setAccounts(a) })
+    Promise.all([api.getMonthlyStats(), api.getAccounts(), api.getSpendingByCategory()])
+      .then(([m, a, c]) => { setMonthly(m); setAccounts(a); setCategories(c) })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
@@ -174,6 +190,47 @@ export function Finance() {
               <Bar dataKey="spending" fill="#f43f5e" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* Category breakdown */}
+      <div className="rounded-xl border bg-card p-5">
+        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Расходы по категориям</h2>
+        {loading ? (
+          <div className="h-56 bg-muted rounded animate-pulse" />
+        ) : categories.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-8">Нет данных за текущий месяц</p>
+        ) : (
+          <div className="flex flex-col lg:flex-row gap-8 items-start">
+            <div style={{ width: 240, height: 240, flexShrink: 0 }}>
+              <PieChart width={240} height={240}>
+                <Pie
+                  data={categories}
+                  dataKey="amount"
+                  nameKey="category"
+                  cx={120}
+                  cy={120}
+                  innerRadius={65}
+                  outerRadius={108}
+                  paddingAngle={2}
+                >
+                  {categories.map((_, i) => (
+                    <Cell key={i} fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip content={<CategoryTooltip />} />
+              </PieChart>
+            </div>
+            <div className="flex flex-col gap-2 flex-1 min-w-0 py-2">
+              {categories.map((c, i) => (
+                <div key={c.category} className="flex items-center gap-2 text-sm">
+                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }} />
+                  <span className="flex-1 text-foreground truncate">{c.category}</span>
+                  <span className="text-muted-foreground tabular-nums shrink-0">{fmt(c.amount, 'RUB')}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
 
