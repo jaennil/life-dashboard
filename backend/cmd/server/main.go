@@ -198,6 +198,7 @@ func main() {
 	r.Get("/api/v1/finance/monthly", financeHandler.GetMonthly)
 	r.Get("/api/v1/finance/accounts", financeHandler.GetAccounts)
 	r.Get("/api/v1/finance/transactions", financeHandler.GetTransactions)
+	r.Get("/api/v1/finance/categories", financeHandler.GetSpendingByCategory)
 
 	fitnessHandler := handlers.NewFitness(pool, log.Logger)
 	r.Get("/api/v1/fitness/summary", fitnessHandler.GetSummary)

@@ -19,6 +19,11 @@ func NewFinance(db *pgxpool.Pool, logger zerolog.Logger) *FinanceHandler {
 	return &FinanceHandler{db: db, logger: logger.With().Str("handler", "finance").Logger()}
 }
 
+type CategoryStat struct {
+	Category string  `json:"category"`
+	Amount   float64 `json:"amount"`
+}
+
 type MonthStat struct {
 	Month    string  `json:"month"`
 	Spending float64 `json:"spending"`
@@ -103,6 +108,43 @@ func (h *FinanceHandler) GetAccounts(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(accounts)
+}
+
+func (h *FinanceHandler) GetSpendingByCategory(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	monthStart := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.Local)
+
+	rows, err := h.db.Query(ctx, `
+		SELECT COALESCE(category, 'Без категории') as category, SUM(ABS(amount)) as total
+		FROM transactions
+		WHERE amount < 0
+		  AND is_transfer = false
+		  AND currency = 'RUB'
+		  AND occurred_at >= $1
+		GROUP BY category
+		ORDER BY total DESC
+		LIMIT 15
+	`, monthStart)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("query categories")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	stats := make([]CategoryStat, 0)
+	for rows.Next() {
+		var s CategoryStat
+		if err := rows.Scan(&s.Category, &s.Amount); err != nil {
+			continue
+		}
+		stats = append(stats, s)
+	}
+
+	h.logger.Debug().Int("categories", len(stats)).Msg("spending by category")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
 
 func (h *FinanceHandler) GetTransactions(w http.ResponseWriter, r *http.Request) {
