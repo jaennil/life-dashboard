@@ -144,7 +144,9 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		if content == "" {
 			continue
 		}
-		fmt.Fprintf(w, "data: %s\n\n", content)
+		// Escape newlines so they don't break SSE protocol (\n\n ends an event)
+		encoded := strings.ReplaceAll(content, "\n", "\\n")
+		fmt.Fprintf(w, "data: %s\n\n", encoded)
 		flusher.Flush()
 	}
 }
@@ -305,6 +307,58 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 				}
 			}
 		}
+	}
+
+	// === ПИТАНИЕ ===
+	sb.WriteString("\n=== ПИТАНИЕ ===\n")
+	nutritionRows, err := h.db.Query(ctx, `
+		SELECT date, calories_total, protein_g, carbs_g, fat_g, fiber_g
+		FROM nutrition_daily
+		ORDER BY date DESC LIMIT 14
+	`)
+	if err == nil {
+		for nutritionRows.Next() {
+			var date time.Time
+			var cal, protein, carbs, fat, fiber float64
+			if err := nutritionRows.Scan(&date, &cal, &protein, &carbs, &fat, &fiber); err == nil {
+				sb.WriteString(fmt.Sprintf("  %s: %.0f ккал | Б:%.0fг Ж:%.0fг У:%.0fг Клетч:%.0fг\n",
+					date.Format("02.01"), cal, protein, fat, carbs, fiber))
+			}
+		}
+		nutritionRows.Close()
+	}
+
+	// Детали по приёмам пищи за последние 2 дня
+	mealRows, err := h.db.Query(ctx, `
+		SELECT nd.date, ni.meal_type, ni.food_name, ni.serving_description, ni.calories
+		FROM nutrition_items ni
+		JOIN nutrition_daily nd ON nd.id = ni.daily_id
+		WHERE nd.date >= $1
+		ORDER BY nd.date DESC, ni.meal_type, ni.calories DESC
+	`, now.AddDate(0, 0, -2))
+	if err == nil {
+		var curDay string
+		var curMeal string
+		for mealRows.Next() {
+			var date time.Time
+			var mealType, foodName, serving string
+			var calories float64
+			if err := mealRows.Scan(&date, &mealType, &foodName, &serving, &calories); err != nil {
+				continue
+			}
+			day := date.Format("02.01")
+			if day != curDay {
+				sb.WriteString(fmt.Sprintf("  Детали %s:\n", day))
+				curDay = day
+				curMeal = ""
+			}
+			if mealType != curMeal {
+				sb.WriteString(fmt.Sprintf("    [%s]\n", mealType))
+				curMeal = mealType
+			}
+			sb.WriteString(fmt.Sprintf("      - %s (%s): %.0f ккал\n", foodName, serving, calories))
+		}
+		mealRows.Close()
 	}
 
 	// === ПОГОДА ===
