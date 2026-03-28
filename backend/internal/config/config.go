@@ -5,6 +5,7 @@ import "github.com/spf13/viper"
 type Config struct {
 	Server     ServerConfig     `mapstructure:"server"`
 	Database   DatabaseConfig   `mapstructure:"database"`
+	Auth       AuthConfig       `mapstructure:"auth"`
 	AI         AIConfig         `mapstructure:"ai"`
 	Log        LogConfig        `mapstructure:"log"`
 	Connectors ConnectorsConfig `mapstructure:"connectors"`
@@ -63,6 +64,10 @@ type DatabaseConfig struct {
 	MaxConns int32  `mapstructure:"max_conns"`
 }
 
+type AuthConfig struct {
+	JWTSecret string `mapstructure:"jwt_secret"`
+}
+
 type AIConfig struct {
 	Provider string `mapstructure:"provider"`
 	Model    string `mapstructure:"model"`
@@ -104,6 +109,9 @@ func Load() (*Config, error) {
 	viper.BindEnv("connectors.fatsecret.client_secret", "FATSECRET_CLIENT_SECRET")
 	viper.BindEnv("connectors.fatsecret.redirect_uri", "FATSECRET_REDIRECT_URI")
 	viper.SetDefault("connectors.fatsecret.redirect_uri", "http://localhost:8080/api/v1/auth/fatsecret/callback")
+
+	viper.BindEnv("auth.jwt_secret", "JWT_SECRET")
+	viper.SetDefault("auth.jwt_secret", "change-me-in-production-please")
 
 	viper.BindEnv("connectors.mfp.username", "MFP_USERNAME")
 	viper.BindEnv("connectors.mfp.password", "MFP_PASSWORD")

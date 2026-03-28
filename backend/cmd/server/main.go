@@ -21,6 +21,7 @@ import (
 	"life-dashboard/internal/connectors"
 	"life-dashboard/internal/database"
 	"life-dashboard/internal/handlers"
+	authmw "life-dashboard/internal/middleware"
 	"life-dashboard/internal/scheduler"
 )
 
@@ -175,56 +176,78 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	syncHandler := handlers.NewSync(pool, activeConnectors, log.Logger)
-	r.Post("/api/v1/sync/{source}", syncHandler.TriggerSync)
+	// Auth (public)
+	usersHandler := handlers.NewUsers(pool, cfg.Auth.JWTSecret, "Life Dashboard", log.Logger)
+	r.Post("/api/v1/auth/register", usersHandler.Register)
+	r.Post("/api/v1/auth/login", usersHandler.Login)
+	r.Post("/api/v1/auth/logout", usersHandler.Logout)
 
-	configuredMap := map[string]bool{
-		"strava":       cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
-		"hevy":         cfg.Connectors.Hevy.APIKey != "",
-		"zenmoney":     cfg.Connectors.Zenmoney.Token != "",
-		"myfitnesspal": mfpEnabled,
-		"fatsecret":    fsc.ClientID != "" && fsc.ClientSecret != "",
-	}
-	integrationsHandler := handlers.NewIntegrations(pool, activeConnectors, configuredMap, log.Logger)
-	r.Get("/api/v1/integrations", integrationsHandler.GetIntegrations)
-	r.Post("/api/v1/integrations/{name}/toggle", integrationsHandler.ToggleIntegration)
-	r.Post("/api/v1/integrations/myfitnesspal/token", integrationsHandler.SaveMFPToken)
-
-	dashboardHandler := handlers.NewDashboard(pool, log.Logger)
-	r.Get("/api/v1/dashboard/summary", dashboardHandler.GetSummary)
-	r.Get("/api/v1/dashboard/transactions", dashboardHandler.GetRecentTransactions)
-
-	financeHandler := handlers.NewFinance(pool, log.Logger)
-	r.Get("/api/v1/finance/monthly", financeHandler.GetMonthly)
-	r.Get("/api/v1/finance/accounts", financeHandler.GetAccounts)
-	r.Get("/api/v1/finance/transactions", financeHandler.GetTransactions)
-	r.Get("/api/v1/finance/categories", financeHandler.GetSpendingByCategory)
-
-	fitnessHandler := handlers.NewFitness(pool, log.Logger)
-	r.Get("/api/v1/fitness/summary", fitnessHandler.GetSummary)
-	r.Get("/api/v1/fitness/weekly", fitnessHandler.GetWeeklyStats)
-	r.Get("/api/v1/fitness/activities", fitnessHandler.GetActivities)
-	r.Get("/api/v1/fitness/workouts", fitnessHandler.GetWorkouts)
-
-	nutritionHandler := handlers.NewNutrition(pool, log.Logger)
-	r.Get("/api/v1/nutrition/summary", nutritionHandler.GetSummary)
-	r.Get("/api/v1/nutrition/daily", nutritionHandler.GetDaily)
-
-	weatherHandler := handlers.NewWeather(cfg.Weather.Lat, cfg.Weather.Lon, cfg.Weather.City, log.Logger)
-	r.Get("/api/v1/weather", weatherHandler.GetWeather)
-
-	aiHandler := handlers.NewAI(pool, cfg.AI.BaseURL, cfg.AI.Model, cfg.AI.APIKey, weatherHandler, log.Logger)
-	r.Post("/api/v1/ai/chat", aiHandler.Chat)
-
+	// OAuth callbacks are public (redirect from external providers)
 	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, log.Logger)
 	if stravaConn != nil {
-		r.Get("/api/v1/auth/strava", authHandler.StravaAuthorize)
 		r.Get("/api/v1/auth/strava/callback", authHandler.StravaCallback)
 	}
 	if fatSecretConn != nil {
-		r.Get("/api/v1/auth/fatsecret", authHandler.FatSecretAuthorize)
 		r.Get("/api/v1/auth/fatsecret/callback", authHandler.FatSecretCallback)
 	}
+
+	// Protected routes
+	r.Group(func(r chi.Router) {
+		r.Use(authmw.Auth(cfg.Auth.JWTSecret))
+
+		r.Get("/api/v1/auth/me", usersHandler.Me)
+		r.Get("/api/v1/auth/totp/setup", usersHandler.TOTPSetup)
+		r.Post("/api/v1/auth/totp/enable", usersHandler.TOTPEnable)
+		r.Post("/api/v1/auth/totp/disable", usersHandler.TOTPDisable)
+
+		syncHandler := handlers.NewSync(pool, activeConnectors, log.Logger)
+		r.Post("/api/v1/sync/{source}", syncHandler.TriggerSync)
+
+		configuredMap := map[string]bool{
+			"strava":       cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
+			"hevy":         cfg.Connectors.Hevy.APIKey != "",
+			"zenmoney":     cfg.Connectors.Zenmoney.Token != "",
+			"myfitnesspal": mfpEnabled,
+			"fatsecret":    fsc.ClientID != "" && fsc.ClientSecret != "",
+		}
+		integrationsHandler := handlers.NewIntegrations(pool, activeConnectors, configuredMap, log.Logger)
+		r.Get("/api/v1/integrations", integrationsHandler.GetIntegrations)
+		r.Post("/api/v1/integrations/{name}/toggle", integrationsHandler.ToggleIntegration)
+		r.Post("/api/v1/integrations/myfitnesspal/token", integrationsHandler.SaveMFPToken)
+
+		dashboardHandler := handlers.NewDashboard(pool, log.Logger)
+		r.Get("/api/v1/dashboard/summary", dashboardHandler.GetSummary)
+		r.Get("/api/v1/dashboard/transactions", dashboardHandler.GetRecentTransactions)
+
+		financeHandler := handlers.NewFinance(pool, log.Logger)
+		r.Get("/api/v1/finance/monthly", financeHandler.GetMonthly)
+		r.Get("/api/v1/finance/accounts", financeHandler.GetAccounts)
+		r.Get("/api/v1/finance/transactions", financeHandler.GetTransactions)
+		r.Get("/api/v1/finance/categories", financeHandler.GetSpendingByCategory)
+
+		fitnessHandler := handlers.NewFitness(pool, log.Logger)
+		r.Get("/api/v1/fitness/summary", fitnessHandler.GetSummary)
+		r.Get("/api/v1/fitness/weekly", fitnessHandler.GetWeeklyStats)
+		r.Get("/api/v1/fitness/activities", fitnessHandler.GetActivities)
+		r.Get("/api/v1/fitness/workouts", fitnessHandler.GetWorkouts)
+
+		nutritionHandler := handlers.NewNutrition(pool, log.Logger)
+		r.Get("/api/v1/nutrition/summary", nutritionHandler.GetSummary)
+		r.Get("/api/v1/nutrition/daily", nutritionHandler.GetDaily)
+
+		weatherHandler := handlers.NewWeather(cfg.Weather.Lat, cfg.Weather.Lon, cfg.Weather.City, log.Logger)
+		r.Get("/api/v1/weather", weatherHandler.GetWeather)
+
+		aiHandler := handlers.NewAI(pool, cfg.AI.BaseURL, cfg.AI.Model, cfg.AI.APIKey, weatherHandler, log.Logger)
+		r.Post("/api/v1/ai/chat", aiHandler.Chat)
+
+		if stravaConn != nil {
+			r.Get("/api/v1/auth/strava", authHandler.StravaAuthorize)
+		}
+		if fatSecretConn != nil {
+			r.Get("/api/v1/auth/fatsecret", authHandler.FatSecretAuthorize)
+		}
+	})
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
