@@ -1,0 +1,19 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  annotations:
+    sealedsecrets.bitnami.com/namespace-wide: "true"
+  name: postgres-credentials
+  namespace: life-dashboard
+spec:
+  encryptedData:
+    password: AgBulpQU8XqUr9dmk/h6zBRQ4R5/CF1jKam419vyAg/7hpbnPiWd+RSvIZrTvulL/YoTry8o/urM5PYS6TpSNObbgVjD9azE6ykQbPKMBfVO+zGjhb6zx7mEwQQm13hcIKRKNAdKKn6cDHS6B0mJhboI9T33pDhQWeSHYvORmiECsRpegG/IYg0chr40fZ9TNm/1sDVntCKQdidsUSAgN2L1Nu0Q/yn71rsdriiP4FZP0qlOw2POuZ7iImBzKSZXnD0b4sqeyiBL0vXsvqH3UgPj0qvbLWdhz43NCApT+dhxLgV36uulVlB55lNckPfdtjA7urdCAu5cCBFHgVjPyA9mW7+SN9z+bamfS/XcEMtktmCYwBbss8XSy5OhsX67XAdgQfdlHPJSGmzpI4EOf/W5FSXDMcvSV0RPi7g6ua7ZGjZs5V2X+b44qwpt23qYOPhSBpMe7SJxFyCLemW1Yb4mOMrwmpCgfBHt9oeazyL5qtETKXocH/Bwg47xCp9AU9bOP9LiaRhUkoXVpmSZzejbIepYMbaahngsnIw5d4D83JsZfkCtU5DiNngq6mIkE+NGMBxmLVmkNMQHLeZMmbmFXr7QLTL+5oDkaz99WRQHHFC54tlYKITl/8uJW9IYsFgT5RM8ETohyLjyEArBZoQPONtlNX2yK2FJfEci9PdOwqouqFNc6r6eDofcWqZpbsy20LGnry2yRYZatnHTpDvkDktDY25MUdLK9HYrNRqkug==
+    username: AgDCQbZKqFMB/csFKoIFGYXT1yfwkSxLw2JWM69I9wp0DswzDbfVGcizphhVaDdolFNAYcSQzsLEVeta4J5uoY3aCcH+YeudSDTNMTnTucqDEYF9zBUg2ixbmc4+fPaVr7IDrkfLsfAFyd5N/L5urTCdP6anItvfijdllghqAnWN0sR88ZsjYUsqWQ++RFsbtRpRrWVjwvfXxSfs/pJ+murLQ3Pgqu4gEh9WrffTSZVZy/MZxng5oKYr+9CWv7zw0DGNYJWUpC4vyhLfa+gZo7U/XFgWT/VohaX6xWvyLLyhDu51SZTuUpOqNSLaRdW8hVyGnrN5ERxhpCMRcXo0ENK0u1EHTOW55nqQiQORx1MEsFoHnUxQWGRHtPrfBVqGzrZ1aTzBa6PPGmfXnPrZexaaQ7MqkdD9mAnff1gUFwBxgbL5Z7xcB0iRVlYAeCh7bW7WkJXlR1P0+4qYALM4RO22XXNNH/YsXKToAjfDA9gbrtrpKzTr8BgPfs2QU+Qd3tqaM5Jg34kmObEtpilnjla15NoZpQECH/2z2uVvpzUUouFX1/meQG+AdcTzJIhBVqnFwfvaXr7J66n3Lw2ddTj/JYQEpMDYgNBV9sClIZLK7R5em+MbrFzlbzo8EGo05q7HGYvet39gTQ9/BEeIJzcxUD+vzmlFdWVAfhkzH/YI7eDlA0TdyUn76719G7Fo0Y1hWOaPFwknkjeyqiqb
+  template:
+    metadata:
+      annotations:
+        sealedsecrets.bitnami.com/namespace-wide: "true"
+      name: postgres-credentials
+      namespace: life-dashboard
+    type: kubernetes.io/basic-auth

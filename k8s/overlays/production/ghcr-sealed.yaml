@@ -1,0 +1,18 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  annotations:
+    sealedsecrets.bitnami.com/namespace-wide: "true"
+  name: ghcr-secret
+  namespace: life-dashboard
+spec:
+  encryptedData:
+    .dockerconfigjson: AgBI+e/ZLH9S6rbplSpIB1OZY2HMaLEnE8EPzPt46x2tj1gWxvqrhrJSiCsppH7MOkiGQQ5obtILnPrDPp74nFa/Ix0FPYzswwoOkU0Na6n+6EFDkmFEcZbph/SXR3Vg1zWXPFFeTwCr+7A7db9JN+Sz4ASzHll3UG8s1ydJXya/BIDAp9IzPuplGbq5R6HbdHnpsEVuczUwBLc+U4hdhywIKBfDN3FNfKQdFOXo6wuwcKIbkFI7qOGvdzS1yrz4LNb838ujFoqxFkVQF0rzaDjjJIzrVv+OPsl7xoqFD2nFHVVpvI1CjuRqNFuFjvLWGKl7Q3JS0liDO8P46Oj3AIhD5FQxcNkgYdfAPJi+HpIH0Tk4ExHY6s3zNsWhGF90V9BT4UFNzHd3QplDiQ8vuqoo13GzRU2Ef4BsgDB2iwFTzgXwrAuhmFoY70QbDwfo702Zdh4sROl3deN/3PErhpGUqB65hufVhZW4mjyX3qCafH/l/j3dWjwAtQCBQmOlckBg/fBR/H4aVt8Lv0LTI82a5rtTWas7oCEiyiCylqWKGKm25hKZ9c3RmSKKWrmr7FXgPXw7t6XqMqTO3YwlctbptHoBSG0llJgbd2J9hTsLd4mklo7ITb9w/qhN6KqAhIkSylw7eZQ3ldqMZj19AaUW0O7FPgOZquh32flgtqm0M3BlJUHy/qhoL3st+ca+pxRnfIr8epaDx5pGNuAP4GE6hvnVN9OyLNU9JjBBgALeaVdqZe0rbhJvrh/cpLdzasxFdhEM/okTmgPxHM2NWdzr9IOKKZs8CN/BgnPTpSGpot7vaG6VhsFraFW9imoP+qURkX3xGYi+73yNH6V26COieLk97JLPZQapVaIBuSjlmnmNLaFXAAmswYNIOcJzBXyYzJDS12o8Fgc07TjEGu6GFfokqWdkx3XTIn/o
+  template:
+    metadata:
+      annotations:
+        sealedsecrets.bitnami.com/namespace-wide: "true"
+      name: ghcr-secret
+      namespace: life-dashboard
+    type: kubernetes.io/dockerconfigjson

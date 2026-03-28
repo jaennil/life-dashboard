@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: life-dashboard
+
+resources:
+  - ../../base
+  - ingress.yaml
+  - postgres-sealed.yaml
+  - ghcr-sealed.yaml
+  - app-config-sealed.yaml
+
+images:
+  - name: backend
+    newName: ghcr.io/jaennil/life-dashboard/backend
+    newTag: latest
+  - name: frontend
+    newName: ghcr.io/jaennil/life-dashboard/frontend
+    newTag: latest
