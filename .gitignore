@@ -19,3 +19,4 @@ frontend/.next/
 # OS
 .DS_Store
 claude-code-api/
+backend/xiaomi-test
