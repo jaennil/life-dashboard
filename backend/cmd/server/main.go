@@ -123,8 +123,22 @@ func main() {
 				log.Info().Str("connector", connCopy.Name()).Msg("skipping disabled connector")
 				return
 			}
-			if err := connCopy.Sync(ctx); err != nil {
-				log.Error().Err(err).Str("connector", connCopy.Name()).Msg("scheduled sync failed")
+			rows, err := pool.Query(ctx, `SELECT id FROM users`)
+			if err != nil {
+				log.Error().Err(err).Str("connector", connCopy.Name()).Msg("failed to query users for scheduled sync")
+				return
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var userID string
+				if err := rows.Scan(&userID); err != nil {
+					log.Error().Err(err).Str("connector", connCopy.Name()).Msg("failed to scan user id")
+					continue
+				}
+				log.Info().Str("connector", connCopy.Name()).Str("user_id", userID).Msg("scheduled sync for user")
+				if err := connCopy.Sync(ctx, userID); err != nil {
+					log.Error().Err(err).Str("connector", connCopy.Name()).Str("user_id", userID).Msg("scheduled sync failed")
+				}
 			}
 		}); err != nil {
 			log.Fatal().Err(err).Str("connector", conn.Name()).Msg("failed to register sync job")
@@ -182,14 +196,7 @@ func main() {
 	r.Post("/api/v1/auth/login", usersHandler.Login)
 	r.Post("/api/v1/auth/logout", usersHandler.Logout)
 
-	// OAuth callbacks are public (redirect from external providers)
 	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, log.Logger)
-	if stravaConn != nil {
-		r.Get("/api/v1/auth/strava/callback", authHandler.StravaCallback)
-	}
-	if fatSecretConn != nil {
-		r.Get("/api/v1/auth/fatsecret/callback", authHandler.FatSecretCallback)
-	}
 
 	// Protected routes
 	r.Group(func(r chi.Router) {
@@ -243,9 +250,11 @@ func main() {
 
 		if stravaConn != nil {
 			r.Get("/api/v1/auth/strava", authHandler.StravaAuthorize)
+			r.Get("/api/v1/auth/strava/callback", authHandler.StravaCallback)
 		}
 		if fatSecretConn != nil {
 			r.Get("/api/v1/auth/fatsecret", authHandler.FatSecretAuthorize)
+			r.Get("/api/v1/auth/fatsecret/callback", authHandler.FatSecretCallback)
 		}
 	})
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"life-dashboard/internal/connectors"
+	"life-dashboard/internal/middleware"
 )
 
 type AuthHandler struct {
@@ -32,7 +33,8 @@ func (h *AuthHandler) FatSecretAuthorize(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "fatsecret not configured", http.StatusServiceUnavailable)
 		return
 	}
-	authURL, err := h.fatsecret.AuthURL(r.Context())
+	userID := r.Context().Value(middleware.UserIDKey).(string)
+	authURL, err := h.fatsecret.AuthURL(r.Context(), userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("fatsecret request token failed")
 		http.Error(w, "failed to get request token", http.StatusInternalServerError)
@@ -62,9 +64,10 @@ func (h *AuthHandler) FatSecretCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.logger.Info().Msg("fatsecret authorization successful, starting initial sync")
+	fsUserID := r.Context().Value(middleware.UserIDKey).(string)
+	h.logger.Info().Str("user_id", fsUserID).Msg("fatsecret authorization successful, starting initial sync")
 	go func() {
-		if err := h.fatsecret.Sync(r.Context()); err != nil {
+		if err := h.fatsecret.Sync(r.Context(), fsUserID); err != nil {
 			h.logger.Error().Err(err).Msg("fatsecret initial sync failed")
 		} else {
 			h.logger.Info().Msg("fatsecret initial sync complete")
@@ -83,15 +86,15 @@ func (h *AuthHandler) StravaCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.strava.ExchangeCode(r.Context(), code); err != nil {
+	stravaUserID := r.Context().Value(middleware.UserIDKey).(string)
+	if err := h.strava.ExchangeCode(r.Context(), stravaUserID, code); err != nil {
 		h.logger.Error().Err(err).Msg("strava token exchange failed")
 		http.Error(w, "authorization failed", http.StatusInternalServerError)
 		return
 	}
-
-	h.logger.Info().Msg("strava authorization successful, starting initial sync")
+	h.logger.Info().Str("user_id", stravaUserID).Msg("strava authorization successful, starting initial sync")
 	go func() {
-		if err := h.strava.Sync(r.Context()); err != nil {
+		if err := h.strava.Sync(r.Context(), stravaUserID); err != nil {
 			h.logger.Error().Err(err).Msg("strava initial sync failed")
 		} else {
 			h.logger.Info().Msg("strava initial sync complete")

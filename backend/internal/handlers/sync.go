@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"life-dashboard/internal/connectors"
+	"life-dashboard/internal/middleware"
 )
 
 type SyncHandler struct {
@@ -38,9 +39,10 @@ func (h *SyncHandler) TriggerSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("source", source).Msg("manual sync triggered")
+	userID := r.Context().Value(middleware.UserIDKey).(string)
+	h.logger.Info().Str("source", source).Str("user_id", userID).Msg("manual sync triggered")
 
-	if err := conn.Sync(r.Context()); err != nil {
+	if err := conn.Sync(r.Context(), userID); err != nil {
 		h.logger.Error().Err(err).Str("source", source).Msg("sync failed")
 		h.writeError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -53,10 +53,10 @@ func NewMFP(username, password, sessionCookie, accessToken, userID string, db *p
 
 func (c *MFPConnector) Name() string { return "myfitnesspal" }
 
-func (c *MFPConnector) Sync(ctx context.Context) error {
-	c.logger.Info().Msg("starting sync")
+func (c *MFPConnector) Sync(ctx context.Context, userID string) error {
+	c.logger.Info().Str("user_id", userID).Msg("starting sync")
 
-	if err := c.ensureAuth(ctx); err != nil {
+	if err := c.ensureAuth(ctx, userID); err != nil {
 		return fmt.Errorf("auth: %w", err)
 	}
 
@@ -64,7 +64,7 @@ func (c *MFPConnector) Sync(ctx context.Context) error {
 	today := time.Now().Truncate(24 * time.Hour)
 	for i := 0; i < 14; i++ {
 		date := today.AddDate(0, 0, -i)
-		if err := c.syncDay(ctx, date); err != nil {
+		if err := c.syncDay(ctx, userID, date); err != nil {
 			c.logger.Warn().Err(err).Str("date", date.Format("2006-01-02")).Msg("failed to sync day")
 		}
 	}
@@ -73,13 +73,13 @@ func (c *MFPConnector) Sync(ctx context.Context) error {
 	return nil
 }
 
-func (c *MFPConnector) ensureAuth(ctx context.Context) error {
+func (c *MFPConnector) ensureAuth(ctx context.Context, userID string) error {
 	if c.bearerToken != "" && time.Now().Before(c.tokenExpiry) {
 		return nil
 	}
 
 	// Try to load/refresh from DB first
-	if err := c.authFromDB(ctx); err == nil {
+	if err := c.authFromDB(ctx, userID); err == nil {
 		return nil
 	}
 
@@ -89,36 +89,36 @@ func (c *MFPConnector) ensureAuth(ctx context.Context) error {
 	return c.authWithCredentials(ctx)
 }
 
-func (c *MFPConnector) authFromDB(ctx context.Context) error {
+func (c *MFPConnector) authFromDB(ctx context.Context, userID string) error {
 	var accessToken, refreshToken string
 	var expiresAt time.Time
-	var userID int64
+	var athleteID int64
 	err := c.db.QueryRow(ctx, `
 		SELECT access_token, refresh_token, expires_at, athlete_id
-		FROM oauth_tokens WHERE source = 'myfitnesspal'
-	`).Scan(&accessToken, &refreshToken, &expiresAt, &userID)
+		FROM oauth_tokens WHERE source = 'myfitnesspal' AND user_id = $1
+	`, userID).Scan(&accessToken, &refreshToken, &expiresAt, &athleteID)
 	if err != nil {
 		return err
 	}
 
 	if time.Now().Before(expiresAt.Add(-5 * time.Minute)) {
 		c.bearerToken = accessToken
-		c.userID = fmt.Sprintf("%d", userID)
+		c.userID = fmt.Sprintf("%d", athleteID)
 		c.tokenExpiry = expiresAt
 		c.logger.Info().Msg("loaded token from db")
 		return nil
 	}
 
 	// Token expired — try refresh
-	return c.refreshToken(ctx, refreshToken)
+	return c.refreshToken(ctx, userID, refreshToken)
 }
 
-func (c *MFPConnector) refreshToken(ctx context.Context, refreshToken string) error {
-	c.logger.Info().Msg("refreshing access token")
+func (c *MFPConnector) refreshToken(ctx context.Context, userID string, refreshTok string) error {
+	c.logger.Info().Str("user_id", userID).Msg("refreshing access token")
 
 	form := url.Values{}
 	form.Set("grant_type", "refresh_token")
-	form.Set("refresh_token", refreshToken)
+	form.Set("refresh_token", refreshTok)
 	form.Set("client_id", "mfp-main-js")
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -158,16 +158,15 @@ func (c *MFPConnector) refreshToken(ctx context.Context, refreshToken string) er
 	c.tokenExpiry = expiresAt
 
 	// Persist new tokens to DB
-	newRT := refreshToken
+	newRT := refreshTok
 	if tokenData.RefreshToken != "" {
 		newRT = tokenData.RefreshToken
 	}
-	userIDVal := c.userID
 	c.db.Exec(ctx, `
 		UPDATE oauth_tokens SET access_token=$1, refresh_token=$2, expires_at=$3, updated_at=NOW()
-		WHERE source='myfitnesspal'
-	`, tokenData.AccessToken, newRT, expiresAt)
-	c.logger.Info().Str("user_id", userIDVal).Msg("token refreshed")
+		WHERE source='myfitnesspal' AND user_id = $4
+	`, tokenData.AccessToken, newRT, expiresAt, userID)
+	c.logger.Info().Str("user_id", userID).Msg("token refreshed")
 	return nil
 }
 
@@ -265,7 +264,7 @@ func (c *MFPConnector) fetchBearerToken(ctx context.Context) error {
 	return nil
 }
 
-func (c *MFPConnector) syncDay(ctx context.Context, date time.Time) error {
+func (c *MFPConnector) syncDay(ctx context.Context, userID string, date time.Time) error {
 	dateStr := date.Format("2006-01-02")
 
 	apiURL := fmt.Sprintf("%s/v2/diary?fields%%5B%%5D=all&entry_date=%s&types=food_entry,diary_meal",
@@ -297,7 +296,7 @@ func (c *MFPConnector) syncDay(ctx context.Context, date time.Time) error {
 		return fmt.Errorf("diary decode: %w", err)
 	}
 
-	return c.storeDiaryItems(ctx, date, diaryResp.Items)
+	return c.storeDiaryItems(ctx, userID, date, diaryResp.Items)
 }
 
 type mfpNutrients struct {
@@ -327,7 +326,7 @@ type mfpDiaryItem struct {
 	NutritionalContents mfpNutrients `json:"nutritional_contents"`
 }
 
-func (c *MFPConnector) storeDiaryItems(ctx context.Context, date time.Time, items []mfpDiaryItem) error {
+func (c *MFPConnector) storeDiaryItems(ctx context.Context, userID string, date time.Time, items []mfpDiaryItem) error {
 	// Find diary_meal totals per meal and daily total
 	var totalCal, totalProtein, totalCarbs, totalFat, totalFiber float64
 	for _, item := range items {
@@ -351,9 +350,9 @@ func (c *MFPConnector) storeDiaryItems(ctx context.Context, date time.Time, item
 	// Upsert daily row
 	var dailyID string
 	err := c.db.QueryRow(ctx, `
-		INSERT INTO nutrition_daily (date, calories_total, protein_g, carbs_g, fat_g, fiber_g, source)
-		VALUES ($1, $2, $3, $4, $5, $6, 'myfitnesspal')
-		ON CONFLICT (date) DO UPDATE SET
+		INSERT INTO nutrition_daily (user_id, date, calories_total, protein_g, carbs_g, fat_g, fiber_g, source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'myfitnesspal')
+		ON CONFLICT (user_id, date) DO UPDATE SET
 			calories_total = EXCLUDED.calories_total,
 			protein_g = EXCLUDED.protein_g,
 			carbs_g = EXCLUDED.carbs_g,
@@ -361,7 +360,7 @@ func (c *MFPConnector) storeDiaryItems(ctx context.Context, date time.Time, item
 			fiber_g = EXCLUDED.fiber_g,
 			source = 'myfitnesspal'
 		RETURNING id
-	`, date, totalCal, totalProtein, totalCarbs, totalFat, totalFiber).Scan(&dailyID)
+	`, userID, date, totalCal, totalProtein, totalCarbs, totalFat, totalFiber).Scan(&dailyID)
 	if err != nil {
 		return fmt.Errorf("upsert daily: %w", err)
 	}

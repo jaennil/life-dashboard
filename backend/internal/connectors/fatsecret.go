@@ -26,6 +26,11 @@ const (
 	fsAPIBase         = "https://platform.fatsecret.com/rest/server.api"
 )
 
+type requestTokenState struct {
+	secret string
+	userID string
+}
+
 type FatSecretConnector struct {
 	consumerKey    string
 	consumerSecret string
@@ -34,7 +39,7 @@ type FatSecretConnector struct {
 	client         *http.Client
 	logger         zerolog.Logger
 	// temporary storage for request token secrets during OAuth flow
-	requestSecrets map[string]string
+	requestSecrets map[string]requestTokenState
 }
 
 func NewFatSecret(consumerKey, consumerSecret, redirectURI string, db *pgxpool.Pool, logger zerolog.Logger) *FatSecretConnector {
@@ -45,7 +50,7 @@ func NewFatSecret(consumerKey, consumerSecret, redirectURI string, db *pgxpool.P
 		db:             db,
 		client:         &http.Client{Timeout: 30 * time.Second},
 		logger:         logger.With().Str("connector", "fatsecret").Logger(),
-		requestSecrets: make(map[string]string),
+		requestSecrets: make(map[string]requestTokenState),
 	}
 }
 
@@ -133,25 +138,25 @@ func (c *FatSecretConnector) GetRequestToken(ctx context.Context) (string, strin
 }
 
 // AuthURL fetches a request token and returns the authorization URL + request token
-func (c *FatSecretConnector) AuthURL(ctx context.Context) (string, error) {
+func (c *FatSecretConnector) AuthURL(ctx context.Context, userID string) (string, error) {
 	token, secret, err := c.GetRequestToken(ctx)
 	if err != nil {
 		return "", err
 	}
-	c.requestSecrets[token] = secret
+	c.requestSecrets[token] = requestTokenState{secret: secret, userID: userID}
 	authURL := fsAuthorizeURL + "?oauth_token=" + url.QueryEscape(token)
 	return authURL, nil
 }
 
 // ExchangeToken exchanges request token + verifier for an access token
 func (c *FatSecretConnector) ExchangeToken(ctx context.Context, requestToken, verifier string) error {
-	secret := c.requestSecrets[requestToken]
+	state := c.requestSecrets[requestToken]
 	delete(c.requestSecrets, requestToken)
 
 	params := c.oauth1BaseParams(requestToken)
 	params.Set("oauth_verifier", verifier)
 
-	sig := c.oauth1Sign("GET", fsAccessTokenURL, params, secret)
+	sig := c.oauth1Sign("GET", fsAccessTokenURL, params, state.secret)
 	params.Set("oauth_signature", sig)
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fsAccessTokenURL+"?"+params.Encode(), nil)
@@ -183,34 +188,34 @@ func (c *FatSecretConnector) ExchangeToken(ctx context.Context, requestToken, ve
 	// Store: access_token = oauth_token, refresh_token = oauth_token_secret
 	// OAuth 1.0 tokens don't expire — use far future date
 	_, err = c.db.Exec(ctx, `
-		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, updated_at)
-		VALUES ('fatsecret', $1, $2, $3, NOW())
-		ON CONFLICT (source) DO UPDATE SET
-			access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW()
-	`, accessToken, accessSecret, time.Now().AddDate(100, 0, 0))
+		INSERT INTO oauth_tokens (source, user_id, access_token, refresh_token, expires_at, updated_at)
+		VALUES ('fatsecret', $1, $2, $3, $4, NOW())
+		ON CONFLICT (source, user_id) DO UPDATE SET
+			access_token = $2, refresh_token = $3, expires_at = $4, updated_at = NOW()
+	`, state.userID, accessToken, accessSecret, time.Now().AddDate(100, 0, 0))
 	if err != nil {
 		return fmt.Errorf("save tokens: %w", err)
 	}
 
-	c.logger.Info().Msg("fatsecret oauth1 tokens saved")
+	c.logger.Info().Str("user_id", state.userID).Msg("fatsecret oauth1 tokens saved")
 	return nil
 }
 
-func (c *FatSecretConnector) getStoredTokens(ctx context.Context) (string, string, error) {
+func (c *FatSecretConnector) getStoredTokens(ctx context.Context, userID string) (string, string, error) {
 	var token, secret string
 	err := c.db.QueryRow(ctx, `
-		SELECT access_token, refresh_token FROM oauth_tokens WHERE source = 'fatsecret'
-	`).Scan(&token, &secret)
+		SELECT access_token, refresh_token FROM oauth_tokens WHERE source = 'fatsecret' AND user_id = $1
+	`, userID).Scan(&token, &secret)
 	if err != nil {
 		return "", "", fmt.Errorf("no token in db — authorize first at /api/v1/auth/fatsecret")
 	}
 	return token, secret, nil
 }
 
-func (c *FatSecretConnector) Sync(ctx context.Context) error {
-	c.logger.Info().Msg("starting sync")
+func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
+	c.logger.Info().Str("user_id", userID).Msg("starting sync")
 
-	token, secret, err := c.getStoredTokens(ctx)
+	token, secret, err := c.getStoredTokens(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -218,7 +223,7 @@ func (c *FatSecretConnector) Sync(ctx context.Context) error {
 	today := time.Now().Truncate(24 * time.Hour)
 	for i := 0; i < 14; i++ {
 		date := today.AddDate(0, 0, -i)
-		if err := c.syncDay(ctx, token, secret, date); err != nil {
+		if err := c.syncDay(ctx, userID, token, secret, date); err != nil {
 			c.logger.Warn().Err(err).Str("date", date.Format("2006-01-02")).Msg("failed to sync day")
 		}
 	}
@@ -255,7 +260,7 @@ var fsMealNames = map[string]string{
 	"3": "snacks",
 }
 
-func (c *FatSecretConnector) syncDay(ctx context.Context, token, secret string, date time.Time) error {
+func (c *FatSecretConnector) syncDay(ctx context.Context, userID, token, secret string, date time.Time) error {
 	dateDay := daysSinceEpoch(date)
 
 	params := c.oauth1BaseParams(token)
@@ -316,7 +321,7 @@ func (c *FatSecretConnector) syncDay(ctx context.Context, token, secret string, 
 		return nil
 	}
 
-	return c.storeEntries(ctx, date, entries)
+	return c.storeEntries(ctx, userID, date, entries)
 }
 
 func parseFloat(s string) float64 {
@@ -325,7 +330,7 @@ func parseFloat(s string) float64 {
 	return f
 }
 
-func (c *FatSecretConnector) storeEntries(ctx context.Context, date time.Time, entries []fsFoodEntry) error {
+func (c *FatSecretConnector) storeEntries(ctx context.Context, userID string, date time.Time, entries []fsFoodEntry) error {
 	var totalCal, totalProtein, totalCarbs, totalFat, totalFiber float64
 	for _, e := range entries {
 		totalCal += parseFloat(e.Calories)
@@ -337,9 +342,9 @@ func (c *FatSecretConnector) storeEntries(ctx context.Context, date time.Time, e
 
 	var dailyID string
 	err := c.db.QueryRow(ctx, `
-		INSERT INTO nutrition_daily (date, calories_total, protein_g, carbs_g, fat_g, fiber_g, source)
-		VALUES ($1, $2, $3, $4, $5, $6, 'fatsecret')
-		ON CONFLICT (date) DO UPDATE SET
+		INSERT INTO nutrition_daily (user_id, date, calories_total, protein_g, carbs_g, fat_g, fiber_g, source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'fatsecret')
+		ON CONFLICT (user_id, date) DO UPDATE SET
 			calories_total = EXCLUDED.calories_total,
 			protein_g = EXCLUDED.protein_g,
 			carbs_g = EXCLUDED.carbs_g,
@@ -347,7 +352,7 @@ func (c *FatSecretConnector) storeEntries(ctx context.Context, date time.Time, e
 			fiber_g = EXCLUDED.fiber_g,
 			source = 'fatsecret'
 		RETURNING id
-	`, date, totalCal, totalProtein, totalCarbs, totalFat, totalFiber).Scan(&dailyID)
+	`, userID, date, totalCal, totalProtein, totalCarbs, totalFat, totalFiber).Scan(&dailyID)
 	if err != nil {
 		return fmt.Errorf("upsert daily: %w", err)
 	}
