@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff } from 'lucide-react'
+import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, type Integration } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+
+const OAUTH_INTEGRATIONS: Record<string, string> = {
+  strava: '/api/v1/auth/strava',
+  fatsecret: '/api/v1/auth/fatsecret',
+}
 
 const ICONS: Record<string, string> = {
   strava: '🚴',
@@ -112,16 +117,27 @@ function IntegrationCard({ integration, onToggle, onSync }: {
           )}
         </div>
 
-        {integration.configured && integration.enabled && (
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-lg hover:bg-muted/50"
-          >
-            <RefreshCw className={cn('w-3 h-3', syncing && 'animate-spin')} />
-            {syncing ? 'Синхронизация...' : 'Синхронизировать'}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {OAUTH_INTEGRATIONS[integration.name] && integration.enabled && integration.record_count === 0 && (
+            <a
+              href={OAUTH_INTEGRATIONS[integration.name]}
+              className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors px-3 py-1.5 rounded-lg border border-primary/30 hover:bg-primary/10"
+            >
+              <ExternalLink className="w-3 h-3" />
+              Подключить
+            </a>
+          )}
+          {integration.configured && integration.enabled && (
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-lg hover:bg-muted/50"
+            >
+              <RefreshCw className={cn('w-3 h-3', syncing && 'animate-spin')} />
+              {syncing ? 'Синхронизация...' : 'Синхронизировать'}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )
