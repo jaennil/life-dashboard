@@ -91,7 +91,7 @@ func (s *StravaConnector) AuthURL(state string) string {
 }
 
 // ExchangeCode exchanges an OAuth code for tokens and stores them
-func (s *StravaConnector) ExchangeCode(ctx context.Context, code string) error {
+func (s *StravaConnector) ExchangeCode(ctx context.Context, userID string, code string) error {
 	resp, err := s.fetchToken(ctx, url.Values{
 		"client_id":     {s.clientID},
 		"client_secret": {s.clientSecret},
@@ -102,7 +102,7 @@ func (s *StravaConnector) ExchangeCode(ctx context.Context, code string) error {
 		return fmt.Errorf("exchange code: %w", err)
 	}
 
-	if err := s.saveToken(ctx, resp); err != nil {
+	if err := s.saveToken(ctx, userID, resp); err != nil {
 		return fmt.Errorf("save token: %w", err)
 	}
 
@@ -110,8 +110,8 @@ func (s *StravaConnector) ExchangeCode(ctx context.Context, code string) error {
 	return nil
 }
 
-func (s *StravaConnector) Sync(ctx context.Context) error {
-	token, err := s.loadToken(ctx)
+func (s *StravaConnector) Sync(ctx context.Context, userID string) error {
+	token, err := s.loadToken(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("load token: %w", err)
 	}
@@ -119,23 +119,23 @@ func (s *StravaConnector) Sync(ctx context.Context) error {
 	// Refresh if expired
 	if time.Now().After(token.ExpiresAt) {
 		s.logger.Info().Msg("access token expired, refreshing")
-		token, err = s.refreshToken(ctx, token.RefreshToken)
+		token, err = s.refreshToken(ctx, userID, token.RefreshToken)
 		if err != nil {
 			return fmt.Errorf("refresh token: %w", err)
 		}
 	}
 
-	lastSync, err := s.getLastSync(ctx)
+	lastSync, err := s.getLastSync(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("get last sync: %w", err)
 	}
 
-	total, err := s.fetchActivities(ctx, token.AccessToken, lastSync)
+	total, err := s.fetchActivities(ctx, userID, token.AccessToken, lastSync)
 	if err != nil {
 		return err
 	}
 
-	if err := s.updateLastSync(ctx); err != nil {
+	if err := s.updateLastSync(ctx, userID); err != nil {
 		return err
 	}
 
@@ -143,7 +143,7 @@ func (s *StravaConnector) Sync(ctx context.Context) error {
 	return nil
 }
 
-func (s *StravaConnector) fetchActivities(ctx context.Context, accessToken string, since time.Time) (int, error) {
+func (s *StravaConnector) fetchActivities(ctx context.Context, userID string, accessToken string, since time.Time) (int, error) {
 	page := 1
 	total := 0
 	afterUnix := since.Unix()
@@ -187,11 +187,11 @@ func (s *StravaConnector) fetchActivities(ctx context.Context, accessToken strin
 		}
 
 		for i := range activities {
-			if err := s.upsertActivity(ctx, &activities[i]); err != nil {
+			if err := s.upsertActivity(ctx, userID, &activities[i]); err != nil {
 				return total, fmt.Errorf("upsert activity %d: %w", activities[i].ID, err)
 			}
 			if activities[i].SportType == "WeightTraining" {
-				if err := s.syncWorkoutDetails(ctx, accessToken, &activities[i]); err != nil {
+				if err := s.syncWorkoutDetails(ctx, userID, accessToken, &activities[i]); err != nil {
 					s.logger.Warn().Err(err).Int64("id", activities[i].ID).Msg("failed to sync workout details")
 				}
 			}
@@ -209,7 +209,7 @@ func (s *StravaConnector) fetchActivities(ctx context.Context, accessToken strin
 	return total, nil
 }
 
-func (s *StravaConnector) upsertActivity(ctx context.Context, a *stravaActivity) error {
+func (s *StravaConnector) upsertActivity(ctx context.Context, userID string, a *stravaActivity) error {
 	raw, err := json.Marshal(a)
 	if err != nil {
 		return err
@@ -218,9 +218,9 @@ func (s *StravaConnector) upsertActivity(ctx context.Context, a *stravaActivity)
 	externalID := fmt.Sprintf("%d", a.ID)
 
 	_, err = s.db.Exec(ctx, `
-		INSERT INTO raw_events (source, event_type, external_id, payload)
-		VALUES ('strava', 'activity', $1, $2)
-	`, externalID, raw)
+		INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
+		VALUES ('strava', 'activity', $1, $2, $3)
+	`, externalID, raw, userID)
 	if err != nil {
 		return fmt.Errorf("insert raw event: %w", err)
 	}
@@ -229,10 +229,10 @@ func (s *StravaConnector) upsertActivity(ctx context.Context, a *stravaActivity)
 		INSERT INTO activities
 			(source, external_id, type, started_at, duration_seconds,
 			 distance_meters, elevation_gain_meters, avg_heart_rate, max_heart_rate,
-			 avg_cadence, avg_power_watts, calories, name, description, raw_payload)
+			 avg_cadence, avg_power_watts, calories, name, description, raw_payload, user_id)
 		VALUES
-			('strava', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-		ON CONFLICT (external_id) DO UPDATE SET
+			('strava', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		ON CONFLICT (user_id, external_id) DO UPDATE SET
 			type                  = EXCLUDED.type,
 			started_at            = EXCLUDED.started_at,
 			duration_seconds      = EXCLUDED.duration_seconds,
@@ -251,7 +251,7 @@ func (s *StravaConnector) upsertActivity(ctx context.Context, a *stravaActivity)
 		a.Distance, a.TotalElevationGain,
 		a.AverageHeartrate, a.MaxHeartrate,
 		a.AverageCadence, a.AverageWatts,
-		a.Calories, a.Name, a.Description, raw,
+		a.Calories, a.Name, a.Description, raw, userID,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert activity: %w", err)
@@ -322,12 +322,12 @@ func parseHevyDescription(desc string) []parsedExercise {
 	return exercises
 }
 
-func (s *StravaConnector) syncWorkoutDetails(ctx context.Context, accessToken string, a *stravaActivity) error {
+func (s *StravaConnector) syncWorkoutDetails(ctx context.Context, userID string, accessToken string, a *stravaActivity) error {
 	externalID := fmt.Sprintf("%d", a.ID)
 
 	// Skip if workout already stored for this activity
 	var exists bool
-	s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM workouts WHERE external_id = $1)`, externalID).Scan(&exists)
+	s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM workouts WHERE external_id = $1 AND user_id = $2)`, externalID, userID).Scan(&exists)
 	if exists {
 		return nil
 	}
@@ -371,14 +371,14 @@ func (s *StravaConnector) syncWorkoutDetails(ctx context.Context, accessToken st
 	endedAt := a.StartDate.Add(time.Duration(a.ElapsedTime) * time.Second)
 	var workoutID string
 	err = s.db.QueryRow(ctx, `
-		INSERT INTO workouts (source, external_id, started_at, ended_at, title, notes)
-		VALUES ('strava', $1, $2, $3, $4, $5)
-		ON CONFLICT (external_id) DO UPDATE SET
+		INSERT INTO workouts (source, external_id, started_at, ended_at, title, notes, user_id)
+		VALUES ('strava', $1, $2, $3, $4, $5, $6)
+		ON CONFLICT (user_id, external_id) DO UPDATE SET
 			started_at = EXCLUDED.started_at,
 			ended_at   = EXCLUDED.ended_at,
 			title      = EXCLUDED.title
 		RETURNING id
-	`, externalID, a.StartDate, endedAt, a.Name, detail.Description).Scan(&workoutID)
+	`, externalID, a.StartDate, endedAt, a.Name, detail.Description, userID).Scan(&workoutID)
 	if err != nil {
 		return fmt.Errorf("upsert workout: %w", err)
 	}
@@ -438,7 +438,7 @@ func (s *StravaConnector) fetchToken(ctx context.Context, params url.Values) (*s
 	return &result, nil
 }
 
-func (s *StravaConnector) refreshToken(ctx context.Context, refreshToken string) (*oauthToken, error) {
+func (s *StravaConnector) refreshToken(ctx context.Context, userID string, refreshToken string) (*oauthToken, error) {
 	resp, err := s.fetchToken(ctx, url.Values{
 		"client_id":     {s.clientID},
 		"client_secret": {s.clientSecret},
@@ -449,7 +449,7 @@ func (s *StravaConnector) refreshToken(ctx context.Context, refreshToken string)
 		return nil, err
 	}
 
-	if err := s.saveToken(ctx, resp); err != nil {
+	if err := s.saveToken(ctx, userID, resp); err != nil {
 		return nil, err
 	}
 
@@ -460,49 +460,49 @@ func (s *StravaConnector) refreshToken(ctx context.Context, refreshToken string)
 	}, nil
 }
 
-func (s *StravaConnector) saveToken(ctx context.Context, t *stravaTokenResponse) error {
+func (s *StravaConnector) saveToken(ctx context.Context, userID string, t *stravaTokenResponse) error {
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, athlete_id, updated_at)
-		VALUES ('strava', $1, $2, $3, $4, NOW())
-		ON CONFLICT (source) DO UPDATE SET
+		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, athlete_id, updated_at, user_id)
+		VALUES ('strava', $1, $2, $3, $4, NOW(), $5)
+		ON CONFLICT (source, user_id) DO UPDATE SET
 			access_token  = EXCLUDED.access_token,
 			refresh_token = EXCLUDED.refresh_token,
 			expires_at    = EXCLUDED.expires_at,
 			athlete_id    = EXCLUDED.athlete_id,
 			updated_at    = NOW()
-	`, t.AccessToken, t.RefreshToken, time.Unix(t.ExpiresAt, 0), t.Athlete.ID)
+	`, t.AccessToken, t.RefreshToken, time.Unix(t.ExpiresAt, 0), t.Athlete.ID, userID)
 	return err
 }
 
-func (s *StravaConnector) loadToken(ctx context.Context) (*oauthToken, error) {
+func (s *StravaConnector) loadToken(ctx context.Context, userID string) (*oauthToken, error) {
 	var t oauthToken
 	err := s.db.QueryRow(ctx, `
-		SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE source = 'strava'
-	`).Scan(&t.AccessToken, &t.RefreshToken, &t.ExpiresAt)
+		SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE source = 'strava' AND user_id = $1
+	`, userID).Scan(&t.AccessToken, &t.RefreshToken, &t.ExpiresAt)
 	if err != nil {
 		return nil, fmt.Errorf("no strava token found — authorize first via GET /api/v1/auth/strava")
 	}
 	return &t, nil
 }
 
-func (s *StravaConnector) getLastSync(ctx context.Context) (time.Time, error) {
+func (s *StravaConnector) getLastSync(ctx context.Context, userID string) (time.Time, error) {
 	var t time.Time
 	err := s.db.QueryRow(ctx, `
-		SELECT last_synced_at FROM sync_state WHERE source = 'strava'
-	`).Scan(&t)
+		SELECT last_synced_at FROM sync_state WHERE source = 'strava' AND user_id = $1
+	`, userID).Scan(&t)
 	if err != nil {
 		return time.Time{}, nil
 	}
 	return t, nil
 }
 
-func (s *StravaConnector) updateLastSync(ctx context.Context) error {
+func (s *StravaConnector) updateLastSync(ctx context.Context, userID string) error {
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO sync_state (source, last_synced_at, updated_at)
-		VALUES ('strava', NOW(), NOW())
-		ON CONFLICT (source) DO UPDATE SET
+		INSERT INTO sync_state (source, last_synced_at, updated_at, user_id)
+		VALUES ('strava', NOW(), NOW(), $1)
+		ON CONFLICT (source, user_id) DO UPDATE SET
 			last_synced_at = EXCLUDED.last_synced_at,
 			updated_at     = EXCLUDED.updated_at
-	`)
+	`, userID)
 	return err
 }
