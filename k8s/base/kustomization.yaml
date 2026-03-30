@@ -8,6 +8,5 @@ resources:
   - postgres/cluster.yaml
   - backend/deployment.yaml
   - backend/service.yaml
-  - backend/xray-configmap.yaml
   - frontend/deployment.yaml
   - frontend/service.yaml

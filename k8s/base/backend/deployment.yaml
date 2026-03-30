@@ -25,9 +25,9 @@ spec:
             - name: SERVER_ENV
               value: production
             - name: HTTPS_PROXY
-              value: "http://127.0.0.1:1081"
+              value: "http://xray.proxy.svc.cluster.local:1081"
             - name: HTTP_PROXY
-              value: "http://127.0.0.1:1081"
+              value: "http://xray.proxy.svc.cluster.local:1081"
             - name: NO_PROXY
               value: "localhost,127.0.0.1,postgres-rw,.svc.cluster.local,.cluster.local,10.0.0.0/8,192.168.0.0/16"
             - name: DB_USER
@@ -71,21 +71,3 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
-        - name: xray
-          image: teddysun/xray:1.8.24
-          args: ["xray", "run", "-c", "/etc/xray/config.json"]
-          volumeMounts:
-            - name: xray-config
-              mountPath: /etc/xray/config.json
-              subPath: config.json
-          resources:
-            requests:
-              memory: "32Mi"
-              cpu: "10m"
-            limits:
-              memory: "128Mi"
-              cpu: "100m"
-      volumes:
-        - name: xray-config
-          configMap:
-            name: xray-config
