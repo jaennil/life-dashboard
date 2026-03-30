@@ -62,9 +62,16 @@ func (h *AuthHandler) FatSecretCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.logger.Info().Msg("fatsecret authorization successful")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(`<html><head><meta charset="utf-8"></head><body><h2>✅ FatSecret подключён!</h2><p>Можно закрыть эту вкладку.</p></body></html>`))
+	h.logger.Info().Msg("fatsecret authorization successful, starting initial sync")
+	go func() {
+		if err := h.fatsecret.Sync(r.Context()); err != nil {
+			h.logger.Error().Err(err).Msg("fatsecret initial sync failed")
+		} else {
+			h.logger.Info().Msg("fatsecret initial sync complete")
+		}
+	}()
+
+	http.Redirect(w, r, "/settings", http.StatusFound)
 }
 
 // GET /api/v1/auth/strava/callback — exchange code for tokens
@@ -82,7 +89,14 @@ func (h *AuthHandler) StravaCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Msg("strava authorization successful")
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"authorized","source":"strava"}`))
+	h.logger.Info().Msg("strava authorization successful, starting initial sync")
+	go func() {
+		if err := h.strava.Sync(r.Context()); err != nil {
+			h.logger.Error().Err(err).Msg("strava initial sync failed")
+		} else {
+			h.logger.Info().Msg("strava initial sync complete")
+		}
+	}()
+
+	http.Redirect(w, r, "/settings", http.StatusFound)
 }
