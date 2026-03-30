@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+	authmw "life-dashboard/internal/middleware"
 )
 
 type AIHandler struct {
@@ -56,8 +57,9 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 
-	dataContext, err := h.buildContext(ctx)
+	dataContext, err := h.buildContext(ctx, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("build context")
 		dataContext = "Данные пользователя временно недоступны."
@@ -151,7 +153,7 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
+func (h *AIHandler) buildContext(ctx context.Context, userID string) (string, error) {
 	var sb strings.Builder
 	now := time.Now()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
@@ -162,9 +164,9 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 
 	rows, err := h.db.Query(ctx, `
 		SELECT title, currency, balance, type
-		FROM accounts WHERE balance != 0
+		FROM accounts WHERE balance != 0 AND user_id = $1
 		ORDER BY balance DESC LIMIT 10
-	`)
+	`, userID)
 	if err == nil {
 		sb.WriteString("Счета:\n")
 		for rows.Next() {
@@ -178,14 +180,14 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 	}
 
 	var totalBalance, monthSpending, monthIncome float64
-	h.db.QueryRow(ctx, `SELECT COALESCE(SUM(balance),0) FROM accounts WHERE currency='RUB' AND balance > 0`).Scan(&totalBalance)
+	h.db.QueryRow(ctx, `SELECT COALESCE(SUM(balance),0) FROM accounts WHERE currency='RUB' AND balance > 0 AND user_id = $1`, userID).Scan(&totalBalance)
 	h.db.QueryRow(ctx, `
 		SELECT
 			COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0)
 		FROM transactions
-		WHERE currency='RUB' AND occurred_at >= $1 AND is_transfer=false
-	`, monthStart).Scan(&monthSpending, &monthIncome)
+		WHERE currency='RUB' AND occurred_at >= $1 AND is_transfer=false AND user_id = $2
+	`, monthStart, userID).Scan(&monthSpending, &monthIncome)
 
 	sb.WriteString(fmt.Sprintf("Общий баланс (RUB): %.0f ₽\n", totalBalance))
 	sb.WriteString(fmt.Sprintf("Расходы за текущий месяц: %.0f ₽\n", monthSpending))
@@ -193,9 +195,9 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 
 	txRows, err := h.db.Query(ctx, `
 		SELECT occurred_at, amount, currency, COALESCE(payee, comment, '') as label
-		FROM transactions WHERE is_transfer=false
+		FROM transactions WHERE is_transfer=false AND user_id = $1
 		ORDER BY occurred_at DESC LIMIT 30
-	`)
+	`, userID)
 	if err == nil {
 		sb.WriteString("Последние транзакции:\n")
 		for txRows.Next() {
@@ -217,14 +219,14 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 	sb.WriteString("\n=== АКТИВНОСТИ ===\n")
 	var weekActivities int
 	var weekDistanceKm float64
-	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM activities WHERE started_at >= $1`, weekStart).Scan(&weekActivities)
-	h.db.QueryRow(ctx, `SELECT COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE started_at >= $1`, weekStart).Scan(&weekDistanceKm)
+	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM activities WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).Scan(&weekActivities)
+	h.db.QueryRow(ctx, `SELECT COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).Scan(&weekDistanceKm)
 	sb.WriteString(fmt.Sprintf("За эту неделю: %d активностей, %.1f км\n", weekActivities, weekDistanceKm))
 
 	actRows, err := h.db.Query(ctx, `
 		SELECT started_at, type, COALESCE(distance_meters/1000.0,0), COALESCE(duration_seconds/60,0), name
-		FROM activities ORDER BY started_at DESC LIMIT 10
-	`)
+		FROM activities WHERE user_id = $1 ORDER BY started_at DESC LIMIT 10
+	`, userID)
 	if err == nil {
 		for actRows.Next() {
 			var t time.Time
@@ -240,12 +242,12 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 	// === ТРЕНИРОВКИ ===
 	sb.WriteString("\n=== ТРЕНИРОВКИ ===\n")
 	var weekWorkouts int
-	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE started_at >= $1`, weekStart).Scan(&weekWorkouts)
+	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).Scan(&weekWorkouts)
 	sb.WriteString(fmt.Sprintf("За эту неделю: %d тренировок\n", weekWorkouts))
 
 	wRows, err := h.db.Query(ctx, `
-		SELECT id, started_at, title FROM workouts ORDER BY started_at DESC LIMIT 10
-	`)
+		SELECT id, started_at, title FROM workouts WHERE user_id = $1 ORDER BY started_at DESC LIMIT 10
+	`, userID)
 	if err == nil {
 		type workoutEntry struct {
 			id       string
@@ -314,8 +316,9 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 	nutritionRows, err := h.db.Query(ctx, `
 		SELECT date, calories_total, protein_g, carbs_g, fat_g, fiber_g
 		FROM nutrition_daily
+		WHERE user_id = $1
 		ORDER BY date DESC LIMIT 14
-	`)
+	`, userID)
 	if err == nil {
 		for nutritionRows.Next() {
 			var date time.Time
@@ -333,9 +336,9 @@ func (h *AIHandler) buildContext(ctx context.Context) (string, error) {
 		SELECT nd.date, ni.meal_type, ni.food_name, ni.serving_description, ni.calories
 		FROM nutrition_items ni
 		JOIN nutrition_daily nd ON nd.id = ni.daily_id
-		WHERE nd.date >= $1
+		WHERE nd.date >= $1 AND nd.user_id = $2
 		ORDER BY nd.date DESC, ni.meal_type, ni.calories DESC
-	`, now.AddDate(0, 0, -2))
+	`, now.AddDate(0, 0, -2), userID)
 	if err == nil {
 		var curDay string
 		var curMeal string

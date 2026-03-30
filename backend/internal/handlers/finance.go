@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+	authmw "life-dashboard/internal/middleware"
 )
 
 type FinanceHandler struct {
@@ -49,6 +50,7 @@ type FinanceTransaction struct {
 
 func (h *FinanceHandler) GetMonthly(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT
@@ -58,9 +60,10 @@ func (h *FinanceHandler) GetMonthly(w http.ResponseWriter, r *http.Request) {
 		FROM transactions
 		WHERE currency = 'RUB' AND is_transfer = false
 			AND occurred_at >= DATE_TRUNC('month', NOW()) - INTERVAL '5 months'
+			AND user_id = $1
 		GROUP BY DATE_TRUNC('month', occurred_at)
 		ORDER BY DATE_TRUNC('month', occurred_at) ASC
-	`)
+	`, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query monthly")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -83,13 +86,14 @@ func (h *FinanceHandler) GetMonthly(w http.ResponseWriter, r *http.Request) {
 
 func (h *FinanceHandler) GetAccounts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT id, title, COALESCE(type, ''), currency, COALESCE(balance, 0)
 		FROM accounts
-		WHERE balance != 0
+		WHERE balance != 0 AND user_id = $1
 		ORDER BY currency, balance DESC
-	`)
+	`, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query accounts")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -112,6 +116,7 @@ func (h *FinanceHandler) GetAccounts(w http.ResponseWriter, r *http.Request) {
 
 func (h *FinanceHandler) GetSpendingByCategory(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 	monthStart := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.Local)
 
 	rows, err := h.db.Query(ctx, `
@@ -121,10 +126,11 @@ func (h *FinanceHandler) GetSpendingByCategory(w http.ResponseWriter, r *http.Re
 		  AND is_transfer = false
 		  AND currency = 'RUB'
 		  AND occurred_at >= $1
+		  AND user_id = $2
 		GROUP BY category
 		ORDER BY total DESC
 		LIMIT 15
-	`, monthStart)
+	`, monthStart, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query categories")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -149,6 +155,7 @@ func (h *FinanceHandler) GetSpendingByCategory(w http.ResponseWriter, r *http.Re
 
 func (h *FinanceHandler) GetTransactions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	q := r.URL.Query()
 	filter := q.Get("type") // "income", "expense", ""=all
@@ -172,10 +179,10 @@ func (h *FinanceHandler) GetTransactions(w http.ResponseWriter, r *http.Request)
 	rows, err := h.db.Query(ctx, `
 		SELECT id, occurred_at, amount, currency, COALESCE(comment, ''), payee
 		FROM transactions
-		WHERE is_transfer = false `+condition+`
+		WHERE is_transfer = false AND user_id = $1 `+condition+`
 		ORDER BY occurred_at DESC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+		LIMIT $2 OFFSET $3
+	`, userID, limit, offset)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query transactions")
 		http.Error(w, "internal error", http.StatusInternalServerError)

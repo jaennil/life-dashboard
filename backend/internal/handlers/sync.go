@@ -34,12 +34,12 @@ func (h *SyncHandler) TriggerSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !IsEnabled(r.Context(), h.db, source) {
+	userID := r.Context().Value(middleware.UserIDKey).(string)
+
+	if !IsEnabled(r.Context(), h.db, source, userID) {
 		h.writeError(w, http.StatusForbidden, "integration is disabled")
 		return
 	}
-
-	userID := r.Context().Value(middleware.UserIDKey).(string)
 	h.logger.Info().Str("source", source).Str("user_id", userID).Msg("manual sync triggered")
 
 	if err := conn.Sync(r.Context(), userID); err != nil {

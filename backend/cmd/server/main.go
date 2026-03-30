@@ -119,10 +119,6 @@ func main() {
 		connCopy := conn
 		if err := sched.AddJob("0 0 */2 * * *", connCopy.Name(), func() {
 			ctx := context.Background()
-			if !handlers.IsEnabled(ctx, pool, connCopy.Name()) {
-				log.Info().Str("connector", connCopy.Name()).Msg("skipping disabled connector")
-				return
-			}
 			rows, err := pool.Query(ctx, `SELECT id FROM users`)
 			if err != nil {
 				log.Error().Err(err).Str("connector", connCopy.Name()).Msg("failed to query users for scheduled sync")
@@ -133,6 +129,10 @@ func main() {
 				var userID string
 				if err := rows.Scan(&userID); err != nil {
 					log.Error().Err(err).Str("connector", connCopy.Name()).Msg("failed to scan user id")
+					continue
+				}
+				if !handlers.IsEnabled(ctx, pool, connCopy.Name(), userID) {
+					log.Info().Str("connector", connCopy.Name()).Str("user_id", userID).Msg("skipping disabled connector for user")
 					continue
 				}
 				log.Info().Str("connector", connCopy.Name()).Str("user_id", userID).Msg("scheduled sync for user")

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"life-dashboard/internal/connectors"
+	authmw "life-dashboard/internal/middleware"
 )
 
 type IntegrationsHandler struct {
@@ -43,27 +44,27 @@ var integrationMeta_ = map[string]integrationMeta{
 	"strava": {
 		displayName: "Strava",
 		description: "Активности: пробежки, велосипед, плавание",
-		countQuery:  "SELECT COUNT(*) FROM activities",
+		countQuery:  "SELECT COUNT(*) FROM activities WHERE user_id = $1",
 	},
 	"hevy": {
 		displayName: "Hevy",
 		description: "Тренировки с упражнениями и весами",
-		countQuery:  "SELECT COUNT(*) FROM workouts",
+		countQuery:  "SELECT COUNT(*) FROM workouts WHERE user_id = $1",
 	},
 	"zenmoney": {
 		displayName: "ZenMoney",
 		description: "Финансы: счета и транзакции",
-		countQuery:  "SELECT COUNT(*) FROM transactions",
+		countQuery:  "SELECT COUNT(*) FROM transactions WHERE user_id = $1",
 	},
 	"myfitnesspal": {
 		displayName: "MyFitnessPal",
 		description: "Питание: дневник калорий и КБЖУ",
-		countQuery:  "SELECT COUNT(*) FROM nutrition_daily",
+		countQuery:  "SELECT COUNT(*) FROM nutrition_daily WHERE user_id = $1",
 	},
 	"fatsecret": {
 		displayName: "FatSecret",
 		description: "Питание: дневник калорий и КБЖУ (официальный OAuth2)",
-		countQuery:  "SELECT COUNT(*) FROM nutrition_daily WHERE source='fatsecret'",
+		countQuery:  "SELECT COUNT(*) FROM nutrition_daily WHERE source='fatsecret' AND user_id = $1",
 	},
 }
 
@@ -79,6 +80,7 @@ type IntegrationStatus struct {
 
 func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	type syncRow struct {
 		lastSyncAt *time.Time
@@ -86,7 +88,7 @@ func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Req
 	}
 	syncStates := map[string]syncRow{}
 
-	rows, err := h.db.Query(ctx, `SELECT source, last_synced_at, enabled FROM sync_state`)
+	rows, err := h.db.Query(ctx, `SELECT source, last_synced_at, enabled FROM sync_state WHERE user_id = $1`, userID)
 	if err == nil {
 		for rows.Next() {
 			var source string
@@ -105,7 +107,7 @@ func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Req
 
 		var count int
 		if meta.countQuery != "" {
-			h.db.QueryRow(ctx, meta.countQuery).Scan(&count)
+			h.db.QueryRow(ctx, meta.countQuery, userID).Scan(&count)
 		}
 
 		result = append(result, IntegrationStatus{
@@ -139,11 +141,12 @@ func (h *IntegrationsHandler) ToggleIntegration(w http.ResponseWriter, r *http.R
 	}
 
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 	_, err := h.db.Exec(ctx, `
-		INSERT INTO sync_state (source, last_synced_at, updated_at, enabled)
-		VALUES ($1, NULL, NOW(), $2)
-		ON CONFLICT (source) DO UPDATE SET enabled = $2, updated_at = NOW()
-	`, name, body.Enabled)
+		INSERT INTO sync_state (source, last_synced_at, updated_at, enabled, user_id)
+		VALUES ($1, NULL, NOW(), $2, $3)
+		ON CONFLICT (source, user_id) DO UPDATE SET enabled = $2, updated_at = NOW()
+	`, name, body.Enabled, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Str("name", name).Msg("toggle integration")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -167,14 +170,15 @@ func (h *IntegrationsHandler) SaveMFPToken(w http.ResponseWriter, r *http.Reques
 	}
 
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 	_, err := h.db.Exec(ctx, `
-		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, athlete_id, updated_at)
-		VALUES ('myfitnesspal', $1, $2, NOW() + INTERVAL '10 days', $3, NOW())
-		ON CONFLICT (source) DO UPDATE SET
+		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, athlete_id, updated_at, user_id)
+		VALUES ('myfitnesspal', $1, $2, NOW() + INTERVAL '10 days', $3, NOW(), $4)
+		ON CONFLICT (source, user_id) DO UPDATE SET
 			access_token = $1, refresh_token = $2,
 			expires_at = NOW() + INTERVAL '10 days',
 			athlete_id = $3, updated_at = NOW()
-	`, body.AccessToken, body.RefreshToken, body.UserID)
+	`, body.AccessToken, body.RefreshToken, body.UserID, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("save mfp token")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -183,9 +187,9 @@ func (h *IntegrationsHandler) SaveMFPToken(w http.ResponseWriter, r *http.Reques
 
 	// also mark as configured in sync_state
 	h.db.Exec(ctx, `
-		INSERT INTO sync_state (source, enabled, updated_at) VALUES ('myfitnesspal', true, NOW())
-		ON CONFLICT (source) DO UPDATE SET enabled = true, updated_at = NOW()
-	`)
+		INSERT INTO sync_state (source, enabled, updated_at, user_id) VALUES ('myfitnesspal', true, NOW(), $1)
+		ON CONFLICT (source, user_id) DO UPDATE SET enabled = true, updated_at = NOW()
+	`, userID)
 
 	h.configured["myfitnesspal"] = true
 	h.logger.Info().Str("user_id", body.UserID).Msg("mfp token saved")
@@ -194,9 +198,9 @@ func (h *IntegrationsHandler) SaveMFPToken(w http.ResponseWriter, r *http.Reques
 }
 
 // IsEnabled checks DB state for use in scheduler/sync
-func IsEnabled(ctx context.Context, db *pgxpool.Pool, source string) bool {
+func IsEnabled(ctx context.Context, db *pgxpool.Pool, source string, userID string) bool {
 	var enabled bool
-	err := db.QueryRow(ctx, `SELECT enabled FROM sync_state WHERE source = $1`, source).Scan(&enabled)
+	err := db.QueryRow(ctx, `SELECT enabled FROM sync_state WHERE source = $1 AND user_id = $2`, source, userID).Scan(&enabled)
 	if err != nil {
 		return true // default to enabled if no row
 	}

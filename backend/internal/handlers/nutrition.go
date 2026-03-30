@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+	authmw "life-dashboard/internal/middleware"
 )
 
 type NutritionHandler struct {
@@ -50,6 +51,7 @@ type NutritionDay struct {
 
 func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 	now := time.Now()
 	sevenDaysAgo := now.AddDate(0, 0, -7)
 	today := now.Truncate(24 * time.Hour)
@@ -63,12 +65,12 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 			COALESCE(AVG(fat_g), 0),
 			COUNT(*)
 		FROM nutrition_daily
-		WHERE date >= $1
-	`, sevenDaysAgo).Scan(&s.AvgCalories, &s.AvgProtein, &s.AvgCarbs, &s.AvgFat, &s.DaysTracked)
+		WHERE date >= $1 AND user_id = $2
+	`, sevenDaysAgo, userID).Scan(&s.AvgCalories, &s.AvgProtein, &s.AvgCarbs, &s.AvgFat, &s.DaysTracked)
 
 	h.db.QueryRow(ctx, `
-		SELECT COALESCE(calories_total, 0) FROM nutrition_daily WHERE date = $1
-	`, today).Scan(&s.TodayKcal)
+		SELECT COALESCE(calories_total, 0) FROM nutrition_daily WHERE date = $1 AND user_id = $2
+	`, today, userID).Scan(&s.TodayKcal)
 
 	h.logger.Debug().Interface("summary", s).Msg("nutrition summary")
 
@@ -78,14 +80,15 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 
 func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 	fourteenDaysAgo := time.Now().AddDate(0, 0, -14)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT id, TO_CHAR(date, 'YYYY-MM-DD'), calories_total, protein_g, carbs_g, fat_g, fiber_g
 		FROM nutrition_daily
-		WHERE date >= $1
+		WHERE date >= $1 AND user_id = $2
 		ORDER BY date DESC
-	`, fourteenDaysAgo)
+	`, fourteenDaysAgo, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query nutrition daily")
 		http.Error(w, "internal error", http.StatusInternalServerError)

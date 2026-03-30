@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+	authmw "life-dashboard/internal/middleware"
 )
 
 type DashboardHandler struct {
@@ -38,6 +39,7 @@ type FitnessSummary struct {
 
 func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	var summary DashboardSummary
 	summary.Finance.Currency = "RUB"
@@ -46,8 +48,8 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	_ = h.db.QueryRow(ctx, `
 		SELECT COALESCE(SUM(balance), 0)
 		FROM accounts
-		WHERE currency = 'RUB' AND balance > 0
-	`).Scan(&summary.Finance.TotalBalance)
+		WHERE currency = 'RUB' AND balance > 0 AND user_id = $1
+	`, userID).Scan(&summary.Finance.TotalBalance)
 
 	// Monthly spending / income
 	now := time.Now()
@@ -57,25 +59,25 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 			COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0)
 		FROM transactions
-		WHERE currency = 'RUB' AND occurred_at >= $1 AND is_transfer = false
-	`, monthStart).Scan(&summary.Finance.MonthlySpending, &summary.Finance.MonthlyIncome)
+		WHERE currency = 'RUB' AND occurred_at >= $1 AND is_transfer = false AND user_id = $2
+	`, monthStart, userID).Scan(&summary.Finance.MonthlySpending, &summary.Finance.MonthlyIncome)
 
 	// Activities this week
 	weekStart := now.AddDate(0, 0, -int(now.Weekday()))
 	_ = h.db.QueryRow(ctx, `
-		SELECT COUNT(*) FROM activities WHERE started_at >= $1
-	`, weekStart).Scan(&summary.Fitness.ActivitiesThisWeek)
+		SELECT COUNT(*) FROM activities WHERE started_at >= $1 AND user_id = $2
+	`, weekStart, userID).Scan(&summary.Fitness.ActivitiesThisWeek)
 
 	// Total distance this week (km)
 	_ = h.db.QueryRow(ctx, `
 		SELECT COALESCE(SUM(distance_meters) / 1000.0, 0)
-		FROM activities WHERE started_at >= $1
-	`, weekStart).Scan(&summary.Fitness.TotalDistanceKm)
+		FROM activities WHERE started_at >= $1 AND user_id = $2
+	`, weekStart, userID).Scan(&summary.Fitness.TotalDistanceKm)
 
 	// Workouts this week
 	_ = h.db.QueryRow(ctx, `
-		SELECT COUNT(*) FROM workouts WHERE started_at >= $1
-	`, weekStart).Scan(&summary.Fitness.WorkoutsThisWeek)
+		SELECT COUNT(*) FROM workouts WHERE started_at >= $1 AND user_id = $2
+	`, weekStart, userID).Scan(&summary.Fitness.WorkoutsThisWeek)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(summary)
@@ -93,14 +95,15 @@ type Transaction struct {
 
 func (h *DashboardHandler) GetRecentTransactions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT id, occurred_at, amount, currency, COALESCE(comment, ''), payee, is_transfer
 		FROM transactions
-		WHERE is_transfer = false
+		WHERE is_transfer = false AND user_id = $1
 		ORDER BY occurred_at DESC
 		LIMIT 10
-	`)
+	`, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query transactions")
 		http.Error(w, "internal error", http.StatusInternalServerError)

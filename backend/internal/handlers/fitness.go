@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+	authmw "life-dashboard/internal/middleware"
 )
 
 type FitnessHandler struct {
@@ -68,15 +69,16 @@ type FitnessSummaryResponse struct {
 
 func (h *FitnessHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 	now := time.Now()
 	weekStart := now.AddDate(0, 0, -int(now.Weekday()))
 
 	var s FitnessSummaryResponse
-	h.db.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE started_at >= $1`, weekStart).
+	h.db.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).
 		Scan(&s.ActivitiesThisWeek, &s.DistanceThisWeek)
-	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE started_at >= $1`, weekStart).
+	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).
 		Scan(&s.WorkoutsThisWeek)
-	h.db.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(distance_meters)/1000.0,0) FROM activities`).
+	h.db.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE user_id = $1`, userID).
 		Scan(&s.ActivitiesTotal, &s.TotalDistanceKm)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -85,6 +87,7 @@ func (h *FitnessHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 
 func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT
@@ -92,10 +95,10 @@ func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) 
 			COUNT(*) as count,
 			COALESCE(SUM(distance_meters)/1000.0, 0) as km
 		FROM activities
-		WHERE started_at >= NOW() - INTERVAL '10 weeks'
+		WHERE started_at >= NOW() - INTERVAL '10 weeks' AND user_id = $1
 		GROUP BY DATE_TRUNC('week', started_at)
 		ORDER BY DATE_TRUNC('week', started_at) ASC
-	`)
+	`, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query weekly stats")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -118,14 +121,16 @@ func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) 
 
 func (h *FitnessHandler) GetActivities(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT id, type, COALESCE(name,''), started_at,
 			duration_seconds, distance_meters, calories, avg_heart_rate
 		FROM activities
+		WHERE user_id = $1
 		ORDER BY started_at DESC
 		LIMIT 30
-	`)
+	`, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query activities")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -149,13 +154,15 @@ func (h *FitnessHandler) GetActivities(w http.ResponseWriter, r *http.Request) {
 
 func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT id, COALESCE(title,''), started_at, ended_at
 		FROM workouts
+		WHERE user_id = $1
 		ORDER BY started_at DESC
 		LIMIT 30
-	`)
+	`, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query workouts")
 		http.Error(w, "internal error", http.StatusInternalServerError)
