@@ -86,29 +86,29 @@ func NewHevy(apiKey string, db *pgxpool.Pool, logger zerolog.Logger) *HevyConnec
 
 func (h *HevyConnector) Name() string { return "hevy" }
 
-func (h *HevyConnector) Sync(ctx context.Context) error {
-	lastSync, err := h.getLastSync(ctx)
+func (h *HevyConnector) Sync(ctx context.Context, userID string) error {
+	lastSync, err := h.getLastSync(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("get last sync: %w", err)
 	}
 
 	if lastSync.IsZero() {
 		h.logger.Info().Msg("no previous sync, running full historical sync")
-		if err := h.syncFull(ctx); err != nil {
+		if err := h.syncFull(ctx, userID); err != nil {
 			return err
 		}
 	} else {
 		h.logger.Info().Time("since", lastSync).Msg("running incremental sync")
-		if err := h.syncIncremental(ctx, lastSync); err != nil {
+		if err := h.syncIncremental(ctx, userID, lastSync); err != nil {
 			return err
 		}
 	}
 
-	return h.updateLastSync(ctx)
+	return h.updateLastSync(ctx, userID)
 }
 
 // syncFull fetches all workouts via paginated /v1/workouts
-func (h *HevyConnector) syncFull(ctx context.Context) error {
+func (h *HevyConnector) syncFull(ctx context.Context, userID string) error {
 	page := 1
 	total := 0
 
@@ -119,7 +119,7 @@ func (h *HevyConnector) syncFull(ctx context.Context) error {
 		}
 
 		for i := range resp.Workouts {
-			if err := h.upsertWorkout(ctx, &resp.Workouts[i]); err != nil {
+			if err := h.upsertWorkout(ctx, userID, &resp.Workouts[i]); err != nil {
 				return fmt.Errorf("upsert workout %s: %w", resp.Workouts[i].ID, err)
 			}
 		}
@@ -138,7 +138,7 @@ func (h *HevyConnector) syncFull(ctx context.Context) error {
 }
 
 // syncIncremental uses /v1/workouts/events to fetch changes since last sync
-func (h *HevyConnector) syncIncremental(ctx context.Context, since time.Time) error {
+func (h *HevyConnector) syncIncremental(ctx context.Context, userID string, since time.Time) error {
 	page := 1
 	updated, deleted := 0, 0
 
@@ -156,12 +156,12 @@ func (h *HevyConnector) syncIncremental(ctx context.Context, since time.Time) er
 					h.logger.Warn().Msg("event type 'updated' has no workout payload, skipping")
 					continue
 				}
-				if err := h.upsertWorkout(ctx, event.Workout); err != nil {
+				if err := h.upsertWorkout(ctx, userID, event.Workout); err != nil {
 					return fmt.Errorf("upsert workout %s: %w", event.Workout.ID, err)
 				}
 				updated++
 			case "deleted":
-				if err := h.deleteWorkout(ctx, event.WorkoutID); err != nil {
+				if err := h.deleteWorkout(ctx, userID, event.WorkoutID); err != nil {
 					return fmt.Errorf("delete workout %s: %w", event.WorkoutID, err)
 				}
 				deleted++
@@ -221,7 +221,7 @@ func doRequest[T any](ctx context.Context, client *http.Client, apiKey, url stri
 
 // ---- Database helpers ----
 
-func (h *HevyConnector) upsertWorkout(ctx context.Context, w *hevyWorkout) error {
+func (h *HevyConnector) upsertWorkout(ctx context.Context, userID string, w *hevyWorkout) error {
 	raw, err := json.Marshal(w)
 	if err != nil {
 		return err
@@ -229,31 +229,31 @@ func (h *HevyConnector) upsertWorkout(ctx context.Context, w *hevyWorkout) error
 
 	// Store raw event
 	_, err = h.db.Exec(ctx, `
-		INSERT INTO raw_events (source, event_type, external_id, payload)
-		VALUES ('hevy', 'workout', $1, $2)
-	`, w.ID, raw)
+		INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
+		VALUES ('hevy', 'workout', $1, $2, $3)
+	`, w.ID, raw, userID)
 	if err != nil {
 		return fmt.Errorf("insert raw event: %w", err)
 	}
 
 	// Upsert workout
 	_, err = h.db.Exec(ctx, `
-		INSERT INTO workouts (source, external_id, started_at, ended_at, title, notes, raw_payload)
-		VALUES ('hevy', $1, $2, $3, $4, $5, $6)
-		ON CONFLICT (external_id) DO UPDATE SET
+		INSERT INTO workouts (source, external_id, started_at, ended_at, title, notes, raw_payload, user_id)
+		VALUES ('hevy', $1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (user_id, external_id) DO UPDATE SET
 			started_at  = EXCLUDED.started_at,
 			ended_at    = EXCLUDED.ended_at,
 			title       = EXCLUDED.title,
 			notes       = EXCLUDED.notes,
 			raw_payload = EXCLUDED.raw_payload
-	`, w.ID, w.StartTime, w.EndTime, w.Title, w.Description, raw)
+	`, w.ID, w.StartTime, w.EndTime, w.Title, w.Description, raw, userID)
 	if err != nil {
 		return fmt.Errorf("upsert workout: %w", err)
 	}
 
 	// Get internal workout id
 	var workoutID string
-	err = h.db.QueryRow(ctx, `SELECT id FROM workouts WHERE external_id = $1`, w.ID).Scan(&workoutID)
+	err = h.db.QueryRow(ctx, `SELECT id FROM workouts WHERE external_id = $1 AND user_id = $2`, w.ID, userID).Scan(&workoutID)
 	if err != nil {
 		return fmt.Errorf("get workout id: %w", err)
 	}
@@ -282,8 +282,8 @@ func (h *HevyConnector) upsertWorkout(ctx context.Context, w *hevyWorkout) error
 	return nil
 }
 
-func (h *HevyConnector) deleteWorkout(ctx context.Context, externalID string) error {
-	_, err := h.db.Exec(ctx, `DELETE FROM workouts WHERE external_id = $1`, externalID)
+func (h *HevyConnector) deleteWorkout(ctx context.Context, userID string, externalID string) error {
+	_, err := h.db.Exec(ctx, `DELETE FROM workouts WHERE external_id = $1 AND user_id = $2`, externalID, userID)
 	if err != nil {
 		return err
 	}
@@ -291,11 +291,11 @@ func (h *HevyConnector) deleteWorkout(ctx context.Context, externalID string) er
 	return nil
 }
 
-func (h *HevyConnector) getLastSync(ctx context.Context) (time.Time, error) {
+func (h *HevyConnector) getLastSync(ctx context.Context, userID string) (time.Time, error) {
 	var t time.Time
 	err := h.db.QueryRow(ctx, `
-		SELECT last_synced_at FROM sync_state WHERE source = 'hevy'
-	`).Scan(&t)
+		SELECT last_synced_at FROM sync_state WHERE source = 'hevy' AND user_id = $1
+	`, userID).Scan(&t)
 	if err != nil {
 		// No row = first sync
 		return time.Time{}, nil
@@ -303,13 +303,13 @@ func (h *HevyConnector) getLastSync(ctx context.Context) (time.Time, error) {
 	return t, nil
 }
 
-func (h *HevyConnector) updateLastSync(ctx context.Context) error {
+func (h *HevyConnector) updateLastSync(ctx context.Context, userID string) error {
 	_, err := h.db.Exec(ctx, `
-		INSERT INTO sync_state (source, last_synced_at, updated_at)
-		VALUES ('hevy', NOW(), NOW())
-		ON CONFLICT (source) DO UPDATE SET
+		INSERT INTO sync_state (source, last_synced_at, updated_at, user_id)
+		VALUES ('hevy', NOW(), NOW(), $1)
+		ON CONFLICT (source, user_id) DO UPDATE SET
 			last_synced_at = EXCLUDED.last_synced_at,
 			updated_at     = EXCLUDED.updated_at
-	`)
+	`, userID)
 	return err
 }

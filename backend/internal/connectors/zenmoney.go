@@ -86,8 +86,8 @@ func NewZenmoney(token string, db *pgxpool.Pool, logger zerolog.Logger) *Zenmone
 
 func (z *ZenmoneyConnector) Name() string { return "zenmoney" }
 
-func (z *ZenmoneyConnector) Sync(ctx context.Context) error {
-	lastTS, err := z.getLastServerTimestamp(ctx)
+func (z *ZenmoneyConnector) Sync(ctx context.Context, userID string) error {
+	lastTS, err := z.getLastServerTimestamp(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("get last server timestamp: %w", err)
 	}
@@ -109,19 +109,19 @@ func (z *ZenmoneyConnector) Sync(ctx context.Context) error {
 	for i := range resp.Tag {
 		t := &resp.Tag[i]
 		if t.Deleted {
-			z.db.Exec(ctx, `DELETE FROM zenmoney_tags WHERE id = $1`, t.ID)
+			z.db.Exec(ctx, `DELETE FROM zenmoney_tags WHERE id = $1 AND user_id = $2`, t.ID, userID)
 			continue
 		}
 		z.db.Exec(ctx, `
-			INSERT INTO zenmoney_tags (id, title, parent_id, updated_at)
-			VALUES ($1, $2, $3, NOW())
+			INSERT INTO zenmoney_tags (id, title, parent_id, updated_at, user_id)
+			VALUES ($1, $2, $3, NOW(), $4)
 			ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, parent_id = EXCLUDED.parent_id, updated_at = NOW()
-		`, t.ID, t.Title, t.Parent)
+		`, t.ID, t.Title, t.Parent, userID)
 		tagNames[t.ID] = t.Title
 	}
 	// Fill tagNames from DB for tags not in current diff
 	if len(tagNames) == 0 {
-		rows, err := z.db.Query(ctx, `SELECT id, title FROM zenmoney_tags`)
+		rows, err := z.db.Query(ctx, `SELECT id, title FROM zenmoney_tags WHERE user_id = $1`, userID)
 		if err == nil {
 			for rows.Next() {
 				var id, title string
@@ -135,7 +135,7 @@ func (z *ZenmoneyConnector) Sync(ctx context.Context) error {
 	z.logger.Info().Int("count", len(resp.Tag)).Msg("tags synced")
 
 	for i := range resp.Account {
-		if err := z.upsertAccount(ctx, &resp.Account[i], currencies); err != nil {
+		if err := z.upsertAccount(ctx, userID, &resp.Account[i], currencies); err != nil {
 			return fmt.Errorf("upsert account %s: %w", resp.Account[i].ID, err)
 		}
 	}
@@ -145,12 +145,12 @@ func (z *ZenmoneyConnector) Sync(ctx context.Context) error {
 	for i := range resp.Transaction {
 		tx := &resp.Transaction[i]
 		if tx.Deleted {
-			if err := z.deleteTransaction(ctx, tx.ID); err != nil {
+			if err := z.deleteTransaction(ctx, userID, tx.ID); err != nil {
 				return fmt.Errorf("delete transaction %s: %w", tx.ID, err)
 			}
 			deleted++
 		} else {
-			if err := z.upsertTransaction(ctx, tx, currencies, tagNames); err != nil {
+			if err := z.upsertTransaction(ctx, userID, tx, currencies, tagNames); err != nil {
 				return fmt.Errorf("upsert transaction %s: %w", tx.ID, err)
 			}
 			synced++
@@ -166,9 +166,10 @@ func (z *ZenmoneyConnector) Sync(ctx context.Context) error {
 		WHERE t.category IS NULL
 		  AND t.tags IS NOT NULL
 		  AND zt.id = t.tags[1]
-	`)
+		  AND t.user_id = $1
+	`, userID)
 
-	return z.updateLastServerTimestamp(ctx, resp.ServerTimestamp)
+	return z.updateLastServerTimestamp(ctx, userID, resp.ServerTimestamp)
 }
 
 // ---- HTTP ----
@@ -208,9 +209,9 @@ func (z *ZenmoneyConnector) fetchDiff(ctx context.Context, lastServerTimestamp i
 
 // ---- DB ----
 
-func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, acc *zenmoneyAccount, currencies map[int]string) error {
+func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, userID string, acc *zenmoneyAccount, currencies map[int]string) error {
 	if acc.Deleted {
-		_, err := z.db.Exec(ctx, `DELETE FROM accounts WHERE external_id = $1`, acc.ID)
+		_, err := z.db.Exec(ctx, `DELETE FROM accounts WHERE external_id = $1 AND user_id = $2`, acc.ID, userID)
 		return err
 	}
 
@@ -220,15 +221,15 @@ func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, acc *zenmoneyAcco
 	}
 
 	_, err := z.db.Exec(ctx, `
-		INSERT INTO accounts (external_id, title, type, currency, balance, last_updated)
-		VALUES ($1, $2, $3, $4, $5, NOW())
-		ON CONFLICT (external_id) DO UPDATE SET
+		INSERT INTO accounts (external_id, title, type, currency, balance, last_updated, user_id)
+		VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+		ON CONFLICT (user_id, external_id) DO UPDATE SET
 			title        = EXCLUDED.title,
 			type         = EXCLUDED.type,
 			currency     = EXCLUDED.currency,
 			balance      = EXCLUDED.balance,
 			last_updated = EXCLUDED.last_updated
-	`, acc.ID, acc.Title, acc.Type, currency, acc.Balance)
+	`, acc.ID, acc.Title, acc.Type, currency, acc.Balance, userID)
 	if err != nil {
 		return err
 	}
@@ -237,7 +238,7 @@ func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, acc *zenmoneyAcco
 	return nil
 }
 
-func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, tx *zenmoneyTransaction, currencies map[int]string, tagNames map[string]string) error {
+func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, userID string, tx *zenmoneyTransaction, currencies map[int]string, tagNames map[string]string) error {
 	isTransfer := tx.Income > 0 && tx.Outcome > 0
 
 	var accountExternalID string
@@ -261,7 +262,7 @@ func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, tx *zenmoneyT
 	var accountID *string
 	if accountExternalID != "" {
 		var id string
-		if err := z.db.QueryRow(ctx, `SELECT id FROM accounts WHERE external_id = $1`, accountExternalID).Scan(&id); err == nil {
+		if err := z.db.QueryRow(ctx, `SELECT id FROM accounts WHERE external_id = $1 AND user_id = $2`, accountExternalID, userID).Scan(&id); err == nil {
 			accountID = &id
 		}
 	}
@@ -279,9 +280,9 @@ func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, tx *zenmoneyT
 	}
 
 	_, err = z.db.Exec(ctx, `
-		INSERT INTO transactions (external_id, account_id, occurred_at, amount, currency, payee, comment, tags, category, is_transfer)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		ON CONFLICT (external_id) DO UPDATE SET
+		INSERT INTO transactions (external_id, account_id, occurred_at, amount, currency, payee, comment, tags, category, is_transfer, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (user_id, external_id) DO UPDATE SET
 			account_id  = EXCLUDED.account_id,
 			occurred_at = EXCLUDED.occurred_at,
 			amount      = EXCLUDED.amount,
@@ -291,7 +292,7 @@ func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, tx *zenmoneyT
 			tags        = EXCLUDED.tags,
 			category    = EXCLUDED.category,
 			is_transfer = EXCLUDED.is_transfer
-	`, tx.ID, accountID, date, amount, currency, tx.Payee, tx.Comment, tx.Tag, category, isTransfer)
+	`, tx.ID, accountID, date, amount, currency, tx.Payee, tx.Comment, tx.Tag, category, isTransfer, userID)
 
 	if err != nil {
 		return err
@@ -301,8 +302,8 @@ func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, tx *zenmoneyT
 	return nil
 }
 
-func (z *ZenmoneyConnector) deleteTransaction(ctx context.Context, externalID string) error {
-	_, err := z.db.Exec(ctx, `DELETE FROM transactions WHERE external_id = $1`, externalID)
+func (z *ZenmoneyConnector) deleteTransaction(ctx context.Context, userID string, externalID string) error {
+	_, err := z.db.Exec(ctx, `DELETE FROM transactions WHERE external_id = $1 AND user_id = $2`, externalID, userID)
 	if err != nil {
 		return err
 	}
@@ -310,23 +311,23 @@ func (z *ZenmoneyConnector) deleteTransaction(ctx context.Context, externalID st
 	return nil
 }
 
-func (z *ZenmoneyConnector) getLastServerTimestamp(ctx context.Context) (int64, error) {
+func (z *ZenmoneyConnector) getLastServerTimestamp(ctx context.Context, userID string) (int64, error) {
 	var t time.Time
-	err := z.db.QueryRow(ctx, `SELECT last_synced_at FROM sync_state WHERE source = 'zenmoney'`).Scan(&t)
+	err := z.db.QueryRow(ctx, `SELECT last_synced_at FROM sync_state WHERE source = 'zenmoney' AND user_id = $1`, userID).Scan(&t)
 	if err != nil {
 		return 0, nil // first sync
 	}
 	return t.Unix(), nil
 }
 
-func (z *ZenmoneyConnector) updateLastServerTimestamp(ctx context.Context, serverTimestamp int64) error {
+func (z *ZenmoneyConnector) updateLastServerTimestamp(ctx context.Context, userID string, serverTimestamp int64) error {
 	t := time.Unix(serverTimestamp, 0)
 	_, err := z.db.Exec(ctx, `
-		INSERT INTO sync_state (source, last_synced_at, updated_at)
-		VALUES ('zenmoney', $1, NOW())
-		ON CONFLICT (source) DO UPDATE SET
+		INSERT INTO sync_state (source, last_synced_at, updated_at, user_id)
+		VALUES ('zenmoney', $1, NOW(), $2)
+		ON CONFLICT (source, user_id) DO UPDATE SET
 			last_synced_at = EXCLUDED.last_synced_at,
 			updated_at     = EXCLUDED.updated_at
-	`, t)
+	`, t, userID)
 	return err
 }
