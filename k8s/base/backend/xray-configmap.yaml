@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: xray-config
+data:
+  config.json: |
+    {
+      "log": { "loglevel": "warning" },
+      "inbounds": [
+        {
+          "tag": "http-in",
+          "port": 1081,
+          "listen": "127.0.0.1",
+          "protocol": "http"
+        }
+      ],
+      "outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "vless",
+          "settings": {
+            "vnext": [
+              {
+                "address": "de1.gofizzin.com",
+                "port": 443,
+                "users": [
+                  {
+                    "id": "c87fada7-5e2c-4851-9089-423b31d31d51",
+                    "encryption": "none",
+                    "flow": "xtls-rprx-vision"
+                  }
+                ]
+              }
+            ]
+          },
+          "streamSettings": {
+            "network": "tcp",
+            "security": "reality",
+            "realitySettings": {
+              "serverName": "de1.gofizzin.com",
+              "fingerprint": "chrome",
+              "publicKey": "zl_ufoBxXwRSPvxTIJEqFIIaewNT_1fYtxI9rWXRtwg",
+              "shortId": "ba15d0ae"
+            }
+          }
+        },
+        {
+          "tag": "direct",
+          "protocol": "freedom"
+        }
+      ],
+      "routing": {
+        "rules": [
+          {
+            "type": "field",
+            "outboundTag": "proxy",
+            "domain": ["strava.com", "fatsecret.com"]
+          },
+          {
+            "type": "field",
+            "outboundTag": "direct",
+            "network": "tcp,udp"
+          }
+        ]
+      }
+    }
