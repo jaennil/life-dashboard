@@ -24,11 +24,18 @@ spec:
           env:
             - name: SERVER_ENV
               value: production
-            - name: DATABASE_URL
+            - name: DB_USER
               valueFrom:
                 secretKeyRef:
-                  name: postgres-app
-                  key: uri
+                  name: postgres-credentials
+                  key: username
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASS)@postgres-rw:5432/lifedashboard?sslmode=disable"
             - name: STRAVA_REDIRECT_URI
               value: https://lifedash.dubrovskih.ru/api/v1/auth/strava/callback
             - name: FATSECRET_REDIRECT_URI
