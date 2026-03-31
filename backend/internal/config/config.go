@@ -41,7 +41,10 @@ type WeatherConfig struct {
 }
 
 type ZenmoneyConfig struct {
-	Token string `mapstructure:"token"`
+	Token        string `mapstructure:"token"`
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	RedirectURI  string `mapstructure:"redirect_uri"`
 }
 
 type HevyConfig struct {
@@ -93,7 +96,11 @@ func Load() (*Config, error) {
 	viper.BindEnv("connectors.strava.client_secret", "STRAVA_CLIENT_SECRET")
 	viper.BindEnv("connectors.strava.redirect_uri", "STRAVA_REDIRECT_URI")
 	viper.BindEnv("connectors.zenmoney.token", "ZENMONEY_TOKEN")
+	viper.BindEnv("connectors.zenmoney.client_id", "ZENMONEY_CLIENT_ID")
+	viper.BindEnv("connectors.zenmoney.client_secret", "ZENMONEY_CLIENT_SECRET")
+	viper.BindEnv("connectors.zenmoney.redirect_uri", "ZENMONEY_REDIRECT_URI")
 	viper.SetDefault("connectors.strava.redirect_uri", "http://localhost:8080/api/v1/auth/strava/callback")
+	viper.SetDefault("connectors.zenmoney.redirect_uri", "http://localhost:8080/api/v1/auth/zenmoney/callback")
 
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.env", "development")

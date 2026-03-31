@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth'
 const OAUTH_INTEGRATIONS: Record<string, string> = {
   strava: '/api/v1/auth/strava',
   fatsecret: '/api/v1/auth/fatsecret',
+  zenmoney: '/api/v1/auth/zenmoney',
 }
 
 const ICONS: Record<string, string> = {

@@ -75,12 +75,13 @@ func main() {
 		log.Warn().Msg("hevy connector disabled: HEVY_API_KEY not set")
 	}
 
-	if cfg.Connectors.Zenmoney.Token != "" {
-		zenmoney := connectors.NewZenmoney(cfg.Connectors.Zenmoney.Token, pool, log.Logger)
+	var zenmoney *connectors.ZenmoneyConnector
+	if cfg.Connectors.Zenmoney.ClientID != "" {
+		zenmoney = connectors.NewZenmoney(cfg.Connectors.Zenmoney.ClientID, cfg.Connectors.Zenmoney.ClientSecret, cfg.Connectors.Zenmoney.RedirectURI, pool, log.Logger)
 		activeConnectors = append(activeConnectors, zenmoney)
 		log.Info().Msg("zenmoney connector enabled")
 	} else {
-		log.Warn().Msg("zenmoney connector disabled: ZENMONEY_TOKEN not set")
+		log.Warn().Msg("zenmoney connector disabled: ZENMONEY_CLIENT_ID not set")
 	}
 
 	mfpCfg := cfg.Connectors.MFP
@@ -196,7 +197,7 @@ func main() {
 	r.Post("/api/v1/auth/login", usersHandler.Login)
 	r.Post("/api/v1/auth/logout", usersHandler.Logout)
 
-	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, log.Logger)
+	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, zenmoney, log.Logger)
 
 	// Protected routes
 	r.Group(func(r chi.Router) {
@@ -213,7 +214,7 @@ func main() {
 		configuredMap := map[string]bool{
 			"strava":       cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
 			"hevy":         cfg.Connectors.Hevy.APIKey != "",
-			"zenmoney":     cfg.Connectors.Zenmoney.Token != "",
+			"zenmoney":     cfg.Connectors.Zenmoney.ClientID != "",
 			"myfitnesspal": mfpEnabled,
 			"fatsecret":    fsc.ClientID != "" && fsc.ClientSecret != "",
 		}
@@ -255,6 +256,8 @@ func main() {
 		if fatSecretConn != nil {
 			r.Get("/api/v1/auth/fatsecret", authHandler.FatSecretAuthorize)
 			r.Get("/api/v1/auth/fatsecret/callback", authHandler.FatSecretCallback)
+			r.Get("/api/v1/auth/zenmoney", authHandler.ZenmoneyAuthorize)
+			r.Get("/api/v1/auth/zenmoney/callback", authHandler.ZenmoneyCallback)
 		}
 	})
 

@@ -12,13 +12,15 @@ import (
 type AuthHandler struct {
 	strava    *connectors.StravaConnector
 	fatsecret *connectors.FatSecretConnector
+	zenmoney  *connectors.ZenmoneyConnector
 	logger    zerolog.Logger
 }
 
-func NewAuth(strava *connectors.StravaConnector, fatsecret *connectors.FatSecretConnector, logger zerolog.Logger) *AuthHandler {
+func NewAuth(strava *connectors.StravaConnector, fatsecret *connectors.FatSecretConnector, zenmoney *connectors.ZenmoneyConnector, logger zerolog.Logger) *AuthHandler {
 	return &AuthHandler{
 		strava:    strava,
 		fatsecret: fatsecret,
+		zenmoney:  zenmoney,
 		logger:    logger.With().Str("handler", "auth").Logger(),
 	}
 }
@@ -99,6 +101,43 @@ func (h *AuthHandler) StravaCallback(w http.ResponseWriter, r *http.Request) {
 			h.logger.Error().Err(err).Msg("strava initial sync failed")
 		} else {
 			h.logger.Info().Msg("strava initial sync complete")
+		}
+	}()
+
+	http.Redirect(w, r, "/settings", http.StatusFound)
+}
+
+// GET /api/v1/auth/zenmoney — redirect to ZenMoney OAuth
+func (h *AuthHandler) ZenmoneyAuthorize(w http.ResponseWriter, r *http.Request) {
+	if h.zenmoney == nil {
+		http.Error(w, "zenmoney not configured", http.StatusServiceUnavailable)
+		return
+	}
+	http.Redirect(w, r, h.zenmoney.AuthURL(""), http.StatusTemporaryRedirect)
+}
+
+// GET /api/v1/auth/zenmoney/callback — exchange code for tokens
+func (h *AuthHandler) ZenmoneyCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		h.logger.Error().Msg("zenmoney callback missing code")
+		http.Error(w, "missing code", http.StatusBadRequest)
+		return
+	}
+
+	zmUserID := r.Context().Value(middleware.UserIDKey).(string)
+	if err := h.zenmoney.ExchangeCode(r.Context(), zmUserID, code); err != nil {
+		h.logger.Error().Err(err).Msg("zenmoney token exchange failed")
+		http.Error(w, "authorization failed", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().Str("user_id", zmUserID).Msg("zenmoney authorization successful, starting initial sync")
+	go func() {
+		if err := h.zenmoney.Sync(context.Background(), zmUserID); err != nil {
+			h.logger.Error().Err(err).Msg("zenmoney initial sync failed")
+		} else {
+			h.logger.Info().Msg("zenmoney initial sync complete")
 		}
 	}()
 

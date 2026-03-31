@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -69,24 +71,146 @@ type zenmoneyTransaction struct {
 // ---- Connector ----
 
 type ZenmoneyConnector struct {
-	token  string
-	db     *pgxpool.Pool
-	client *http.Client
-	logger zerolog.Logger
+	clientID     string
+	clientSecret string
+	redirectURI  string
+	db           *pgxpool.Pool
+	client       *http.Client
+	logger       zerolog.Logger
 }
 
-func NewZenmoney(token string, db *pgxpool.Pool, logger zerolog.Logger) *ZenmoneyConnector {
+func NewZenmoney(clientID, clientSecret, redirectURI string, db *pgxpool.Pool, logger zerolog.Logger) *ZenmoneyConnector {
 	return &ZenmoneyConnector{
-		token:  token,
-		db:     db,
-		client: &http.Client{Timeout: 30 * time.Second},
-		logger: logger.With().Str("connector", "zenmoney").Logger(),
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		redirectURI:  redirectURI,
+		db:           db,
+		client:       &http.Client{Timeout: 30 * time.Second},
+		logger:       logger.With().Str("connector", "zenmoney").Logger(),
 	}
+}
+
+func (z *ZenmoneyConnector) AuthURL(state string) string {
+	return fmt.Sprintf("https://api.zenmoney.ru/oauth2/authorize/?response_type=code&client_id=%s&redirect_uri=%s&state=%s",
+		z.clientID, url.QueryEscape(z.redirectURI), url.QueryEscape(state))
+}
+
+func (z *ZenmoneyConnector) ExchangeCode(ctx context.Context, userID string, code string) error {
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {z.clientID},
+		"client_secret": {z.clientSecret},
+		"code":          {code},
+		"redirect_uri":  {z.redirectURI},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.zenmoney.ru/oauth2/token/",
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := z.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("token exchange failed with status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+
+	expiresAt := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
+	_, err = z.db.Exec(ctx, `
+		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, updated_at, user_id)
+		VALUES ('zenmoney', $1, $2, $3, NOW(), $4)
+		ON CONFLICT (source, user_id) DO UPDATE SET
+			access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW()
+	`, result.AccessToken, result.RefreshToken, expiresAt, userID)
+
+	z.logger.Info().Str("user_id", userID).Msg("zenmoney authorized")
+	return err
+}
+
+func (z *ZenmoneyConnector) loadToken(ctx context.Context, userID string) (string, error) {
+	var accessToken, refreshToken string
+	var expiresAt time.Time
+	err := z.db.QueryRow(ctx, `
+		SELECT access_token, refresh_token, expires_at FROM oauth_tokens
+		WHERE source = 'zenmoney' AND user_id = $1
+	`, userID).Scan(&accessToken, &refreshToken, &expiresAt)
+	if err != nil {
+		return "", fmt.Errorf("no token in db — authorize first at /api/v1/auth/zenmoney")
+	}
+
+	if time.Now().After(expiresAt) {
+		z.logger.Info().Str("user_id", userID).Msg("zenmoney token expired, refreshing")
+		return z.refreshToken(ctx, userID, refreshToken)
+	}
+	return accessToken, nil
+}
+
+func (z *ZenmoneyConnector) refreshToken(ctx context.Context, userID string, refreshTok string) (string, error) {
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {z.clientID},
+		"client_secret": {z.clientSecret},
+		"refresh_token": {refreshTok},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.zenmoney.ru/oauth2/token/",
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := z.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("refresh failed with status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	expiresAt := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
+	z.db.Exec(ctx, `
+		UPDATE oauth_tokens SET access_token=$1, refresh_token=$2, expires_at=$3, updated_at=NOW()
+		WHERE source='zenmoney' AND user_id=$4
+	`, result.AccessToken, result.RefreshToken, expiresAt, userID)
+
+	return result.AccessToken, nil
 }
 
 func (z *ZenmoneyConnector) Name() string { return "zenmoney" }
 
 func (z *ZenmoneyConnector) Sync(ctx context.Context, userID string) error {
+	token, err := z.loadToken(ctx, userID)
+	if err != nil {
+		return err
+	}
+
 	lastTS, err := z.getLastServerTimestamp(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("get last server timestamp: %w", err)
@@ -94,7 +218,7 @@ func (z *ZenmoneyConnector) Sync(ctx context.Context, userID string) error {
 
 	z.logger.Info().Int64("last_server_timestamp", lastTS).Msg("fetching diff")
 
-	resp, err := z.fetchDiff(ctx, lastTS)
+	resp, err := z.fetchDiff(ctx, token, lastTS)
 	if err != nil {
 		return fmt.Errorf("fetch diff: %w", err)
 	}
@@ -174,7 +298,7 @@ func (z *ZenmoneyConnector) Sync(ctx context.Context, userID string) error {
 
 // ---- HTTP ----
 
-func (z *ZenmoneyConnector) fetchDiff(ctx context.Context, lastServerTimestamp int64) (*zenmoneyDiffResponse, error) {
+func (z *ZenmoneyConnector) fetchDiff(ctx context.Context, token string, lastServerTimestamp int64) (*zenmoneyDiffResponse, error) {
 	body, err := json.Marshal(zenmoneyDiffRequest{
 		CurrentClientTimestamp: time.Now().Unix(),
 		LastServerTimestamp:    lastServerTimestamp,
@@ -187,7 +311,7 @@ func (z *ZenmoneyConnector) fetchDiff(ctx context.Context, lastServerTimestamp i
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+z.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := z.client.Do(req)
