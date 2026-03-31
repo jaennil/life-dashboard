@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/rs/zerolog"
@@ -67,7 +68,7 @@ func (h *AuthHandler) FatSecretCallback(w http.ResponseWriter, r *http.Request) 
 	fsUserID := r.Context().Value(middleware.UserIDKey).(string)
 	h.logger.Info().Str("user_id", fsUserID).Msg("fatsecret authorization successful, starting initial sync")
 	go func() {
-		if err := h.fatsecret.Sync(r.Context(), fsUserID); err != nil {
+		if err := h.fatsecret.Sync(context.Background(), fsUserID); err != nil {
 			h.logger.Error().Err(err).Msg("fatsecret initial sync failed")
 		} else {
 			h.logger.Info().Msg("fatsecret initial sync complete")
@@ -94,7 +95,7 @@ func (h *AuthHandler) StravaCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	h.logger.Info().Str("user_id", stravaUserID).Msg("strava authorization successful, starting initial sync")
 	go func() {
-		if err := h.strava.Sync(r.Context(), stravaUserID); err != nil {
+		if err := h.strava.Sync(context.Background(), stravaUserID); err != nil {
 			h.logger.Error().Err(err).Msg("strava initial sync failed")
 		} else {
 			h.logger.Info().Msg("strava initial sync complete")
