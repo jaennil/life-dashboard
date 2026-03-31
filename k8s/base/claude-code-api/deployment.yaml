@@ -26,13 +26,18 @@ spec:
               value: "0.0.0.0"
             - name: PORT
               value: "8000"
+            - name: HTTPS_PROXY
+              value: "http://xray.proxy.svc.cluster.local:1081"
+            - name: HTTP_PROXY
+              value: "http://xray.proxy.svc.cluster.local:1081"
+            - name: NO_PROXY
+              value: "localhost,127.0.0.1,.svc.cluster.local,.cluster.local,10.0.0.0/8,192.168.0.0/16"
           ports:
             - containerPort: 8000
               name: http
           volumeMounts:
             - name: claude-auth
               mountPath: /home/claudeuser/.claude
-              readOnly: true
           livenessProbe:
             httpGet:
               path: /health
