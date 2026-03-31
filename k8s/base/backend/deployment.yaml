@@ -29,7 +29,7 @@ spec:
             - name: HTTP_PROXY
               value: "http://xray.proxy.svc.cluster.local:1081"
             - name: NO_PROXY
-              value: "localhost,127.0.0.1,postgres-rw,.svc.cluster.local,.cluster.local,10.0.0.0/8,192.168.0.0/16"
+              value: "localhost,127.0.0.1,postgres-rw,claude-code-api,.svc.cluster.local,.cluster.local,10.0.0.0/8,192.168.0.0/16"
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
