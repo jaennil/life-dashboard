@@ -16,15 +16,19 @@ spec:
         kubernetes.io/hostname: jaennil-pc
       imagePullSecrets:
         - name: ghcr-secret
-      securityContext:
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
+      initContainers:
+        - name: fix-permissions
+          image: busybox
+          command: ['sh', '-c', 'cp -r /src-claude /dest-claude && chmod -R 777 /dest-claude']
+          volumeMounts:
+            - name: claude-auth-host
+              mountPath: /src-claude
+              readOnly: true
+            - name: claude-auth
+              mountPath: /dest-claude
       containers:
         - name: claude-code-api
           image: ghcr.io/jaennil/life-dashboard/claude-code-api:latest
-          securityContext:
-            runAsUser: 0
           env:
             - name: USE_CLAUDE_MAX
               value: "true"
@@ -64,7 +68,9 @@ spec:
               memory: "1Gi"
               cpu: "1000m"
       volumes:
-        - name: claude-auth
+        - name: claude-auth-host
           hostPath:
             path: /home/jaennil/.claude
             type: Directory
+        - name: claude-auth
+          emptyDir: {}
