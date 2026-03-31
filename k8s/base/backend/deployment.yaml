@@ -49,7 +49,7 @@ spec:
             - name: AI_BASE_URL
               value: http://claude-code-api:8000
             - name: AI_MODEL
-              value: claude-opus-4-6-20250501
+              value: claude-opus-4-6
           envFrom:
             - secretRef:
                 name: app-config
