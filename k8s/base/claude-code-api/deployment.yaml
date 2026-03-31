@@ -19,7 +19,7 @@ spec:
       initContainers:
         - name: fix-permissions
           image: busybox
-          command: ['sh', '-c', 'cp -r /src-claude /dest-claude && chmod -R 777 /dest-claude']
+          command: ['sh', '-c', 'cp -a /src-claude/. /dest-claude/ && chmod -R 777 /dest-claude']
           volumeMounts:
             - name: claude-auth-host
               mountPath: /src-claude
