@@ -127,7 +127,7 @@ function IntegrationCard({ integration, onToggle, onSync }: {
               Подключить
             </a>
           )}
-          {integration.configured && integration.enabled && (
+          {integration.configured && integration.enabled && !(OAUTH_INTEGRATIONS[integration.name] && integration.record_count === 0) && (
             <button
               onClick={handleSync}
               disabled={syncing}
