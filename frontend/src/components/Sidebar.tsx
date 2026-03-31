@@ -9,9 +9,11 @@ import {
   Sun,
   Moon,
   Activity,
+  User,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
+import { useAuth } from '@/lib/auth'
 
 const nav = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -23,6 +25,7 @@ const nav = [
 
 export function Sidebar() {
   const { theme, toggle } = useTheme()
+  const { user } = useAuth()
 
   return (
     <aside className="flex flex-col w-16 lg:w-56 h-screen bg-card border-r shrink-0 fixed top-0 left-0">
@@ -80,6 +83,15 @@ export function Sidebar() {
         >
           <Settings className="w-4 h-4 shrink-0" />
           <span className="hidden lg:block">Settings</span>
+        </NavLink>
+        <NavLink
+          to="/settings"
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+        >
+          <div className="w-4 h-4 shrink-0 rounded-full bg-muted flex items-center justify-center">
+            <User className="w-3 h-3" />
+          </div>
+          <span className="hidden lg:block text-xs truncate">{user?.username}</span>
         </NavLink>
       </div>
     </aside>
