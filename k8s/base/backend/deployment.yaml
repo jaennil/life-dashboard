@@ -46,6 +46,8 @@ spec:
               value: https://lifedash.dubrovskih.ru/api/v1/auth/strava/callback
             - name: FATSECRET_REDIRECT_URI
               value: https://lifedash.dubrovskih.ru/api/v1/auth/fatsecret/callback
+            - name: AI_BASE_URL
+              value: http://claude-code-api:8000
           envFrom:
             - secretRef:
                 name: app-config

@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claude-code-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: claude-code-api
+  template:
+    metadata:
+      labels:
+        app: claude-code-api
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: jaennil-pc
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: claude-code-api
+          image: ghcr.io/jaennil/life-dashboard/claude-code-api:latest
+          env:
+            - name: USE_CLAUDE_MAX
+              value: "true"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "8000"
+          ports:
+            - containerPort: 8000
+              name: http
+          volumeMounts:
+            - name: claude-auth
+              mountPath: /home/claudeuser/.claude
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      volumes:
+        - name: claude-auth
+          hostPath:
+            path: /home/jaennil/.claude
+            type: Directory

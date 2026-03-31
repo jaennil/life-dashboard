@@ -10,3 +10,5 @@ resources:
   - backend/service.yaml
   - frontend/deployment.yaml
   - frontend/service.yaml
+  - claude-code-api/deployment.yaml
+  - claude-code-api/service.yaml
