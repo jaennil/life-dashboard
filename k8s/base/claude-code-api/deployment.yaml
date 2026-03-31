@@ -16,6 +16,10 @@ spec:
         kubernetes.io/hostname: jaennil-pc
       imagePullSecrets:
         - name: ghcr-secret
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
       containers:
         - name: claude-code-api
           image: ghcr.io/jaennil/life-dashboard/claude-code-api:latest
