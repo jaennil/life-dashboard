@@ -10,14 +10,14 @@ const OAUTH_INTEGRATIONS: Record<string, string> = {
   fatsecret: '/api/v1/auth/fatsecret',
 }
 
-const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: string }> = {
+const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.ReactNode }> = {
   zenmoney: {
     placeholder: 'Bearer токен от ZenMoney',
-    help: 'Получите токен на zerro.app/token — войдите через ZenMoney аккаунт и скопируйте токен. Токен действует 24 часа, потом нужно обновить.',
+    help: <>Получите токен на <a href="https://zerro.app/token" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">zerro.app/token</a> — войдите через ZenMoney аккаунт и скопируйте токен. Токен действует 24 часа, потом нужно обновить.</>,
   },
   hevy: {
     placeholder: 'API ключ от Hevy',
-    help: 'Откройте Hevy → Settings → API, скопируйте API Key.',
+    help: <>Откройте Hevy → Settings → API, скопируйте API Key.</>,
   },
 }
 
