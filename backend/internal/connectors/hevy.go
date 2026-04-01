@@ -69,24 +69,36 @@ type hevySet struct {
 // ---- Connector ----
 
 type HevyConnector struct {
-	apiKey string
 	db     *pgxpool.Pool
 	client *http.Client
 	logger zerolog.Logger
 }
 
-func NewHevy(apiKey string, db *pgxpool.Pool, logger zerolog.Logger) *HevyConnector {
+func NewHevy(db *pgxpool.Pool, logger zerolog.Logger) *HevyConnector {
 	return &HevyConnector{
-		apiKey: apiKey,
 		db:     db,
 		client: &http.Client{Timeout: 30 * time.Second},
 		logger: logger.With().Str("connector", "hevy").Logger(),
 	}
 }
 
+func (h *HevyConnector) loadAPIKey(ctx context.Context, userID string) (string, error) {
+	var key string
+	err := h.db.QueryRow(ctx, `SELECT access_token FROM oauth_tokens WHERE source = 'hevy' AND user_id = $1`, userID).Scan(&key)
+	if err != nil {
+		return "", fmt.Errorf("no API key — add your Hevy API key in Settings")
+	}
+	return key, nil
+}
+
 func (h *HevyConnector) Name() string { return "hevy" }
 
 func (h *HevyConnector) Sync(ctx context.Context, userID string) error {
+	apiKey, err := h.loadAPIKey(ctx, userID)
+	if err != nil {
+		return err
+	}
+
 	lastSync, err := h.getLastSync(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("get last sync: %w", err)
@@ -94,12 +106,12 @@ func (h *HevyConnector) Sync(ctx context.Context, userID string) error {
 
 	if lastSync.IsZero() {
 		h.logger.Info().Msg("no previous sync, running full historical sync")
-		if err := h.syncFull(ctx, userID); err != nil {
+		if err := h.syncFull(ctx, userID, apiKey); err != nil {
 			return err
 		}
 	} else {
 		h.logger.Info().Time("since", lastSync).Msg("running incremental sync")
-		if err := h.syncIncremental(ctx, userID, lastSync); err != nil {
+		if err := h.syncIncremental(ctx, userID, lastSync, apiKey); err != nil {
 			return err
 		}
 	}
@@ -108,12 +120,12 @@ func (h *HevyConnector) Sync(ctx context.Context, userID string) error {
 }
 
 // syncFull fetches all workouts via paginated /v1/workouts
-func (h *HevyConnector) syncFull(ctx context.Context, userID string) error {
+func (h *HevyConnector) syncFull(ctx context.Context, userID string, apiKey string) error {
 	page := 1
 	total := 0
 
 	for {
-		resp, err := h.fetchWorkoutsPage(ctx, page)
+		resp, err := h.fetchWorkoutsPage(ctx, apiKey, page)
 		if err != nil {
 			return fmt.Errorf("fetch page %d: %w", page, err)
 		}
@@ -138,12 +150,12 @@ func (h *HevyConnector) syncFull(ctx context.Context, userID string) error {
 }
 
 // syncIncremental uses /v1/workouts/events to fetch changes since last sync
-func (h *HevyConnector) syncIncremental(ctx context.Context, userID string, since time.Time) error {
+func (h *HevyConnector) syncIncremental(ctx context.Context, userID string, since time.Time, apiKey string) error {
 	page := 1
 	updated, deleted := 0, 0
 
 	for {
-		resp, err := h.fetchEventsPage(ctx, since, page)
+		resp, err := h.fetchEventsPage(ctx, apiKey, since, page)
 		if err != nil {
 			return fmt.Errorf("fetch events page %d: %w", page, err)
 		}
@@ -184,15 +196,15 @@ func (h *HevyConnector) syncIncremental(ctx context.Context, userID string, sinc
 
 // ---- HTTP helpers ----
 
-func (h *HevyConnector) fetchWorkoutsPage(ctx context.Context, page int) (*hevyWorkoutsResponse, error) {
+func (h *HevyConnector) fetchWorkoutsPage(ctx context.Context, apiKey string, page int) (*hevyWorkoutsResponse, error) {
 	url := fmt.Sprintf("%s/workouts?page=%d&pageSize=%d", hevyBaseURL, page, hevyPageSize)
-	return doRequest[hevyWorkoutsResponse](ctx, h.client, h.apiKey, url)
+	return doRequest[hevyWorkoutsResponse](ctx, h.client, apiKey, url)
 }
 
-func (h *HevyConnector) fetchEventsPage(ctx context.Context, since time.Time, page int) (*hevyEventsResponse, error) {
+func (h *HevyConnector) fetchEventsPage(ctx context.Context, apiKey string, since time.Time, page int) (*hevyEventsResponse, error) {
 	url := fmt.Sprintf("%s/workouts/events?since=%s&page=%d&pageSize=%d",
 		hevyBaseURL, since.UTC().Format(time.RFC3339), page, hevyPageSize)
-	return doRequest[hevyEventsResponse](ctx, h.client, h.apiKey, url)
+	return doRequest[hevyEventsResponse](ctx, h.client, apiKey, url)
 }
 
 func doRequest[T any](ctx context.Context, client *http.Client, apiKey, url string) (*T, error) {

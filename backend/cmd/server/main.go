@@ -67,13 +67,9 @@ func main() {
 	// Connectors
 	var activeConnectors []connectors.Connector
 
-	if cfg.Connectors.Hevy.APIKey != "" {
-		hevy := connectors.NewHevy(cfg.Connectors.Hevy.APIKey, pool, log.Logger)
-		activeConnectors = append(activeConnectors, hevy)
-		log.Info().Msg("hevy connector enabled")
-	} else {
-		log.Warn().Msg("hevy connector disabled: HEVY_API_KEY not set")
-	}
+	hevy := connectors.NewHevy(pool, log.Logger)
+	activeConnectors = append(activeConnectors, hevy)
+	log.Info().Msg("hevy connector enabled")
 
 	zenmoney := connectors.NewZenmoney(cfg.Connectors.Zenmoney.ClientID, cfg.Connectors.Zenmoney.ClientSecret, cfg.Connectors.Zenmoney.RedirectURI, pool, log.Logger)
 	activeConnectors = append(activeConnectors, zenmoney)
@@ -208,7 +204,7 @@ func main() {
 
 		configuredMap := map[string]bool{
 			"strava":       cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
-			"hevy":         cfg.Connectors.Hevy.APIKey != "",
+			"hevy":         true,
 			"zenmoney":     true,
 			"myfitnesspal": mfpEnabled,
 			"fatsecret":    fsc.ClientID != "" && fsc.ClientSecret != "",

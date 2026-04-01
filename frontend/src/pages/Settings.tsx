@@ -15,6 +15,10 @@ const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: string }> 
     placeholder: 'Bearer токен от ZenMoney',
     help: 'Получите токен на zerro.app/token — войдите через ZenMoney аккаунт и скопируйте токен. Токен действует 24 часа, потом нужно обновить.',
   },
+  hevy: {
+    placeholder: 'API ключ от Hevy',
+    help: 'Откройте Hevy → Settings → API, скопируйте API Key.',
+  },
 }
 
 const ICONS: Record<string, string> = {
