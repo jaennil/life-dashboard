@@ -75,14 +75,9 @@ func main() {
 		log.Warn().Msg("hevy connector disabled: HEVY_API_KEY not set")
 	}
 
-	var zenmoney *connectors.ZenmoneyConnector
-	if cfg.Connectors.Zenmoney.ClientID != "" {
-		zenmoney = connectors.NewZenmoney(cfg.Connectors.Zenmoney.ClientID, cfg.Connectors.Zenmoney.ClientSecret, cfg.Connectors.Zenmoney.RedirectURI, pool, log.Logger)
-		activeConnectors = append(activeConnectors, zenmoney)
-		log.Info().Msg("zenmoney connector enabled")
-	} else {
-		log.Warn().Msg("zenmoney connector disabled: ZENMONEY_CLIENT_ID not set")
-	}
+	zenmoney := connectors.NewZenmoney(cfg.Connectors.Zenmoney.ClientID, cfg.Connectors.Zenmoney.ClientSecret, cfg.Connectors.Zenmoney.RedirectURI, pool, log.Logger)
+	activeConnectors = append(activeConnectors, zenmoney)
+	log.Info().Msg("zenmoney connector enabled")
 
 	mfpCfg := cfg.Connectors.MFP
 	mfpEnabled := mfpCfg.AccessToken != "" || (mfpCfg.Username != "" && (mfpCfg.Password != "" || mfpCfg.SessionCookie != ""))
@@ -214,7 +209,7 @@ func main() {
 		configuredMap := map[string]bool{
 			"strava":       cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
 			"hevy":         cfg.Connectors.Hevy.APIKey != "",
-			"zenmoney":     cfg.Connectors.Zenmoney.ClientID != "",
+			"zenmoney":     true,
 			"myfitnesspal": mfpEnabled,
 			"fatsecret":    fsc.ClientID != "" && fsc.ClientSecret != "",
 		}
