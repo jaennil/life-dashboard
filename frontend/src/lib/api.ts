@@ -206,6 +206,12 @@ export const api = {
   syncIntegration: (name: string) =>
     fetch(BASE + `/sync/${name}`, { method: 'POST' })
       .then(r => { if (!r.ok) throw new Error(r.statusText) }),
+  saveToken: (name: string, token: string) =>
+    fetch(BASE + `/integrations/${name}/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    }).then(r => { if (!r.ok) throw new Error(r.statusText) }),
   me: () => get<User>('/auth/me'),
   register: (username: string, password: string) =>
     fetch(BASE + '/auth/register', {

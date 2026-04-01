@@ -222,6 +222,7 @@ func main() {
 		r.Get("/api/v1/integrations", integrationsHandler.GetIntegrations)
 		r.Post("/api/v1/integrations/{name}/toggle", integrationsHandler.ToggleIntegration)
 		r.Post("/api/v1/integrations/myfitnesspal/token", integrationsHandler.SaveMFPToken)
+		r.Post("/api/v1/integrations/{name}/token", integrationsHandler.SaveToken)
 
 		dashboardHandler := handlers.NewDashboard(pool, log.Logger)
 		r.Get("/api/v1/dashboard/summary", dashboardHandler.GetSummary)

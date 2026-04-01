@@ -197,6 +197,43 @@ func (h *IntegrationsHandler) SaveMFPToken(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+// SaveToken saves a manually-entered access token for integrations like ZenMoney
+func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Token == "" {
+		http.Error(w, "token is required", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	userID := ctx.Value(authmw.UserIDKey).(string)
+
+	_, err := h.db.Exec(ctx, `
+		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, updated_at, user_id)
+		VALUES ($1, $2, '', NOW() + INTERVAL '100 years', NOW(), $3)
+		ON CONFLICT (source, user_id) DO UPDATE SET
+			access_token = $2, updated_at = NOW()
+	`, name, body.Token, userID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("source", name).Msg("save token failed")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	h.db.Exec(ctx, `
+		INSERT INTO sync_state (source, enabled, updated_at, user_id) VALUES ($1, true, NOW(), $2)
+		ON CONFLICT (source, user_id) DO UPDATE SET enabled = true, updated_at = NOW()
+	`, name, userID)
+
+	h.logger.Info().Str("source", name).Str("user_id", userID).Msg("token saved")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
 // IsEnabled checks DB state for use in scheduler/sync
 func IsEnabled(ctx context.Context, db *pgxpool.Pool, source string, userID string) bool {
 	var enabled bool

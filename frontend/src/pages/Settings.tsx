@@ -7,7 +7,13 @@ import { useAuth } from '@/lib/auth'
 const OAUTH_INTEGRATIONS: Record<string, string> = {
   strava: '/api/v1/auth/strava',
   fatsecret: '/api/v1/auth/fatsecret',
-  zenmoney: '/api/v1/auth/zenmoney',
+}
+
+const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: string }> = {
+  zenmoney: {
+    placeholder: 'Bearer токен от ZenMoney',
+    help: 'Получите токен на zerro.app/token — войдите через ZenMoney аккаунт и скопируйте токен',
+  },
 }
 
 const ICONS: Record<string, string> = {
@@ -42,13 +48,17 @@ function fmtCount(n: number, name: string) {
   return `${n.toLocaleString('ru-RU')} ${label}`
 }
 
-function IntegrationCard({ integration, onToggle, onSync }: {
+function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
   integration: Integration
   onToggle: (enabled: boolean) => void
   onSync: () => void
+  onRefresh: () => void
 }) {
   const [syncing, setSyncing] = useState(false)
   const [toggling, setToggling] = useState(false)
+  const [tokenInput, setTokenInput] = useState('')
+  const [showTokenForm, setShowTokenForm] = useState(false)
+  const [savingToken, setSavingToken] = useState(false)
 
   async function handleSync() {
     setSyncing(true)
@@ -60,7 +70,21 @@ function IntegrationCard({ integration, onToggle, onSync }: {
     try { await onToggle(!integration.enabled) } finally { setToggling(false) }
   }
 
+  async function handleSaveToken() {
+    if (!tokenInput.trim()) return
+    setSavingToken(true)
+    try {
+      await api.saveToken(integration.name, tokenInput.trim())
+      setTokenInput('')
+      setShowTokenForm(false)
+      onRefresh()
+    } catch { /* ignore */ } finally {
+      setSavingToken(false)
+    }
+  }
+
   const isOAuth = !!OAUTH_INTEGRATIONS[integration.name]
+  const tokenMeta = TOKEN_INTEGRATIONS[integration.name]
   const isConnected = integration.enabled && (!isOAuth || integration.record_count > 0)
 
   const statusIcon = !integration.configured
@@ -109,6 +133,25 @@ function IntegrationCard({ integration, onToggle, onSync }: {
               Подключить
             </a>
           )
+        ) : tokenMeta ? (
+          isConnected ? (
+            <button
+              onClick={handleToggle}
+              disabled={toggling}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10 transition-colors shrink-0"
+            >
+              <Power className="w-3 h-3" />
+              {toggling ? '...' : 'Отключить'}
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowTokenForm(!showTokenForm)}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors shrink-0"
+            >
+              <ExternalLink className="w-3 h-3" />
+              Подключить
+            </button>
+          )
         ) : (
           <button
             onClick={handleToggle}
@@ -127,6 +170,28 @@ function IntegrationCard({ integration, onToggle, onSync }: {
           </button>
         )}
       </div>
+
+      {showTokenForm && tokenMeta && (
+        <div className="flex flex-col gap-2 border-t pt-3">
+          <p className="text-xs text-muted-foreground">{tokenMeta.help}</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={tokenInput}
+              onChange={e => setTokenInput(e.target.value)}
+              placeholder={tokenMeta.placeholder}
+              className="flex-1 rounded-lg border bg-background px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring"
+            />
+            <button
+              onClick={handleSaveToken}
+              disabled={savingToken || !tokenInput.trim()}
+              className="rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {savingToken ? '...' : 'Сохранить'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-3 border-t pt-3">
         <div className="flex flex-col gap-1">
@@ -385,6 +450,7 @@ export function Settings() {
                 integration={integration}
                 onToggle={enabled => handleToggle(integration.name, enabled)}
                 onSync={() => handleSync(integration.name)}
+                onRefresh={load}
               />
             ))}
           </div>
