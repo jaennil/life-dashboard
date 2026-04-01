@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,9 +41,13 @@ func (h *HealthWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Reques
 	bodyBytes, _ := io.ReadAll(r.Body)
 	h.logger.Info().Str("raw_body", string(bodyBytes)).Msg("webhook received")
 
+	// Fix common Shortcuts issues: newlines inside values, trailing commas
+	cleaned := strings.ReplaceAll(string(bodyBytes), "\n", "")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "")
+
 	var req healthWebhookRequest
-	if err := json.Unmarshal(bodyBytes, &req); err != nil {
-		h.logger.Error().Err(err).Str("body", string(bodyBytes)).Msg("json decode failed")
+	if err := json.Unmarshal([]byte(cleaned), &req); err != nil {
+		h.logger.Error().Err(err).Str("body", cleaned).Msg("json decode failed")
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -139,11 +144,18 @@ func (h *HealthWebhookHandler) GetAPIKey(w http.ResponseWriter, r *http.Request)
 }
 
 func parseDate(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
 	for _, layout := range []string{
 		time.RFC3339,
 		"2006-01-02T15:04:05Z",
 		"2006-01-02T15:04:05",
 		"2006-01-02",
+		"Jan 2, 2006 at 3:04 PM",
+		"Jan 2, 2006 at 3:04:05 PM",
+		"January 2, 2006 at 3:04 PM",
+		"2 Jan 2006",
+		"02.01.2006",
+		"01/02/2006",
 	} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t, nil
