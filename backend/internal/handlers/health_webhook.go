@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -36,8 +37,12 @@ type healthWebhookRequest struct {
 
 // POST /api/v1/webhook/health — receive health data from iOS Shortcuts
 func (h *HealthWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, _ := io.ReadAll(r.Body)
+	h.logger.Info().Str("raw_body", string(bodyBytes)).Msg("webhook received")
+
 	var req healthWebhookRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		h.logger.Error().Err(err).Str("body", string(bodyBytes)).Msg("json decode failed")
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
