@@ -249,6 +249,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code }),
     }).then(async r => { if (!r.ok) throw new Error(await r.text()) }),
+  getAPIKey: () => get<{ api_key: string }>('/health/apikey'),
+  generateAPIKey: () =>
+    fetch(BASE + '/health/apikey', { method: 'POST' })
+      .then(async r => {
+        if (!r.ok) throw new Error(r.statusText)
+        return r.json() as Promise<{ api_key: string }>
+      }),
   getWeather: (lat?: number, lon?: number, city?: string) => {
     const params = new URLSearchParams()
     if (lat != null) params.set('lat', String(lat))

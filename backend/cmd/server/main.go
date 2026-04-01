@@ -251,7 +251,14 @@ func main() {
 			r.Get("/api/v1/auth/zenmoney", authHandler.ZenmoneyAuthorize)
 			r.Get("/api/v1/auth/zenmoney/callback", authHandler.ZenmoneyCallback)
 		}
+		healthWebhook := handlers.NewHealthWebhook(pool, log.Logger)
+		r.Get("/api/v1/health/apikey", healthWebhook.GetAPIKey)
+		r.Post("/api/v1/health/apikey", healthWebhook.GenerateAPIKey)
 	})
+
+	// Public webhook (auth via api_key in body)
+	healthWebhookPublic := handlers.NewHealthWebhook(pool, log.Logger)
+	r.Post("/api/v1/webhook/health", healthWebhookPublic.ReceiveData)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

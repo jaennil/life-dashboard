@@ -403,6 +403,70 @@ function TOTPSection() {
   )
 }
 
+function AppleHealthSection() {
+  const [apiKey, setApiKey] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [generating, setGenerating] = useState(false)
+
+  useEffect(() => {
+    api.getAPIKey().then(d => setApiKey(d.api_key)).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  async function generate() {
+    setGenerating(true)
+    try {
+      const d = await api.generateAPIKey()
+      setApiKey(d.api_key)
+    } catch { /* ignore */ } finally {
+      setGenerating(false)
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Apple Health</h2>
+      <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-xl shrink-0">❤️</div>
+          <div>
+            <p className="text-sm font-semibold text-foreground">iOS Shortcuts → Webhook</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Шаги, вес, пульс через бесплатные Быстрые команды iOS</p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="h-8 animate-pulse bg-muted/30 rounded" />
+        ) : apiKey ? (
+          <div className="flex flex-col gap-2 border-t pt-3">
+            <p className="text-xs font-medium text-foreground">API Key:</p>
+            <code className="text-xs bg-muted px-3 py-2 rounded-lg font-mono break-all select-all">{apiKey}</code>
+            <div className="text-xs text-muted-foreground flex flex-col gap-1 mt-1">
+              <p className="font-medium text-foreground">Инструкция:</p>
+              <p>1. Откройте <a href="https://www.icloud.com/shortcuts/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Быстрые команды</a> на iPhone</p>
+              <p>2. Создайте Shortcut: Find Health Samples → Steps/Weight → Get Contents of URL</p>
+              <p>3. POST на <code className="bg-muted px-1 rounded">https://lifedash.dubrovskih.ru/api/v1/webhook/health</code></p>
+              <p>4. JSON body: <code className="bg-muted px-1 rounded">{'{"api_key":"ваш_ключ","data":[{"type":"steps","value":8500,"date":"2026-04-01"}]}'}</code></p>
+              <p>5. Настройте Automation для ежедневного запуска</p>
+            </div>
+            <button onClick={generate} disabled={generating}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors mt-1 self-start">
+              {generating ? '...' : 'Перегенерировать ключ'}
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 border-t pt-3">
+            <p className="text-xs text-muted-foreground">Сгенерируйте API ключ для подключения iOS Shortcuts</p>
+            <button onClick={generate} disabled={generating}
+              className="rounded-lg bg-primary text-primary-foreground px-4 py-1.5 text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors self-start">
+              {generating ? '...' : 'Сгенерировать API Key'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function Settings() {
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [loading, setLoading] = useState(true)
@@ -439,6 +503,8 @@ export function Settings() {
         <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Аккаунт</h2>
         <TOTPSection />
       </div>
+
+      <AppleHealthSection />
 
       <div>
         <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Интеграции</h2>
