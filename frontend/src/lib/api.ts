@@ -47,6 +47,18 @@ export interface MonthStat {
   income: number
 }
 
+export interface DailyTotal {
+  date: string
+  spending: number
+  income: number
+}
+
+export interface TopExpense {
+  payee: string
+  amount: number
+  count: number
+}
+
 export interface Account {
   id: string
   title: string
@@ -62,6 +74,7 @@ export interface FinanceTransaction {
   currency: string
   comment: string
   payee: string | null
+  category: string | null
 }
 
 export interface FitnessSummary {
@@ -188,13 +201,35 @@ export const api = {
   getRecentTransactions: () => get<Transaction[]>('/dashboard/transactions'),
   getMonthlyStats: () => get<MonthStat[]>('/finance/monthly'),
   getAccounts: () => get<Account[]>('/finance/accounts'),
-  getTransactions: (page = 1, type = '') =>
-    get<FinanceTransaction[]>(`/finance/transactions?page=${page}&type=${type}`),
+  getTransactions: (params: { page?: number; type?: string; category?: string; search?: string; from?: string; to?: string; sort?: string } = {}) => {
+    const p = new URLSearchParams()
+    if (params.page) p.set('page', String(params.page))
+    if (params.type) p.set('type', params.type)
+    if (params.category) p.set('category', params.category)
+    if (params.search) p.set('search', params.search)
+    if (params.from) p.set('from', params.from)
+    if (params.to) p.set('to', params.to)
+    if (params.sort) p.set('sort', params.sort)
+    return get<FinanceTransaction[]>('/finance/transactions?' + p.toString())
+  },
   getFitnessSummary: () => get<FitnessSummary>('/fitness/summary'),
   getFitnessWeekly: () => get<WeekStat[]>('/fitness/weekly'),
   getActivities: () => get<Activity[]>('/fitness/activities'),
   getWorkouts: () => get<Workout[]>('/fitness/workouts'),
-  getSpendingByCategory: () => get<CategoryStat[]>('/finance/categories'),
+  getSpendingByCategory: (from?: string) => get<CategoryStat[]>('/finance/categories' + (from ? '?from=' + from : '')),
+  getDailyTotals: (from?: string, to?: string) => {
+    const p = new URLSearchParams()
+    if (from) p.set('from', from)
+    if (to) p.set('to', to)
+    return get<DailyTotal[]>('/finance/daily?' + p.toString())
+  },
+  getTopExpenses: (from?: string, to?: string) => {
+    const p = new URLSearchParams()
+    if (from) p.set('from', from)
+    if (to) p.set('to', to)
+    return get<TopExpense[]>('/finance/top-expenses?' + p.toString())
+  },
+  getCategoryList: () => get<string[]>('/finance/category-list'),
   getNutritionSummary: () => get<NutritionSummary>('/nutrition/summary'),
   getNutritionDaily: () => get<NutritionDay[]>('/nutrition/daily'),
   getIntegrations: () => get<Integration[]>('/integrations'),
