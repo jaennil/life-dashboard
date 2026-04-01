@@ -86,20 +86,23 @@ export function Finance() {
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('')
   const [period, setPeriod] = useState(30)
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
   const [txLoading, setTxLoading] = useState(false)
 
-  const from = dateOffset(period)
+  const from = customFrom || dateOffset(period)
+  const to = customTo || undefined
 
   useEffect(() => {
     Promise.all([
       api.getMonthlyStats(),
       api.getAccounts(),
       api.getSpendingByCategory(from),
-      api.getDailyTotals(from),
-      api.getTopExpenses(from),
+      api.getDailyTotals(from, to),
+      api.getTopExpenses(from, to),
       api.getCategoryList(),
     ])
       .then(([m, a, c, d, t, cl]) => {
@@ -108,13 +111,13 @@ export function Finance() {
       })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [period])
+  }, [period, customFrom, customTo])
 
   const loadTxs = useCallback(async (p: number, replace: boolean) => {
     setTxLoading(true)
     try {
       const data = await api.getTransactions({
-        page: p, type: filter, sort, search, category: catFilter, from,
+        page: p, type: filter, sort, search, category: catFilter, from, to,
       })
       setTxs(prev => replace ? data : [...prev, ...data])
       setHasMore(data.length === 30)
@@ -149,14 +152,14 @@ export function Finance() {
             {new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
           </p>
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-1 items-center flex-wrap">
           {PERIODS.map(p => (
             <button
               key={p.days}
-              onClick={() => setPeriod(p.days)}
+              onClick={() => { setPeriod(p.days); setCustomFrom(''); setCustomTo('') }}
               className={cn(
                 'px-3 py-1 text-xs rounded-lg transition-colors',
-                period === p.days
+                period === p.days && !customFrom
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-muted text-muted-foreground hover:bg-accent'
               )}
@@ -164,6 +167,12 @@ export function Finance() {
               {p.label}
             </button>
           ))}
+          <span className="text-xs text-muted-foreground mx-1">|</span>
+          <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+            className="text-xs rounded-lg border bg-background px-2 py-1 outline-none" />
+          <span className="text-xs text-muted-foreground">—</span>
+          <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+            className="text-xs rounded-lg border bg-background px-2 py-1 outline-none" />
         </div>
       </div>
 
