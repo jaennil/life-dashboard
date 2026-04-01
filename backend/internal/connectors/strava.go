@@ -34,23 +34,67 @@ type stravaTokenResponse struct {
 }
 
 type stravaActivity struct {
-	ID                 int64      `json:"id"`
-	Name               string     `json:"name"`
-	Description        string     `json:"description"`
-	SportType          string     `json:"sport_type"`
-	StartDate          time.Time  `json:"start_date"`
-	MovingTime         int        `json:"moving_time"`
-	ElapsedTime        int        `json:"elapsed_time"`
-	Distance           float64    `json:"distance"`
-	TotalElevationGain float64    `json:"total_elevation_gain"`
-	AverageHeartrate   *float64   `json:"average_heartrate"`
-	MaxHeartrate       *float64   `json:"max_heartrate"`
-	AverageCadence     *float64   `json:"average_cadence"`
-	AverageWatts       *float64   `json:"average_watts"`
-	Calories           *float64   `json:"calories"`
-	Map                struct {
+	ID                    int64      `json:"id"`
+	Name                  string     `json:"name"`
+	Description           string     `json:"description"`
+	Type                  string     `json:"type"`
+	SportType             string     `json:"sport_type"`
+	StartDate             time.Time  `json:"start_date"`
+	MovingTime            int        `json:"moving_time"`
+	ElapsedTime           int        `json:"elapsed_time"`
+	Distance              float64    `json:"distance"`
+	TotalElevationGain    float64    `json:"total_elevation_gain"`
+	AverageHeartrate      *float64   `json:"average_heartrate"`
+	MaxHeartrate          *float64   `json:"max_heartrate"`
+	AverageCadence        *float64   `json:"average_cadence"`
+	AverageWatts          *float64   `json:"average_watts"`
+	WeightedAverageWatts  *int       `json:"weighted_average_watts"`
+	MaxWatts              *int       `json:"max_watts"`
+	Calories              *float64   `json:"calories"`
+	AverageSpeed          *float64   `json:"average_speed"`
+	MaxSpeed              *float64   `json:"max_speed"`
+	AverageTemp           *float64   `json:"average_temp"`
+	Kilojoules            *float64   `json:"kilojoules"`
+	ElevHigh              *float64   `json:"elev_high"`
+	ElevLow               *float64   `json:"elev_low"`
+	SufferScore           *int       `json:"suffer_score"`
+	PRCount               *int       `json:"pr_count"`
+	WorkoutType           *int       `json:"workout_type"`
+	DeviceName            string     `json:"device_name"`
+	GearID                string     `json:"gear_id"`
+	StartLatlng           []float64  `json:"start_latlng"`
+	Map                   struct {
 		SummaryPolyline string `json:"summary_polyline"`
 	} `json:"map"`
+	Gear *struct {
+		Name string `json:"name"`
+	} `json:"gear"`
+	SplitsMetric []stravaSplit `json:"splits_metric"`
+	Laps         []stravaLap   `json:"laps"`
+}
+
+type stravaSplit struct {
+	Split               int     `json:"split"`
+	Distance            float64 `json:"distance"`
+	ElapsedTime         int     `json:"elapsed_time"`
+	MovingTime          int     `json:"moving_time"`
+	ElevationDifference float64 `json:"elevation_difference"`
+	AverageSpeed        float64 `json:"average_speed"`
+	PaceZone            int     `json:"pace_zone"`
+}
+
+type stravaLap struct {
+	LapIndex           int       `json:"lap_index"`
+	Name               string    `json:"name"`
+	Distance           float64   `json:"distance"`
+	ElapsedTime        int       `json:"elapsed_time"`
+	MovingTime         int       `json:"moving_time"`
+	StartDate          time.Time `json:"start_date"`
+	TotalElevationGain float64   `json:"total_elevation_gain"`
+	AverageSpeed       float64   `json:"average_speed"`
+	MaxSpeed           float64   `json:"max_speed"`
+	AverageCadence     *float64  `json:"average_cadence"`
+	AverageWatts       *float64  `json:"average_watts"`
 }
 
 // ---- Connector ----
@@ -225,39 +269,86 @@ func (s *StravaConnector) upsertActivity(ctx context.Context, userID string, a *
 		return fmt.Errorf("insert raw event: %w", err)
 	}
 
+	var gearName *string
+	if a.Gear != nil && a.Gear.Name != "" {
+		gearName = &a.Gear.Name
+	}
+	var startLat, startLng *float64
+	if len(a.StartLatlng) == 2 {
+		startLat = &a.StartLatlng[0]
+		startLng = &a.StartLatlng[1]
+	}
+
 	_, err = s.db.Exec(ctx, `
 		INSERT INTO activities
-			(source, external_id, type, started_at, duration_seconds,
+			(source, external_id, type, sport_type, started_at, duration_seconds, elapsed_time,
 			 distance_meters, elevation_gain_meters, avg_heart_rate, max_heart_rate,
-			 avg_cadence, avg_power_watts, calories, name, description, raw_payload, user_id)
+			 avg_cadence, avg_power_watts, weighted_average_watts, max_watts,
+			 calories, average_speed, max_speed, average_temp, kilojoules,
+			 elev_high, elev_low, suffer_score, pr_count, workout_type,
+			 device_name, gear_name, start_lat, start_lng, map_summary_polyline,
+			 name, description, raw_payload, user_id)
 		VALUES
-			('strava', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			('strava', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+			 $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
 		ON CONFLICT (user_id, external_id) DO UPDATE SET
-			type                  = EXCLUDED.type,
-			started_at            = EXCLUDED.started_at,
-			duration_seconds      = EXCLUDED.duration_seconds,
-			distance_meters       = EXCLUDED.distance_meters,
+			type = EXCLUDED.type, sport_type = EXCLUDED.sport_type,
+			started_at = EXCLUDED.started_at, duration_seconds = EXCLUDED.duration_seconds,
+			elapsed_time = EXCLUDED.elapsed_time, distance_meters = EXCLUDED.distance_meters,
 			elevation_gain_meters = EXCLUDED.elevation_gain_meters,
-			avg_heart_rate        = EXCLUDED.avg_heart_rate,
-			max_heart_rate        = EXCLUDED.max_heart_rate,
-			avg_cadence           = EXCLUDED.avg_cadence,
-			avg_power_watts       = EXCLUDED.avg_power_watts,
-			calories              = EXCLUDED.calories,
-			name                  = EXCLUDED.name,
-			description           = EXCLUDED.description,
-			raw_payload           = EXCLUDED.raw_payload
+			avg_heart_rate = EXCLUDED.avg_heart_rate, max_heart_rate = EXCLUDED.max_heart_rate,
+			avg_cadence = EXCLUDED.avg_cadence, avg_power_watts = EXCLUDED.avg_power_watts,
+			weighted_average_watts = EXCLUDED.weighted_average_watts, max_watts = EXCLUDED.max_watts,
+			calories = EXCLUDED.calories, average_speed = EXCLUDED.average_speed, max_speed = EXCLUDED.max_speed,
+			average_temp = EXCLUDED.average_temp, kilojoules = EXCLUDED.kilojoules,
+			elev_high = EXCLUDED.elev_high, elev_low = EXCLUDED.elev_low,
+			suffer_score = EXCLUDED.suffer_score, pr_count = EXCLUDED.pr_count,
+			workout_type = EXCLUDED.workout_type, device_name = EXCLUDED.device_name,
+			gear_name = EXCLUDED.gear_name, start_lat = EXCLUDED.start_lat, start_lng = EXCLUDED.start_lng,
+			map_summary_polyline = EXCLUDED.map_summary_polyline,
+			name = EXCLUDED.name, description = EXCLUDED.description, raw_payload = EXCLUDED.raw_payload
 	`,
-		externalID, a.SportType, a.StartDate, a.MovingTime,
+		externalID, a.Type, a.SportType, a.StartDate, a.MovingTime, a.ElapsedTime,
 		a.Distance, a.TotalElevationGain,
 		a.AverageHeartrate, a.MaxHeartrate,
-		a.AverageCadence, a.AverageWatts,
-		a.Calories, a.Name, a.Description, raw, userID,
+		a.AverageCadence, a.AverageWatts, a.WeightedAverageWatts, a.MaxWatts,
+		a.Calories, a.AverageSpeed, a.MaxSpeed, a.AverageTemp, a.Kilojoules,
+		a.ElevHigh, a.ElevLow, a.SufferScore, a.PRCount, a.WorkoutType,
+		a.DeviceName, gearName, startLat, startLng, a.Map.SummaryPolyline,
+		a.Name, a.Description, raw, userID,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert activity: %w", err)
 	}
 
 	s.logger.Debug().Int64("id", a.ID).Str("type", a.SportType).Str("name", a.Name).Msg("activity upserted")
+
+	// Get activity DB id for splits/laps
+	var activityDBID string
+	s.db.QueryRow(ctx, `SELECT id FROM activities WHERE external_id = $1 AND user_id = $2`, externalID, userID).Scan(&activityDBID)
+
+	// Save splits
+	if len(a.SplitsMetric) > 0 && activityDBID != "" {
+		s.db.Exec(ctx, `DELETE FROM activity_splits WHERE activity_id = $1`, activityDBID)
+		for _, sp := range a.SplitsMetric {
+			s.db.Exec(ctx, `
+				INSERT INTO activity_splits (activity_id, split, distance, elapsed_time, moving_time, elevation_difference, average_speed, pace_zone)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			`, activityDBID, sp.Split, sp.Distance, sp.ElapsedTime, sp.MovingTime, sp.ElevationDifference, sp.AverageSpeed, sp.PaceZone)
+		}
+	}
+
+	// Save laps
+	if len(a.Laps) > 0 && activityDBID != "" {
+		s.db.Exec(ctx, `DELETE FROM activity_laps WHERE activity_id = $1`, activityDBID)
+		for _, lp := range a.Laps {
+			s.db.Exec(ctx, `
+				INSERT INTO activity_laps (activity_id, lap_index, name, distance, elapsed_time, moving_time, start_date, total_elevation_gain, average_speed, max_speed, average_cadence, average_watts)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			`, activityDBID, lp.LapIndex, lp.Name, lp.Distance, lp.ElapsedTime, lp.MovingTime, lp.StartDate, lp.TotalElevationGain, lp.AverageSpeed, lp.MaxSpeed, lp.AverageCadence, lp.AverageWatts)
+		}
+	}
+
 	return nil
 }
 
