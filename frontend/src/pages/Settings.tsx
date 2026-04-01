@@ -12,7 +12,7 @@ const OAUTH_INTEGRATIONS: Record<string, string> = {
 const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: string }> = {
   zenmoney: {
     placeholder: 'Bearer токен от ZenMoney',
-    help: 'Получите токен на zerro.app/token — войдите через ZenMoney аккаунт и скопируйте токен',
+    help: 'Получите токен на zerro.app/token — войдите через ZenMoney аккаунт и скопируйте токен. Токен действует 24 часа, потом нужно обновить.',
   },
 }
 
