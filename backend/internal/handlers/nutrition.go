@@ -29,9 +29,10 @@ type NutritionSummary struct {
 }
 
 type NutritionMealItem struct {
-	FoodName    string  `json:"food_name"`
-	Serving     string  `json:"serving"`
-	Calories    float64 `json:"calories"`
+	FoodName string                 `json:"food_name"`
+	Serving  string                 `json:"serving"`
+	Calories float64                `json:"calories"`
+	Macros   map[string]float64     `json:"macros,omitempty"`
 }
 
 type NutritionMeal struct {
@@ -114,7 +115,7 @@ func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 	// Load meal items for each day
 	for i := range days {
 		itemRows, err := h.db.Query(ctx, `
-			SELECT meal_type, food_name, serving_description, calories
+			SELECT meal_type, food_name, serving_description, calories, COALESCE(macros, '{}')
 			FROM nutrition_items
 			WHERE daily_id = $1
 			ORDER BY meal_type, calories DESC
@@ -129,9 +130,12 @@ func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 		for itemRows.Next() {
 			var mealType, foodName, serving string
 			var calories float64
-			if err := itemRows.Scan(&mealType, &foodName, &serving, &calories); err != nil {
+			var macrosJSON []byte
+			if err := itemRows.Scan(&mealType, &foodName, &serving, &calories, &macrosJSON); err != nil {
 				continue
 			}
+			var macros map[string]float64
+			json.Unmarshal(macrosJSON, &macros)
 			if _, ok := mealMap[mealType]; !ok {
 				mealMap[mealType] = &NutritionMeal{MealType: mealType, Items: []NutritionMealItem{}}
 				mealOrder = append(mealOrder, mealType)
@@ -140,6 +144,7 @@ func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 				FoodName: foodName,
 				Serving:  serving,
 				Calories: calories,
+				Macros:   macros,
 			})
 		}
 		itemRows.Close()

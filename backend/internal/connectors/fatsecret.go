@@ -254,9 +254,18 @@ type fsFoodEntry struct {
 	Carbohydrate           string `json:"carbohydrate"`
 	Protein                string `json:"protein"`
 	Fat                    string `json:"fat"`
-	Fiber                  string `json:"fiber"`
+	SaturatedFat           string `json:"saturated_fat"`
+	PolyunsaturatedFat     string `json:"polyunsaturated_fat"`
+	MonounsaturatedFat     string `json:"monounsaturated_fat"`
+	Cholesterol            string `json:"cholesterol"`
 	Sodium                 string `json:"sodium"`
+	Potassium              string `json:"potassium"`
+	Fiber                  string `json:"fiber"`
 	Sugar                  string `json:"sugar"`
+	VitaminA               string `json:"vitamin_a"`
+	VitaminC               string `json:"vitamin_c"`
+	Calcium                string `json:"calcium"`
+	Iron                   string `json:"iron"`
 }
 
 var fsMealNames = map[string]string{
@@ -372,12 +381,21 @@ func (c *FatSecretConnector) storeEntries(ctx context.Context, userID string, da
 		}
 		serving := fmt.Sprintf("%.0f %s", parseFloat(e.NumberOfUnits), e.MeasurementDescription)
 		macros, _ := json.Marshal(map[string]float64{
-			"protein": parseFloat(e.Protein),
-			"carbs":   parseFloat(e.Carbohydrate),
-			"fat":     parseFloat(e.Fat),
-			"fiber":   parseFloat(e.Fiber),
-			"sugar":   parseFloat(e.Sugar),
-			"sodium":  parseFloat(e.Sodium),
+			"protein":            parseFloat(e.Protein),
+			"carbs":              parseFloat(e.Carbohydrate),
+			"fat":                parseFloat(e.Fat),
+			"saturated_fat":      parseFloat(e.SaturatedFat),
+			"polyunsaturated_fat": parseFloat(e.PolyunsaturatedFat),
+			"monounsaturated_fat": parseFloat(e.MonounsaturatedFat),
+			"cholesterol":        parseFloat(e.Cholesterol),
+			"sodium":             parseFloat(e.Sodium),
+			"potassium":          parseFloat(e.Potassium),
+			"fiber":              parseFloat(e.Fiber),
+			"sugar":              parseFloat(e.Sugar),
+			"vitamin_a":          parseFloat(e.VitaminA),
+			"vitamin_c":          parseFloat(e.VitaminC),
+			"calcium":            parseFloat(e.Calcium),
+			"iron":               parseFloat(e.Iron),
 		})
 		c.db.Exec(ctx, `
 			INSERT INTO nutrition_items (daily_id, meal_type, food_name, serving_description, calories, macros)

@@ -84,12 +84,23 @@ function DayRow({ day }: { day: NutritionDay }) {
               <p className="text-xs font-semibold text-foreground mb-1">
                 {MEAL_LABELS[meal.meal_type] ?? meal.meal_type}
               </p>
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-1">
                 {meal.items.map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span className="truncate flex-1">{item.food_name}</span>
-                    <span className="ml-2 shrink-0 text-foreground/70">{item.serving}</span>
-                    <span className="ml-3 shrink-0 text-orange-400 tabular-nums">{item.calories.toFixed(0)} ккал</span>
+                  <div key={idx} className="flex flex-col gap-0.5">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="truncate flex-1">{item.food_name}</span>
+                      <span className="ml-2 shrink-0 text-foreground/70">{item.serving}</span>
+                      <span className="ml-3 shrink-0 text-orange-400 tabular-nums">{item.calories.toFixed(0)} ккал</span>
+                    </div>
+                    {item.macros && (item.macros.protein > 0 || item.macros.carbs > 0 || item.macros.fat > 0) && (
+                      <div className="flex gap-3 text-[10px] text-muted-foreground/60 ml-1">
+                        <span>Б {item.macros.protein?.toFixed(1)}г</span>
+                        <span>Ж {item.macros.fat?.toFixed(1)}г</span>
+                        <span>У {item.macros.carbs?.toFixed(1)}г</span>
+                        {item.macros.fiber > 0 && <span>Клетч {item.macros.fiber?.toFixed(1)}г</span>}
+                        {item.macros.sugar > 0 && <span>Сахар {item.macros.sugar?.toFixed(1)}г</span>}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

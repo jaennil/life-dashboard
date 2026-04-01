@@ -155,6 +155,7 @@ export interface NutritionMealItem {
   food_name: string
   serving: string
   calories: number
+  macros?: Record<string, number>
 }
 
 export interface NutritionMeal {
