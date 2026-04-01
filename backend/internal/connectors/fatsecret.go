@@ -228,8 +228,14 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 		}
 	}
 
+	_, err = c.db.Exec(ctx, `
+		INSERT INTO sync_state (source, last_synced_at, updated_at, user_id)
+		VALUES ('fatsecret', NOW(), NOW(), $1)
+		ON CONFLICT (source, user_id) DO UPDATE SET last_synced_at = NOW(), updated_at = NOW()
+	`, userID)
+
 	c.logger.Info().Msg("sync complete")
-	return nil
+	return err
 }
 
 // daysSinceEpoch returns FatSecret's date format: days since Jan 1, 1970

@@ -69,6 +69,12 @@ func (c *MFPConnector) Sync(ctx context.Context, userID string) error {
 		}
 	}
 
+	c.db.Exec(ctx, `
+		INSERT INTO sync_state (source, last_synced_at, updated_at, user_id)
+		VALUES ('myfitnesspal', NOW(), NOW(), $1)
+		ON CONFLICT (source, user_id) DO UPDATE SET last_synced_at = NOW(), updated_at = NOW()
+	`, userID)
+
 	c.logger.Info().Msg("sync complete")
 	return nil
 }
