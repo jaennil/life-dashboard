@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, type Integration } from '@/lib/api'
@@ -401,6 +402,7 @@ function TOTPSection() {
 export function Settings() {
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [loading, setLoading] = useState(true)
+  const location = useLocation()
 
   function load() {
     return api.getIntegrations()
@@ -410,7 +412,7 @@ export function Settings() {
 
   useEffect(() => {
     load().finally(() => setLoading(false))
-  }, [])
+  }, [location.key])
 
   async function handleToggle(name: string, enabled: boolean) {
     await api.toggleIntegration(name, enabled)
