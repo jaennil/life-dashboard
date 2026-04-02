@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
-import { ChevronDown, ChevronUp, Flame } from 'lucide-react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  AreaChart, Area, Legend, PieChart, Pie,
+} from 'recharts'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, type NutritionSummary, type NutritionDay } from '@/lib/api'
 
 const MEAL_LABELS: Record<string, string> = {
-  breakfast: 'Завтрак',
-  lunch: 'Обед',
-  dinner: 'Ужин',
-  snacks: 'Перекус',
-  other: 'Прочее',
+  breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', snacks: 'Перекус', other: 'Прочее',
 }
+
+const MACRO_COLORS = { protein: '#3b82f6', fat: '#f97316', carbs: '#10b981', fiber: '#8b5cf6' }
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
@@ -23,15 +24,12 @@ function fmtShort(iso: string) {
 
 const CALORIE_TARGET = 2000
 
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
-      <p className="font-medium text-foreground mb-1">{fmtDate(label)}</p>
-      <p className="text-orange-400">{payload[0]?.value?.toFixed(0)} ккал</p>
-    </div>
-  )
-}
+const PERIODS = [
+  { label: '7д', days: 7 },
+  { label: '14д', days: 14 },
+  { label: '30д', days: 30 },
+  { label: '90д', days: 90 },
+]
 
 function DayRow({ day }: { day: NutritionDay }) {
   const [open, setOpen] = useState(false)
@@ -46,9 +44,7 @@ function DayRow({ day }: { day: NutritionDay }) {
         disabled={!hasMeals}
         className="w-full px-5 py-3 flex items-center gap-3 hover:bg-muted/40 transition-colors text-left disabled:cursor-default"
       >
-        <div className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center text-base shrink-0">
-          🍽️
-        </div>
+        <div className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center text-base shrink-0">🍽️</div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-medium text-foreground">{fmtDate(day.date)}</p>
@@ -58,32 +54,24 @@ function DayRow({ day }: { day: NutritionDay }) {
           </div>
           <div className="flex items-center gap-3 mt-1.5">
             <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className={cn('h-full rounded-full', overTarget ? 'bg-rose-400' : 'bg-orange-400')}
-                style={{ width: `${pct}%` }}
-              />
+              <div className={cn('h-full rounded-full', overTarget ? 'bg-rose-400' : 'bg-orange-400')} style={{ width: `${pct}%` }} />
             </div>
             <div className="flex gap-2 text-xs text-muted-foreground shrink-0">
-              <span>Б {day.protein.toFixed(0)}г</span>
-              <span>Ж {day.fat.toFixed(0)}г</span>
-              <span>У {day.carbs.toFixed(0)}г</span>
+              <span className="text-blue-400">Б {day.protein.toFixed(0)}г</span>
+              <span className="text-orange-400">Ж {day.fat.toFixed(0)}г</span>
+              <span className="text-emerald-400">У {day.carbs.toFixed(0)}г</span>
+              {day.fiber > 0 && <span className="text-violet-400">К {day.fiber.toFixed(0)}г</span>}
             </div>
           </div>
         </div>
-        {hasMeals && (
-          open
-            ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" />
-            : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-        )}
+        {hasMeals && (open ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />)}
       </button>
 
       {open && hasMeals && (
         <div className="px-5 pb-3 flex flex-col gap-3">
           {day.meals.map(meal => (
             <div key={meal.meal_type}>
-              <p className="text-xs font-semibold text-foreground mb-1">
-                {MEAL_LABELS[meal.meal_type] ?? meal.meal_type}
-              </p>
+              <p className="text-xs font-semibold text-foreground mb-1">{MEAL_LABELS[meal.meal_type] ?? meal.meal_type}</p>
               <div className="flex flex-col gap-1">
                 {meal.items.map((item, idx) => (
                   <div key={idx} className="flex flex-col gap-0.5">
@@ -97,8 +85,9 @@ function DayRow({ day }: { day: NutritionDay }) {
                         <span>Б {item.macros.protein?.toFixed(1)}г</span>
                         <span>Ж {item.macros.fat?.toFixed(1)}г</span>
                         <span>У {item.macros.carbs?.toFixed(1)}г</span>
-                        {item.macros.fiber > 0 && <span>Клетч {item.macros.fiber?.toFixed(1)}г</span>}
-                        {item.macros.sugar > 0 && <span>Сахар {item.macros.sugar?.toFixed(1)}г</span>}
+                        {(item.macros.fiber ?? 0) > 0 && <span>Клетч {item.macros.fiber?.toFixed(1)}г</span>}
+                        {(item.macros.sugar ?? 0) > 0 && <span>Сахар {item.macros.sugar?.toFixed(1)}г</span>}
+                        {(item.macros.sodium ?? 0) > 0 && <span>Na {item.macros.sodium?.toFixed(0)}мг</span>}
                       </div>
                     )}
                   </div>
@@ -116,6 +105,8 @@ export function Nutrition() {
   const [summary, setSummary] = useState<NutritionSummary | null>(null)
   const [daily, setDaily] = useState<NutritionDay[]>([])
   const [loading, setLoading] = useState(true)
+  const [period, setPeriod] = useState(14)
+  const [mealFilter, setMealFilter] = useState('')
 
   useEffect(() => {
     Promise.all([api.getNutritionSummary(), api.getNutritionDaily()])
@@ -124,70 +115,204 @@ export function Nutrition() {
       .finally(() => setLoading(false))
   }, [])
 
-  const chartData = [...daily].reverse()
+  const chartData = [...daily].reverse().slice(-period)
+
+  // Macro averages for summary
+  const avgProtein = chartData.length ? chartData.reduce((s, d) => s + d.protein, 0) / chartData.length : 0
+  const avgFat = chartData.length ? chartData.reduce((s, d) => s + d.fat, 0) / chartData.length : 0
+  const avgCarbs = chartData.length ? chartData.reduce((s, d) => s + d.carbs, 0) / chartData.length : 0
+  const avgCalories = chartData.length ? chartData.reduce((s, d) => s + d.calories, 0) / chartData.length : 0
+
+  // Macro distribution pie
+  const macroPie = [
+    { name: 'Белки', value: avgProtein * 4, color: MACRO_COLORS.protein },
+    { name: 'Жиры', value: avgFat * 9, color: MACRO_COLORS.fat },
+    { name: 'Углеводы', value: avgCarbs * 4, color: MACRO_COLORS.carbs },
+  ].filter(m => m.value > 0)
+
+  // Meal distribution
+  const mealTotals: Record<string, number> = {}
+  chartData.forEach(d => d.meals.forEach(m => {
+    const cal = m.items.reduce((s, i) => s + i.calories, 0)
+    mealTotals[m.meal_type] = (mealTotals[m.meal_type] || 0) + cal
+  }))
+  const mealPie = Object.entries(mealTotals).map(([name, value]) => ({
+    name: MEAL_LABELS[name] || name, value: Math.round(value),
+  })).sort((a, b) => b.value - a.value)
+
+  const mealColors = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#f43f5e']
+
+  // Filtered daily
+  const filteredDaily = mealFilter
+    ? daily.map(d => ({ ...d, meals: d.meals.filter(m => m.meal_type === mealFilter) }))
+    : daily
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Питание</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Питание</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
+          </p>
+        </div>
+        <div className="flex gap-1">
+          {PERIODS.map(p => (
+            <button key={p.days} onClick={() => setPeriod(p.days)}
+              className={cn('px-3 py-1 text-xs rounded-lg transition-colors',
+                period === p.days ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent')}>
+              {p.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
-          { label: 'Сегодня', value: summary ? `${summary.today_kcal.toFixed(0)} ккал` : '—', color: 'bg-orange-500' },
-          { label: 'Ср. за 7 дней', value: summary ? `${summary.avg_calories.toFixed(0)} ккал` : '—', color: 'bg-amber-500' },
-          { label: 'Ср. белки', value: summary ? `${summary.avg_protein.toFixed(0)} г` : '—', color: 'bg-blue-500' },
-          { label: 'Ср. углеводы', value: summary ? `${summary.avg_carbs.toFixed(0)} г` : '—', color: 'bg-emerald-500' },
+          { label: 'Сегодня', value: summary ? `${summary.today_kcal.toFixed(0)}` : '—', unit: 'ккал', color: 'bg-orange-500' },
+          { label: `Ср. ккал/${period}д`, value: avgCalories.toFixed(0), unit: 'ккал', color: 'bg-amber-500' },
+          { label: 'Ср. белки', value: avgProtein.toFixed(0), unit: 'г', color: 'bg-blue-500' },
+          { label: 'Ср. жиры', value: avgFat.toFixed(0), unit: 'г', color: 'bg-orange-500' },
+          { label: 'Ср. углеводы', value: avgCarbs.toFixed(0), unit: 'г', color: 'bg-emerald-500' },
         ].map(card => (
-          <div key={card.label} className="rounded-xl border bg-card p-4 flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">{card.label}</span>
-              <div className={cn('flex items-center justify-center w-7 h-7 rounded-lg', card.color)}>
-                <Flame className="w-3.5 h-3.5 text-white" />
-              </div>
-            </div>
-            {loading
-              ? <div className="h-7 w-16 bg-muted rounded animate-pulse" />
-              : <div className="text-xl font-bold text-foreground">{card.value}</div>}
+          <div key={card.label} className="rounded-xl border bg-card p-4 flex flex-col gap-1">
+            <span className="text-[10px] text-muted-foreground">{card.label}</span>
+            {loading ? <div className="h-6 w-12 bg-muted rounded animate-pulse" /> : (
+              <div className="text-lg font-bold text-foreground">{card.value} <span className="text-xs font-normal text-muted-foreground">{card.unit}</span></div>
+            )}
           </div>
         ))}
       </div>
 
-      {/* Calorie chart */}
-      <div className="rounded-xl border bg-card p-5">
-        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Калории за 2 недели</h2>
-        {loading ? (
-          <div className="h-40 bg-muted rounded animate-pulse" />
-        ) : chartData.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-8">Нет данных. Подключи FatSecret в настройках.</p>
-        ) : (
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={chartData} barCategoryGap="35%">
-              <XAxis dataKey="date" tickFormatter={fmtShort} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={36} />
-              <Tooltip content={<CustomTooltip />} cursor={{ opacity: 0.1 }} />
-              <Bar dataKey="calories" radius={[4, 4, 0, 0]}>
-                {chartData.map((d, i) => (
-                  <Cell key={i} fill={d.calories > CALORIE_TARGET ? '#f87171' : '#f97316'} />
+      {/* Charts row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Calorie chart */}
+        <div className="rounded-xl border bg-card p-5">
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Калории</h2>
+          {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : chartData.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={chartData} barCategoryGap="25%">
+                <XAxis dataKey="date" tickFormatter={fmtShort} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={36} />
+                <Tooltip content={({ active, payload, label }: any) => active && payload?.length ? (
+                  <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
+                    <p className="font-medium text-foreground mb-1">{fmtDate(label)}</p>
+                    <p className="text-orange-400">{payload[0]?.value?.toFixed(0)} ккал</p>
+                  </div>
+                ) : null} cursor={{ opacity: 0.1 }} />
+                <Bar dataKey="calories" radius={[4, 4, 0, 0]}>
+                  {chartData.map((d, i) => <Cell key={i} fill={d.calories > CALORIE_TARGET ? '#f87171' : '#f97316'} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Macros trend */}
+        <div className="rounded-xl border bg-card p-5">
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">БЖУ тренд</h2>
+          {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : chartData.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={chartData}>
+                <XAxis dataKey="date" tickFormatter={fmtShort} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={30} />
+                <Tooltip content={({ active, payload, label }: any) => active && payload?.length ? (
+                  <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
+                    <p className="font-medium text-foreground mb-1">{fmtDate(label)}</p>
+                    {payload.map((p: any) => <p key={p.name} style={{ color: p.color }}>{p.name === 'protein' ? 'Белки' : p.name === 'fat' ? 'Жиры' : p.name === 'carbs' ? 'Углеводы' : 'Клетчатка'}: {p.value?.toFixed(0)}г</p>)}
+                  </div>
+                ) : null} />
+                <Legend formatter={v => v === 'protein' ? 'Белки' : v === 'fat' ? 'Жиры' : v === 'carbs' ? 'Углеводы' : 'Клетчатка'} wrapperStyle={{ fontSize: 11 }} />
+                <Area type="monotone" dataKey="protein" stroke={MACRO_COLORS.protein} fill={MACRO_COLORS.protein} fillOpacity={0.1} strokeWidth={2} />
+                <Area type="monotone" dataKey="fat" stroke={MACRO_COLORS.fat} fill={MACRO_COLORS.fat} fillOpacity={0.1} strokeWidth={2} />
+                <Area type="monotone" dataKey="carbs" stroke={MACRO_COLORS.carbs} fill={MACRO_COLORS.carbs} fillOpacity={0.1} strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* Pie charts row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        {/* Macro distribution */}
+        <div className="rounded-xl border bg-card p-5">
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Распределение БЖУ (ккал)</h2>
+          {loading || macroPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
+            <div className="flex items-center gap-6">
+              <div style={{ width: 160, height: 160, flexShrink: 0 }}>
+                <PieChart width={160} height={160}>
+                  <Pie data={macroPie} dataKey="value" cx={80} cy={80} innerRadius={45} outerRadius={72} paddingAngle={3}>
+                    {macroPie.map((m, i) => <Cell key={i} fill={m.color} />)}
+                  </Pie>
+                  <Tooltip formatter={(v: any) => `${Number(v).toFixed(0)} ккал`} />
+                </PieChart>
+              </div>
+              <div className="flex flex-col gap-2">
+                {macroPie.map(m => (
+                  <div key={m.name} className="flex items-center gap-2 text-xs">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: m.color }} />
+                    <span className="text-foreground">{m.name}</span>
+                    <span className="text-muted-foreground">{((m.value / macroPie.reduce((s, x) => s + x.value, 0)) * 100).toFixed(0)}%</span>
+                  </div>
                 ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Meal distribution */}
+        <div className="rounded-xl border bg-card p-5">
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Калории по приёмам пищи</h2>
+          {loading || mealPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
+            <div className="flex items-center gap-6">
+              <div style={{ width: 160, height: 160, flexShrink: 0 }}>
+                <PieChart width={160} height={160}>
+                  <Pie data={mealPie} dataKey="value" cx={80} cy={80} innerRadius={45} outerRadius={72} paddingAngle={3}>
+                    {mealPie.map((_, i) => <Cell key={i} fill={mealColors[i % mealColors.length]} />)}
+                  </Pie>
+                  <Tooltip formatter={(v: any) => `${v} ккал`} />
+                </PieChart>
+              </div>
+              <div className="flex flex-col gap-2">
+                {mealPie.map((m, i) => (
+                  <button key={m.name} onClick={() => setMealFilter(mealFilter === Object.keys(MEAL_LABELS).find(k => MEAL_LABELS[k] === m.name) ? '' : Object.keys(MEAL_LABELS).find(k => MEAL_LABELS[k] === m.name) || '')}
+                    className="flex items-center gap-2 text-xs hover:bg-accent/50 rounded px-1 py-0.5 transition-colors">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: mealColors[i % mealColors.length] }} />
+                    <span className="text-foreground">{m.name}</span>
+                    <span className="text-muted-foreground">{m.value} ккал</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Daily log */}
       <div className="rounded-xl border bg-card overflow-hidden">
-        <div className="px-5 py-4 border-b">
+        <div className="px-5 py-4 border-b flex items-center justify-between">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Дневник питания</h2>
+          <div className="flex gap-1">
+            <button onClick={() => setMealFilter('')}
+              className={cn('px-2 py-1 text-xs rounded-lg transition-colors', !mealFilter ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent')}>
+              Все
+            </button>
+            {Object.entries(MEAL_LABELS).map(([k, v]) => (
+              <button key={k} onClick={() => setMealFilter(mealFilter === k ? '' : k)}
+                className={cn('px-2 py-1 text-xs rounded-lg transition-colors', mealFilter === k ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent')}>
+                {v}
+              </button>
+            ))}
+          </div>
         </div>
         {loading ? (
           <div className="divide-y">
-            {Array.from({ length: 5 }).map((_, i) => (
+            {[1, 2, 3, 4, 5].map(i => (
               <div key={i} className="px-5 py-3 flex gap-3">
                 <div className="h-9 w-9 bg-muted rounded-xl animate-pulse shrink-0" />
                 <div className="flex-1 flex flex-col gap-1.5">
@@ -197,13 +322,11 @@ export function Nutrition() {
               </div>
             ))}
           </div>
-        ) : daily.length === 0 ? (
-          <div className="px-5 py-8 text-sm text-muted-foreground text-center">
-            Нет данных. Подключи FatSecret в настройках.
-          </div>
+        ) : filteredDaily.length === 0 ? (
+          <div className="px-5 py-8 text-sm text-muted-foreground text-center">Нет данных. Подключи FatSecret в настройках.</div>
         ) : (
           <div className="divide-y">
-            {daily.map(day => <DayRow key={day.date} day={day} />)}
+            {filteredDaily.map(day => <DayRow key={day.date} day={day} />)}
           </div>
         )}
       </div>
