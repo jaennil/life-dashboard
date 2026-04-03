@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth'
 const OAUTH_INTEGRATIONS: Record<string, string> = {
   strava: '/api/v1/auth/strava',
   fatsecret: '/api/v1/auth/fatsecret',
+  google_calendar: '/api/v1/auth/google',
 }
 
 const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.ReactNode }> = {
@@ -26,6 +27,7 @@ const ICONS: Record<string, string> = {
   hevy: '🏋️',
   zenmoney: '💰',
   myfitnesspal: '🥗',
+  google_calendar: '📅',
 }
 
 function fmtDate(iso: string | null) {

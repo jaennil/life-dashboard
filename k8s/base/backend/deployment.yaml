@@ -46,6 +46,12 @@ spec:
               value: https://lifedash.dubrovskih.ru/api/v1/auth/strava/callback
             - name: FATSECRET_REDIRECT_URI
               value: https://lifedash.dubrovskih.ru/api/v1/auth/fatsecret/callback
+            - name: GOOGLE_CLIENT_ID
+              value: "1088934787876-e9urhtih3crs40puu7ljvfdiqhdi9lek.apps.googleusercontent.com"
+            - name: GOOGLE_CLIENT_SECRET
+              value: "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"
+            - name: GOOGLE_REDIRECT_URI
+              value: https://lifedash.dubrovskih.ru/api/v1/auth/google/callback
             - name: AI_BASE_URL
               value: http://claude-code-api:8000
             - name: AI_MODEL

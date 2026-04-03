@@ -105,6 +105,16 @@ func main() {
 		log.Warn().Msg("fatsecret connector disabled: FATSECRET_CLIENT_ID not set")
 	}
 
+	var googleCalConn *connectors.GoogleCalendarConnector
+	gc := cfg.Connectors.GoogleCalendar
+	if gc.ClientID != "" && gc.ClientSecret != "" {
+		googleCalConn = connectors.NewGoogleCalendar(gc.ClientID, gc.ClientSecret, gc.RedirectURI, pool, log.Logger)
+		activeConnectors = append(activeConnectors, googleCalConn)
+		log.Info().Msg("google calendar connector enabled")
+	} else {
+		log.Warn().Msg("google calendar connector disabled: GOOGLE_CLIENT_ID not set")
+	}
+
 	// Scheduler
 	sched := scheduler.New(log.Logger)
 	for _, conn := range activeConnectors {
@@ -188,7 +198,7 @@ func main() {
 	r.Post("/api/v1/auth/login", usersHandler.Login)
 	r.Post("/api/v1/auth/logout", usersHandler.Logout)
 
-	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, zenmoney, log.Logger)
+	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, zenmoney, googleCalConn, log.Logger)
 
 	// Protected routes
 	r.Group(func(r chi.Router) {
@@ -207,7 +217,8 @@ func main() {
 			"hevy":         true,
 			"zenmoney":     true,
 			"myfitnesspal": mfpEnabled,
-			"fatsecret":    fsc.ClientID != "" && fsc.ClientSecret != "",
+			"fatsecret":        fsc.ClientID != "" && fsc.ClientSecret != "",
+			"google_calendar":  gc.ClientID != "" && gc.ClientSecret != "",
 		}
 		integrationsHandler := handlers.NewIntegrations(pool, activeConnectors, configuredMap, log.Logger)
 		r.Get("/api/v1/integrations", integrationsHandler.GetIntegrations)
@@ -253,6 +264,10 @@ func main() {
 			r.Get("/api/v1/auth/fatsecret/callback", authHandler.FatSecretCallback)
 			r.Get("/api/v1/auth/zenmoney", authHandler.ZenmoneyAuthorize)
 			r.Get("/api/v1/auth/zenmoney/callback", authHandler.ZenmoneyCallback)
+			if googleCalConn != nil {
+				r.Get("/api/v1/auth/google", authHandler.GoogleAuthorize)
+				r.Get("/api/v1/auth/google/callback", authHandler.GoogleCallback)
+			}
 		}
 		healthWebhook := handlers.NewHealthWebhook(pool, log.Logger)
 		r.Get("/api/v1/health/apikey", healthWebhook.GetAPIKey)

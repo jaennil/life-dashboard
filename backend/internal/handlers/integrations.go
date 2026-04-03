@@ -38,7 +38,7 @@ type integrationMeta struct {
 	countQuery  string
 }
 
-var knownIntegrations = []string{"strava", "hevy", "zenmoney", "myfitnesspal", "fatsecret"}
+var knownIntegrations = []string{"strava", "hevy", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar"}
 
 var integrationMeta_ = map[string]integrationMeta{
 	"strava": {
@@ -65,6 +65,11 @@ var integrationMeta_ = map[string]integrationMeta{
 		displayName: "FatSecret",
 		description: "Питание: дневник калорий и КБЖУ (официальный OAuth2)",
 		countQuery:  "SELECT COUNT(*) FROM nutrition_daily WHERE source='fatsecret' AND user_id = $1",
+	},
+	"google_calendar": {
+		displayName: "Google Calendar",
+		description: "События и встречи из Google Календаря",
+		countQuery:  "SELECT COUNT(*) FROM calendar_events WHERE user_id = $1",
 	},
 }
 

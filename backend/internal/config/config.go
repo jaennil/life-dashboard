@@ -13,11 +13,18 @@ type Config struct {
 }
 
 type ConnectorsConfig struct {
-	Hevy       HevyConfig       `mapstructure:"hevy"`
-	Strava     StravaConfig     `mapstructure:"strava"`
-	Zenmoney   ZenmoneyConfig   `mapstructure:"zenmoney"`
-	MFP        MFPConfig        `mapstructure:"mfp"`
-	FatSecret  FatSecretConfig  `mapstructure:"fatsecret"`
+	Hevy           HevyConfig           `mapstructure:"hevy"`
+	Strava         StravaConfig         `mapstructure:"strava"`
+	Zenmoney       ZenmoneyConfig       `mapstructure:"zenmoney"`
+	MFP            MFPConfig            `mapstructure:"mfp"`
+	FatSecret      FatSecretConfig      `mapstructure:"fatsecret"`
+	GoogleCalendar GoogleCalendarConfig `mapstructure:"google_calendar"`
+}
+
+type GoogleCalendarConfig struct {
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	RedirectURI  string `mapstructure:"redirect_uri"`
 }
 
 type FatSecretConfig struct {
@@ -101,6 +108,10 @@ func Load() (*Config, error) {
 	viper.BindEnv("connectors.zenmoney.redirect_uri", "ZENMONEY_REDIRECT_URI")
 	viper.SetDefault("connectors.strava.redirect_uri", "http://localhost:8080/api/v1/auth/strava/callback")
 	viper.SetDefault("connectors.zenmoney.redirect_uri", "http://localhost:8080/api/v1/auth/zenmoney/callback")
+	viper.BindEnv("connectors.google_calendar.client_id", "GOOGLE_CLIENT_ID")
+	viper.BindEnv("connectors.google_calendar.client_secret", "GOOGLE_CLIENT_SECRET")
+	viper.BindEnv("connectors.google_calendar.redirect_uri", "GOOGLE_REDIRECT_URI")
+	viper.SetDefault("connectors.google_calendar.redirect_uri", "http://localhost:8080/api/v1/auth/google/callback")
 
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.env", "development")

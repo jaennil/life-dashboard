@@ -10,18 +10,20 @@ import (
 )
 
 type AuthHandler struct {
-	strava    *connectors.StravaConnector
-	fatsecret *connectors.FatSecretConnector
-	zenmoney  *connectors.ZenmoneyConnector
-	logger    zerolog.Logger
+	strava         *connectors.StravaConnector
+	fatsecret      *connectors.FatSecretConnector
+	zenmoney       *connectors.ZenmoneyConnector
+	googleCalendar *connectors.GoogleCalendarConnector
+	logger         zerolog.Logger
 }
 
-func NewAuth(strava *connectors.StravaConnector, fatsecret *connectors.FatSecretConnector, zenmoney *connectors.ZenmoneyConnector, logger zerolog.Logger) *AuthHandler {
+func NewAuth(strava *connectors.StravaConnector, fatsecret *connectors.FatSecretConnector, zenmoney *connectors.ZenmoneyConnector, googleCalendar *connectors.GoogleCalendarConnector, logger zerolog.Logger) *AuthHandler {
 	return &AuthHandler{
-		strava:    strava,
-		fatsecret: fatsecret,
-		zenmoney:  zenmoney,
-		logger:    logger.With().Str("handler", "auth").Logger(),
+		strava:         strava,
+		fatsecret:      fatsecret,
+		zenmoney:       zenmoney,
+		googleCalendar: googleCalendar,
+		logger:         logger.With().Str("handler", "auth").Logger(),
 	}
 }
 
@@ -138,6 +140,39 @@ func (h *AuthHandler) ZenmoneyCallback(w http.ResponseWriter, r *http.Request) {
 			h.logger.Error().Err(err).Msg("zenmoney initial sync failed")
 		} else {
 			h.logger.Info().Msg("zenmoney initial sync complete")
+		}
+	}()
+
+	http.Redirect(w, r, "/settings", http.StatusFound)
+}
+// GET /api/v1/auth/google — redirect to Google OAuth
+func (h *AuthHandler) GoogleAuthorize(w http.ResponseWriter, r *http.Request) {
+	if h.googleCalendar == nil {
+		http.Error(w, "google calendar not configured", http.StatusServiceUnavailable)
+		return
+	}
+	http.Redirect(w, r, h.googleCalendar.AuthURL(""), http.StatusTemporaryRedirect)
+}
+
+// GET /api/v1/auth/google/callback — exchange code for tokens
+func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		http.Error(w, "missing code", http.StatusBadRequest)
+		return
+	}
+
+	gcUserID := r.Context().Value(middleware.UserIDKey).(string)
+	if err := h.googleCalendar.ExchangeCode(r.Context(), gcUserID, code); err != nil {
+		h.logger.Error().Err(err).Msg("google token exchange failed")
+		http.Error(w, "authorization failed", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().Str("user_id", gcUserID).Msg("google calendar authorized, starting sync")
+	go func() {
+		if err := h.googleCalendar.Sync(context.Background(), gcUserID); err != nil {
+			h.logger.Error().Err(err).Msg("google calendar initial sync failed")
 		}
 	}()
 
