@@ -376,8 +376,8 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string) (string, er
 	calRows, err := h.db.Query(ctx, `
 		SELECT title, start_time, end_time, all_day, COALESCE(location, '')
 		FROM calendar_events
-		WHERE user_id = $1 AND start_time >= NOW() - INTERVAL '1 day' AND start_time <= NOW() + INTERVAL '7 days'
-		ORDER BY start_time LIMIT 20
+		WHERE user_id = $1 AND start_time >= NOW() - INTERVAL '30 days' AND start_time <= NOW() + INTERVAL '30 days'
+		ORDER BY start_time LIMIT 50
 	`, userID)
 	if err == nil {
 		var calEvents []string
@@ -398,7 +398,7 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string) (string, er
 		}
 		calRows.Close()
 		if len(calEvents) > 0 {
-			sb.WriteString("\n=== КАЛЕНДАРЬ (ближайшие 7 дней) ===\n")
+			sb.WriteString("\n=== КАЛЕНДАРЬ (30 дней назад — 30 дней вперёд) ===\n")
 			for _, e := range calEvents {
 				sb.WriteString(e + "\n")
 			}
