@@ -55,7 +55,7 @@ spec:
             - name: UNLEASH_URL
               value: "http://unleash.unleash.svc.cluster.local:4242/api"
             - name: UNLEASH_API_TOKEN
-              value: "*:*.3fe70ab1dc9ad2fe0f8a4cf57ab04660b99e75365c4b5be66f01f8cd3b54bd2b"
+              value: "default:production.17a398cdf065310266cb7a75945cb7042b4af0760f63df23ef74fb7f"
             - name: AI_BASE_URL
               value: http://claude-code-api:8000
             - name: AI_MODEL
