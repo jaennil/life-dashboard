@@ -1,5 +1,6 @@
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS vector;
+-- Extensions must be created by superuser before running migrations
+-- CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Users
 CREATE TABLE users (
