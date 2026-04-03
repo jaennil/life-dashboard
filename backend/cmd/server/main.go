@@ -116,6 +116,10 @@ func main() {
 		log.Warn().Msg("google calendar connector disabled: GOOGLE_CLIENT_ID not set")
 	}
 
+	notionConn := connectors.NewNotion(pool, log.Logger)
+	activeConnectors = append(activeConnectors, notionConn)
+	log.Info().Msg("notion connector enabled")
+
 	// Scheduler
 	sched := scheduler.New(log.Logger)
 	for _, conn := range activeConnectors {
@@ -214,12 +218,13 @@ func main() {
 		r.Post("/api/v1/sync/{source}", syncHandler.TriggerSync)
 
 		configuredMap := map[string]bool{
-			"strava":       cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
-			"hevy":         true,
-			"zenmoney":     true,
-			"myfitnesspal": mfpEnabled,
+			"strava":           cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
+			"hevy":             true,
+			"zenmoney":         true,
+			"myfitnesspal":     mfpEnabled,
 			"fatsecret":        fsc.ClientID != "" && fsc.ClientSecret != "",
 			"google_calendar":  gc.ClientID != "" && gc.ClientSecret != "",
+			"notion":           true,
 		}
 		integrationsHandler := handlers.NewIntegrations(pool, activeConnectors, configuredMap, log.Logger)
 		r.Get("/api/v1/integrations", integrationsHandler.GetIntegrations)

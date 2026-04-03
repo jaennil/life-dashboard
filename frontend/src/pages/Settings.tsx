@@ -11,7 +11,7 @@ const OAUTH_INTEGRATIONS: Record<string, string> = {
   google_calendar: '/api/v1/auth/google',
 }
 
-const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.ReactNode }> = {
+const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.ReactNode; extraField?: { key: string; placeholder: string } }> = {
   zenmoney: {
     placeholder: 'Bearer токен от ZenMoney',
     help: <>Получите токен на <a href="https://zerro.app/token" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">zerro.app/token</a> — войдите через ZenMoney аккаунт и скопируйте токен. Токен действует 24 часа, потом нужно обновить.</>,
@@ -19,6 +19,11 @@ const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.Reac
   hevy: {
     placeholder: 'API ключ от Hevy',
     help: <>Откройте Hevy → Settings → API, скопируйте API Key.</>,
+  },
+  notion: {
+    placeholder: 'Notion Integration Token (ntn_...)',
+    help: <>1. Создайте <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Internal Integration</a> в Notion. 2. Скопируйте токен. 3. Откройте базу данных дневника в Notion → «...» → Connections → добавьте интеграцию. 4. Скопируйте ID базы данных из URL (32 символа после последнего /).</>,
+    extraField: { key: 'database_id', placeholder: 'Database ID (32 символа из URL)' },
   },
 }
 
@@ -28,6 +33,7 @@ const ICONS: Record<string, string> = {
   zenmoney: '💰',
   myfitnesspal: '🥗',
   google_calendar: '📅',
+  notion: '📓',
 }
 
 function fmtDate(iso: string | null) {
@@ -64,6 +70,7 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
   const [syncing, setSyncing] = useState(false)
   const [toggling, setToggling] = useState(false)
   const [tokenInput, setTokenInput] = useState('')
+  const [extraInput, setExtraInput] = useState('')
   const [showTokenForm, setShowTokenForm] = useState(false)
   const [savingToken, setSavingToken] = useState(false)
 
@@ -79,10 +86,13 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
 
   async function handleSaveToken() {
     if (!tokenInput.trim()) return
+    const extra = tokenMeta?.extraField ? extraInput.trim() : undefined
+    if (tokenMeta?.extraField && !extra) return
     setSavingToken(true)
     try {
-      await api.saveToken(integration.name, tokenInput.trim())
+      await api.saveToken(integration.name, tokenInput.trim(), extra ? { [tokenMeta!.extraField!.key]: extra } : undefined)
       setTokenInput('')
+      setExtraInput('')
       setShowTokenForm(false)
       onRefresh()
     } catch { /* ignore */ } finally {
@@ -181,18 +191,27 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
       {showTokenForm && tokenMeta && (
         <div className="flex flex-col gap-2 border-t pt-3">
           <p className="text-xs text-muted-foreground">{tokenMeta.help}</p>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2">
             <input
               type="text"
               value={tokenInput}
               onChange={e => setTokenInput(e.target.value)}
               placeholder={tokenMeta.placeholder}
-              className="flex-1 rounded-lg border bg-background px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring"
+              className="rounded-lg border bg-background px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring"
             />
+            {tokenMeta.extraField && (
+              <input
+                type="text"
+                value={extraInput}
+                onChange={e => setExtraInput(e.target.value)}
+                placeholder={tokenMeta.extraField.placeholder}
+                className="rounded-lg border bg-background px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring"
+              />
+            )}
             <button
               onClick={handleSaveToken}
-              disabled={savingToken || !tokenInput.trim()}
-              className="rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              disabled={savingToken || !tokenInput.trim() || (!!tokenMeta.extraField && !extraInput.trim())}
+              className="rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors self-start"
             >
               {savingToken ? '...' : 'Сохранить'}
             </button>

@@ -372,6 +372,47 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string) (string, er
 		mealRows.Close()
 	}
 
+	// === ДНЕВНИК ===
+	journalRows, err := h.db.Query(ctx, `
+		SELECT date, title, content, tags, mood
+		FROM journal_entries
+		WHERE user_id = $1 AND date >= NOW() - INTERVAL '30 days'
+		ORDER BY date DESC LIMIT 20
+	`, userID)
+	if err == nil {
+		var journalEntries []string
+		for journalRows.Next() {
+			var date time.Time
+			var title, content string
+			var tags []string
+			var mood *int
+			if journalRows.Scan(&date, &title, &content, &tags, &mood) == nil {
+				entry := fmt.Sprintf("  %s: %s", date.Format("02.01"), title)
+				if mood != nil {
+					entry += fmt.Sprintf(" (настроение: %d/10)", *mood)
+				}
+				if len(tags) > 0 {
+					entry += " [" + strings.Join(tags, ", ") + "]"
+				}
+				// Truncate content for context (max 300 chars)
+				if len(content) > 300 {
+					content = content[:300] + "..."
+				}
+				if content != "" {
+					entry += "\n    " + strings.ReplaceAll(content, "\n", "\n    ")
+				}
+				journalEntries = append(journalEntries, entry)
+			}
+		}
+		journalRows.Close()
+		if len(journalEntries) > 0 {
+			sb.WriteString("\n=== ДНЕВНИК (последние 30 дней) ===\n")
+			for _, e := range journalEntries {
+				sb.WriteString(e + "\n")
+			}
+		}
+	}
+
 	// === КАЛЕНДАРЬ ===
 	calRows, err := h.db.Query(ctx, `
 		SELECT title, start_time, end_time, all_day, COALESCE(location, '')

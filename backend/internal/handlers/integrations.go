@@ -38,7 +38,7 @@ type integrationMeta struct {
 	countQuery  string
 }
 
-var knownIntegrations = []string{"strava", "hevy", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar"}
+var knownIntegrations = []string{"strava", "hevy", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion"}
 
 var integrationMeta_ = map[string]integrationMeta{
 	"strava": {
@@ -70,6 +70,11 @@ var integrationMeta_ = map[string]integrationMeta{
 		displayName: "Google Calendar",
 		description: "События и встречи из Google Календаря",
 		countQuery:  "SELECT COUNT(*) FROM calendar_events WHERE user_id = $1",
+	},
+	"notion": {
+		displayName: "Notion Journal",
+		description: "Личный дневник из Notion",
+		countQuery:  "SELECT COUNT(*) FROM journal_entries WHERE source='notion' AND user_id = $1",
 	},
 }
 
@@ -207,7 +212,8 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 	name := r.PathValue("name")
 
 	var body struct {
-		Token string `json:"token"`
+		Token      string `json:"token"`
+		DatabaseID string `json:"database_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Token == "" {
 		http.Error(w, "token is required", http.StatusBadRequest)
@@ -217,12 +223,18 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	userID := ctx.Value(authmw.UserIDKey).(string)
 
+	// Store database_id in athlete_id column for integrations that need it (e.g. Notion)
+	var athleteID *string
+	if body.DatabaseID != "" {
+		athleteID = &body.DatabaseID
+	}
+
 	_, err := h.db.Exec(ctx, `
-		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, updated_at, user_id)
-		VALUES ($1, $2, '', NOW() + INTERVAL '100 years', NOW(), $3)
+		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, athlete_id, updated_at, user_id)
+		VALUES ($1, $2, '', NOW() + INTERVAL '100 years', $4, NOW(), $3)
 		ON CONFLICT (source, user_id) DO UPDATE SET
-			access_token = $2, updated_at = NOW()
-	`, name, body.Token, userID)
+			access_token = $2, athlete_id = COALESCE($4, oauth_tokens.athlete_id), updated_at = NOW()
+	`, name, body.Token, userID, athleteID)
 	if err != nil {
 		h.logger.Error().Err(err).Str("source", name).Msg("save token failed")
 		http.Error(w, "internal error", http.StatusInternalServerError)
