@@ -372,6 +372,39 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string) (string, er
 		mealRows.Close()
 	}
 
+	// === КАЛЕНДАРЬ ===
+	calRows, err := h.db.Query(ctx, `
+		SELECT title, start_time, end_time, all_day, COALESCE(location, '')
+		FROM calendar_events
+		WHERE user_id = $1 AND start_time >= NOW() - INTERVAL '1 day' AND start_time <= NOW() + INTERVAL '7 days'
+		ORDER BY start_time LIMIT 20
+	`, userID)
+	if err == nil {
+		var calEvents []string
+		for calRows.Next() {
+			var title, location string
+			var startTime, endTime time.Time
+			var allDay bool
+			if calRows.Scan(&title, &startTime, &endTime, &allDay, &location) == nil {
+				if allDay {
+					calEvents = append(calEvents, fmt.Sprintf("  %s: %s (весь день)%s",
+						startTime.Format("02.01"), title, func() string { if location != "" { return " @ " + location }; return "" }()))
+				} else {
+					calEvents = append(calEvents, fmt.Sprintf("  %s %s-%s: %s%s",
+						startTime.Format("02.01"), startTime.Format("15:04"), endTime.Format("15:04"),
+						title, func() string { if location != "" { return " @ " + location }; return "" }()))
+				}
+			}
+		}
+		calRows.Close()
+		if len(calEvents) > 0 {
+			sb.WriteString("\n=== КАЛЕНДАРЬ (ближайшие 7 дней) ===\n")
+			for _, e := range calEvents {
+				sb.WriteString(e + "\n")
+			}
+		}
+	}
+
 	// === ПОГОДА ===
 	if h.weather != nil {
 		if wd, err := h.weather.Fetch(0, 0, ""); err == nil {
