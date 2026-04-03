@@ -56,6 +56,12 @@ spec:
               value: "http://unleash.unleash.svc.cluster.local:4242/api"
             - name: UNLEASH_API_TOKEN
               value: "default:production.17a398cdf065310266cb7a75945cb7042b4af0760f63df23ef74fb7f"
+            - name: NOTION_CLIENT_ID
+              value: "337d872b-594c-815a-aff5-0037c968a909"
+            - name: NOTION_CLIENT_SECRET
+              value: "secret_2uzkS12tU7o0yD6T7zP3FSCyqbTIu8BQgrgKyIIUGUA"
+            - name: NOTION_REDIRECT_URI
+              value: https://lifedash.dubrovskih.ru/api/v1/auth/notion/callback
             - name: AI_BASE_URL
               value: http://claude-code-api:8000
             - name: AI_MODEL
