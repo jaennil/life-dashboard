@@ -14,15 +14,17 @@ type AuthHandler struct {
 	fatsecret      *connectors.FatSecretConnector
 	zenmoney       *connectors.ZenmoneyConnector
 	googleCalendar *connectors.GoogleCalendarConnector
+	notion         *connectors.NotionConnector
 	logger         zerolog.Logger
 }
 
-func NewAuth(strava *connectors.StravaConnector, fatsecret *connectors.FatSecretConnector, zenmoney *connectors.ZenmoneyConnector, googleCalendar *connectors.GoogleCalendarConnector, logger zerolog.Logger) *AuthHandler {
+func NewAuth(strava *connectors.StravaConnector, fatsecret *connectors.FatSecretConnector, zenmoney *connectors.ZenmoneyConnector, googleCalendar *connectors.GoogleCalendarConnector, notion *connectors.NotionConnector, logger zerolog.Logger) *AuthHandler {
 	return &AuthHandler{
 		strava:         strava,
 		fatsecret:      fatsecret,
 		zenmoney:       zenmoney,
 		googleCalendar: googleCalendar,
+		notion:         notion,
 		logger:         logger.With().Str("handler", "auth").Logger(),
 	}
 }
@@ -145,6 +147,42 @@ func (h *AuthHandler) ZenmoneyCallback(w http.ResponseWriter, r *http.Request) {
 
 	http.Redirect(w, r, "/settings", http.StatusFound)
 }
+
+// GET /api/v1/auth/notion — redirect to Notion OAuth
+func (h *AuthHandler) NotionAuthorize(w http.ResponseWriter, r *http.Request) {
+	if h.notion == nil {
+		http.Error(w, "notion not configured", http.StatusServiceUnavailable)
+		return
+	}
+	http.Redirect(w, r, h.notion.AuthURL(""), http.StatusTemporaryRedirect)
+}
+
+// GET /api/v1/auth/notion/callback — exchange code for tokens
+func (h *AuthHandler) NotionCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		h.logger.Error().Str("error", r.URL.Query().Get("error")).Msg("notion callback missing code")
+		http.Error(w, "missing code", http.StatusBadRequest)
+		return
+	}
+
+	notionUserID := r.Context().Value(middleware.UserIDKey).(string)
+	if err := h.notion.ExchangeCode(r.Context(), notionUserID, code); err != nil {
+		h.logger.Error().Err(err).Msg("notion token exchange failed")
+		http.Error(w, "authorization failed", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().Str("user_id", notionUserID).Msg("notion authorized, starting sync")
+	go func() {
+		if err := h.notion.Sync(context.Background(), notionUserID); err != nil {
+			h.logger.Error().Err(err).Msg("notion initial sync failed")
+		}
+	}()
+
+	http.Redirect(w, r, "/settings", http.StatusFound)
+}
+
 // GET /api/v1/auth/google — redirect to Google OAuth
 func (h *AuthHandler) GoogleAuthorize(w http.ResponseWriter, r *http.Request) {
 	if h.googleCalendar == nil {

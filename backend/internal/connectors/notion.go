@@ -86,17 +86,129 @@ type notionToDo struct {
 // ---- Connector ----
 
 type NotionConnector struct {
-	db     *pgxpool.Pool
-	client *http.Client
-	logger zerolog.Logger
+	clientID     string
+	clientSecret string
+	redirectURI  string
+	db           *pgxpool.Pool
+	client       *http.Client
+	logger       zerolog.Logger
 }
 
-func NewNotion(db *pgxpool.Pool, logger zerolog.Logger) *NotionConnector {
+func NewNotion(clientID, clientSecret, redirectURI string, db *pgxpool.Pool, logger zerolog.Logger) *NotionConnector {
 	return &NotionConnector{
-		db:     db,
-		client: &http.Client{Timeout: 30 * time.Second},
-		logger: logger.With().Str("connector", "notion").Logger(),
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		redirectURI:  redirectURI,
+		db:           db,
+		client:       &http.Client{Timeout: 30 * time.Second},
+		logger:       logger.With().Str("connector", "notion").Logger(),
 	}
+}
+
+func (n *NotionConnector) AuthURL(state string) string {
+	return fmt.Sprintf("https://api.notion.com/v1/oauth/authorize?client_id=%s&response_type=code&owner=user&redirect_uri=%s",
+		n.clientID, n.redirectURI)
+}
+
+func (n *NotionConnector) ExchangeCode(ctx context.Context, userID, code string) error {
+	body := fmt.Sprintf(`{"grant_type":"authorization_code","code":"%s","redirect_uri":"%s"}`, code, n.redirectURI)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.notion.com/v1/oauth/token", strings.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.SetBasicAuth(n.clientID, n.clientSecret)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("token exchange request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("notion oauth token exchange returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		AccessToken   string `json:"access_token"`
+		WorkspaceName string `json:"workspace_name"`
+		WorkspaceID   string `json:"workspace_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode token response: %w", err)
+	}
+
+	n.logger.Info().Str("workspace", result.WorkspaceName).Msg("notion oauth token received")
+
+	_, err = n.db.Exec(ctx, `
+		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, updated_at, user_id)
+		VALUES ('notion', $1, '', NOW() + INTERVAL '100 years', NOW(), $2)
+		ON CONFLICT (source, user_id) DO UPDATE SET
+			access_token = $1, updated_at = NOW()
+	`, result.AccessToken, userID)
+	if err != nil {
+		return fmt.Errorf("save notion token: %w", err)
+	}
+
+	// Auto-discover journal database
+	if err := n.autoDiscoverDatabase(ctx, userID, result.AccessToken); err != nil {
+		n.logger.Warn().Err(err).Msg("auto-discover database failed, user can set manually")
+	}
+
+	_, err = n.db.Exec(ctx, `
+		INSERT INTO sync_state (source, enabled, updated_at, user_id) VALUES ('notion', true, NOW(), $1)
+		ON CONFLICT (source, user_id) DO UPDATE SET enabled = true, updated_at = NOW()
+	`, userID)
+
+	return err
+}
+
+func (n *NotionConnector) autoDiscoverDatabase(ctx context.Context, userID, token string) error {
+	// Search for databases the user shared with the integration
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		notionAPIBase+"/search",
+		strings.NewReader(`{"filter":{"value":"database","property":"object"},"page_size":10}`))
+	if err != nil {
+		return err
+	}
+	n.setHeaders(req, token)
+
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Results []struct {
+			ID    string `json:"id"`
+			Title []struct {
+				PlainText string `json:"plain_text"`
+			} `json:"title"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+
+	if len(result.Results) == 0 {
+		return fmt.Errorf("no databases found")
+	}
+
+	// Use the first database found
+	dbID := result.Results[0].ID
+	dbTitle := ""
+	if len(result.Results[0].Title) > 0 {
+		dbTitle = result.Results[0].Title[0].PlainText
+	}
+	n.logger.Info().Str("database_id", dbID).Str("title", dbTitle).Msg("auto-discovered notion database")
+
+	_, err = n.db.Exec(ctx, `
+		UPDATE oauth_tokens SET athlete_id = $1 WHERE source = 'notion' AND user_id = $2
+	`, dbID, userID)
+	return err
 }
 
 func (n *NotionConnector) Name() string { return "notion" }

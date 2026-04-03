@@ -116,9 +116,15 @@ func main() {
 		log.Warn().Msg("google calendar connector disabled: GOOGLE_CLIENT_ID not set")
 	}
 
-	notionConn := connectors.NewNotion(pool, log.Logger)
+	nc := cfg.Connectors.Notion
+	var notionConn *connectors.NotionConnector
+	notionConn = connectors.NewNotion(nc.ClientID, nc.ClientSecret, nc.RedirectURI, pool, log.Logger)
 	activeConnectors = append(activeConnectors, notionConn)
-	log.Info().Msg("notion connector enabled")
+	if nc.ClientID != "" && nc.ClientSecret != "" {
+		log.Info().Msg("notion connector enabled (OAuth + token)")
+	} else {
+		log.Info().Msg("notion connector enabled (token-only, no OAuth)")
+	}
 
 	// Scheduler
 	sched := scheduler.New(log.Logger)
@@ -203,7 +209,7 @@ func main() {
 	r.Post("/api/v1/auth/login", usersHandler.Login)
 	r.Post("/api/v1/auth/logout", usersHandler.Logout)
 
-	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, zenmoney, googleCalConn, log.Logger)
+	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, zenmoney, googleCalConn, notionConn, log.Logger)
 
 	// Protected routes
 	r.Group(func(r chi.Router) {
@@ -291,6 +297,10 @@ func main() {
 				r.Get("/api/v1/auth/google", authHandler.GoogleAuthorize)
 				r.Get("/api/v1/auth/google/callback", authHandler.GoogleCallback)
 			}
+		}
+		if nc.ClientID != "" && nc.ClientSecret != "" {
+			r.Get("/api/v1/auth/notion", authHandler.NotionAuthorize)
+			r.Get("/api/v1/auth/notion/callback", authHandler.NotionCallback)
 		}
 		healthWebhook := handlers.NewHealthWebhook(pool, log.Logger)
 		r.Get("/api/v1/health/apikey", healthWebhook.GetAPIKey)

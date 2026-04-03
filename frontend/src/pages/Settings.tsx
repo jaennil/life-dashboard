@@ -9,6 +9,7 @@ const OAUTH_INTEGRATIONS: Record<string, string> = {
   strava: '/api/v1/auth/strava',
   fatsecret: '/api/v1/auth/fatsecret',
   google_calendar: '/api/v1/auth/google',
+  notion: '/api/v1/auth/notion',
 }
 
 const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.ReactNode; extraField?: { key: string; placeholder: string } }> = {
@@ -102,7 +103,8 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
 
   const isOAuth = !!OAUTH_INTEGRATIONS[integration.name]
   const tokenMeta = TOKEN_INTEGRATIONS[integration.name]
-  const isConnected = integration.enabled && (!isOAuth || integration.record_count > 0)
+  const isDual = isOAuth && !!tokenMeta
+  const isConnected = integration.enabled && ((!isOAuth && !tokenMeta) || integration.record_count > 0 || integration.last_sync_at)
 
   const statusIcon = !integration.configured
     ? <AlertCircle className="w-4 h-4 text-muted-foreground" />
@@ -130,7 +132,7 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
           </div>
         </div>
 
-        {isOAuth ? (
+        {isOAuth && !isDual ? (
           isConnected ? (
             <button
               onClick={handleToggle}
@@ -149,6 +151,34 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
               <ExternalLink className="w-3 h-3" />
               Подключить
             </a>
+          )
+        ) : isDual ? (
+          isConnected ? (
+            <button
+              onClick={handleToggle}
+              disabled={toggling}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10 transition-colors shrink-0"
+            >
+              <Power className="w-3 h-3" />
+              {toggling ? '...' : 'Отключить'}
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href={OAUTH_INTEGRATIONS[integration.name]}
+                onClick={() => { if (!integration.enabled) handleToggle() }}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
+              >
+                <ExternalLink className="w-3 h-3" />
+                OAuth
+              </a>
+              <button
+                onClick={() => setShowTokenForm(!showTokenForm)}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:bg-muted/50 transition-colors"
+              >
+                Токен
+              </button>
+            </div>
           )
         ) : tokenMeta ? (
           isConnected ? (
