@@ -10,6 +10,13 @@ type Config struct {
 	Log        LogConfig        `mapstructure:"log"`
 	Connectors ConnectorsConfig `mapstructure:"connectors"`
 	Weather    WeatherConfig    `mapstructure:"weather"`
+	Unleash    UnleashConfig    `mapstructure:"unleash"`
+}
+
+type UnleashConfig struct {
+	URL      string `mapstructure:"url"`
+	APIToken string `mapstructure:"api_token"`
+	AppName  string `mapstructure:"app_name"`
 }
 
 type ConnectorsConfig struct {
@@ -112,6 +119,10 @@ func Load() (*Config, error) {
 	viper.BindEnv("connectors.google_calendar.client_secret", "GOOGLE_CLIENT_SECRET")
 	viper.BindEnv("connectors.google_calendar.redirect_uri", "GOOGLE_REDIRECT_URI")
 	viper.SetDefault("connectors.google_calendar.redirect_uri", "http://localhost:8080/api/v1/auth/google/callback")
+	viper.BindEnv("unleash.url", "UNLEASH_URL")
+	viper.BindEnv("unleash.api_token", "UNLEASH_API_TOKEN")
+	viper.SetDefault("unleash.url", "http://unleash.unleash.svc.cluster.local:4242/api")
+	viper.SetDefault("unleash.app_name", "life-dashboard")
 
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.env", "development")

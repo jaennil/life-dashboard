@@ -14,6 +14,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	unleashclient "github.com/Unleash/unleash-client-go/v4"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -252,7 +253,24 @@ func main() {
 		weatherHandler := handlers.NewWeather(cfg.Weather.Lat, cfg.Weather.Lon, cfg.Weather.City, log.Logger)
 		r.Get("/api/v1/weather", weatherHandler.GetWeather)
 
-		aiHandler := handlers.NewAI(pool, cfg.AI.BaseURL, cfg.AI.Model, cfg.AI.APIKey, weatherHandler, log.Logger)
+		// Unleash feature flags
+		var unleashClient *unleashclient.Client
+		if cfg.Unleash.URL != "" && cfg.Unleash.APIToken != "" {
+			var err error
+			unleashClient, err = unleashclient.NewClient(
+				unleashclient.WithUrl(cfg.Unleash.URL),
+				unleashclient.WithCustomHeaders(http.Header{"Authorization": {cfg.Unleash.APIToken}}),
+				unleashclient.WithAppName(cfg.Unleash.AppName),
+				unleashclient.WithRefreshInterval(10),
+			)
+			if err != nil {
+				log.Warn().Err(err).Msg("unleash client failed to initialize")
+			} else {
+				log.Info().Str("url", cfg.Unleash.URL).Msg("unleash client initialized")
+			}
+		}
+
+		aiHandler := handlers.NewAI(pool, cfg.AI.BaseURL, cfg.AI.Model, cfg.AI.APIKey, weatherHandler, unleashClient, log.Logger)
 		r.Post("/api/v1/ai/chat", aiHandler.Chat)
 
 		if stravaConn != nil {

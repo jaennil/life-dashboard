@@ -11,26 +11,29 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	unleashclient "github.com/Unleash/unleash-client-go/v4"
 	"github.com/rs/zerolog"
 	authmw "life-dashboard/internal/middleware"
 )
 
 type AIHandler struct {
-	db      *pgxpool.Pool
-	baseURL string
-	model   string
-	apiKey  string
-	weather *WeatherHandler
-	logger  zerolog.Logger
+	db       *pgxpool.Pool
+	baseURL  string
+	model    string
+	apiKey   string
+	weather  *WeatherHandler
+	unleash  *unleashclient.Client
+	logger   zerolog.Logger
 }
 
-func NewAI(db *pgxpool.Pool, baseURL, model, apiKey string, weather *WeatherHandler, logger zerolog.Logger) *AIHandler {
+func NewAI(db *pgxpool.Pool, baseURL, model, apiKey string, weather *WeatherHandler, unleashClient *unleashclient.Client, logger zerolog.Logger) *AIHandler {
 	return &AIHandler{
 		db:      db,
 		baseURL: strings.TrimRight(baseURL, "/"),
 		model:   model,
 		apiKey:  apiKey,
 		weather: weather,
+		unleash: unleashClient,
 		logger:  logger.With().Str("handler", "ai").Logger(),
 	}
 }
@@ -46,6 +49,11 @@ type ChatRequest struct {
 }
 
 func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
+	if h.unleash != nil && !h.unleash.IsEnabled("ai-chat") {
+		http.Error(w, "AI чат временно отключён", http.StatusForbidden)
+		return
+	}
+
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
