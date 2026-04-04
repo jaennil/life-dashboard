@@ -232,8 +232,10 @@ func (n *NotionConnector) loadCredentials(ctx context.Context, userID string) (a
 		userID,
 	).Scan(&apiToken, &databaseID)
 	if err != nil {
-		return "", "", fmt.Errorf("no Notion credentials — add your Notion token and database ID in Settings")
+		n.logger.Error().Err(err).Str("user_id", userID).Msg("loadCredentials query failed")
+		return "", "", fmt.Errorf("no Notion credentials — add your Notion token and database ID in Settings: %w", err)
 	}
+	n.logger.Info().Str("user_id", userID).Str("database_id", databaseID).Bool("has_token", apiToken != "").Msg("loaded notion credentials")
 	if databaseID == "" {
 		return "", "", fmt.Errorf("no Notion database ID configured")
 	}
