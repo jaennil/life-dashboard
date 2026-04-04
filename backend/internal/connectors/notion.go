@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -106,14 +107,26 @@ func NewNotion(clientID, clientSecret, redirectURI string, db *pgxpool.Pool, log
 }
 
 func (n *NotionConnector) AuthURL(state string) string {
-	return fmt.Sprintf("https://api.notion.com/v1/oauth/authorize?client_id=%s&response_type=code&owner=user&redirect_uri=%s",
-		n.clientID, n.redirectURI)
+	params := url.Values{
+		"client_id":     {n.clientID},
+		"response_type": {"code"},
+		"owner":         {"user"},
+		"redirect_uri":  {n.redirectURI},
+	}
+	return "https://api.notion.com/v1/oauth/authorize?" + params.Encode()
 }
 
 func (n *NotionConnector) ExchangeCode(ctx context.Context, userID, code string) error {
-	body := fmt.Sprintf(`{"grant_type":"authorization_code","code":"%s","redirect_uri":"%s"}`, code, n.redirectURI)
+	payload := map[string]string{
+		"grant_type":   "authorization_code",
+		"code":         code,
+		"redirect_uri": n.redirectURI,
+	}
+	bodyBytes, _ := json.Marshal(payload)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.notion.com/v1/oauth/token", strings.NewReader(body))
+	n.logger.Info().Str("redirect_uri", n.redirectURI).Str("client_id", n.clientID).Msg("exchanging notion oauth code")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.notion.com/v1/oauth/token", strings.NewReader(string(bodyBytes)))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
