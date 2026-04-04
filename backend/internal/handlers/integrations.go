@@ -223,18 +223,16 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	userID := ctx.Value(authmw.UserIDKey).(string)
 
-	// Store database_id in athlete_id column for integrations that need it (e.g. Notion)
-	var athleteID *string
-	if body.DatabaseID != "" {
-		athleteID = &body.DatabaseID
-	}
-
 	_, err := h.db.Exec(ctx, `
-		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, athlete_id, updated_at, user_id)
-		VALUES ($1, $2, '', NOW() + INTERVAL '100 years', $4, NOW(), $3)
+		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, updated_at, user_id)
+		VALUES ($1, $2, '', NOW() + INTERVAL '100 years', NOW(), $3)
 		ON CONFLICT (source, user_id) DO UPDATE SET
-			access_token = $2, athlete_id = COALESCE($4, oauth_tokens.athlete_id), updated_at = NOW()
-	`, name, body.Token, userID, athleteID)
+			access_token = $2, updated_at = NOW()
+	`, name, body.Token, userID)
+	if err == nil && body.DatabaseID != "" {
+		h.db.Exec(ctx, `UPDATE oauth_tokens SET athlete_id = $1 WHERE source = $2 AND user_id = $3`,
+			body.DatabaseID, name, userID)
+	}
 	if err != nil {
 		h.logger.Error().Err(err).Str("source", name).Msg("save token failed")
 		http.Error(w, "internal error", http.StatusInternalServerError)
