@@ -227,13 +227,17 @@ func (n *NotionConnector) autoDiscoverDatabase(ctx context.Context, userID, toke
 func (n *NotionConnector) Name() string { return "notion" }
 
 func (n *NotionConnector) loadCredentials(ctx context.Context, userID string) (apiToken string, databaseID string, err error) {
+	var dbID *string
 	err = n.db.QueryRow(ctx,
-		`SELECT access_token, COALESCE(athlete_id, '') FROM oauth_tokens WHERE source = 'notion' AND user_id = $1`,
+		`SELECT access_token, athlete_id FROM oauth_tokens WHERE source = 'notion' AND user_id = $1`,
 		userID,
-	).Scan(&apiToken, &databaseID)
+	).Scan(&apiToken, &dbID)
 	if err != nil {
 		n.logger.Error().Err(err).Str("user_id", userID).Msg("loadCredentials query failed")
-		return "", "", fmt.Errorf("no Notion credentials — add your Notion token and database ID in Settings: %w", err)
+		return "", "", fmt.Errorf("no Notion credentials — add your Notion token and database ID in Settings")
+	}
+	if dbID != nil {
+		databaseID = *dbID
 	}
 	n.logger.Info().Str("user_id", userID).Str("database_id", databaseID).Bool("has_token", apiToken != "").Msg("loaded notion credentials")
 	if databaseID == "" {
