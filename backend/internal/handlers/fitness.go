@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -40,24 +41,35 @@ type Activity struct {
 type WorkoutSet struct {
 	ExerciseName     string   `json:"exercise_name"`
 	ExerciseCategory string   `json:"exercise_category"`
+	ExerciseIndex    int      `json:"exercise_index"`
 	SetIndex         int      `json:"set_index"`
 	SetType          string   `json:"set_type"`
 	WeightKg         *float64 `json:"weight_kg"`
 	Reps             *int     `json:"reps"`
+	DistanceMeters   *float64 `json:"distance_meters"`
+	DurationSeconds  *int     `json:"duration_seconds"`
+	RPE              *float64 `json:"rpe"`
 }
 
 type WorkoutExercise struct {
-	Name     string       `json:"name"`
-	Category string       `json:"category"`
-	Sets     []WorkoutSet `json:"sets"`
+	Index      int          `json:"index"`
+	Name       string       `json:"name"`
+	Category   string       `json:"category"`
+	Notes      string       `json:"notes"`
+	TemplateID string       `json:"template_id"`
+	Sets       []WorkoutSet `json:"sets"`
 }
 
 type Workout struct {
-	ID        string            `json:"id"`
-	Title     string            `json:"title"`
-	StartedAt time.Time         `json:"started_at"`
-	EndedAt   *time.Time        `json:"ended_at"`
-	Exercises []WorkoutExercise `json:"exercises"`
+	ID              string            `json:"id"`
+	Source          string            `json:"source"`
+	Title           string            `json:"title"`
+	Notes           string            `json:"notes"`
+	StartedAt       time.Time         `json:"started_at"`
+	EndedAt         *time.Time        `json:"ended_at"`
+	SourceCreatedAt *time.Time        `json:"source_created_at"`
+	SourceUpdatedAt *time.Time        `json:"source_updated_at"`
+	Exercises       []WorkoutExercise `json:"exercises"`
 }
 
 type FitnessSummaryResponse struct {
@@ -183,8 +195,13 @@ func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 
+	type workoutRow struct {
+		workout    Workout
+		rawPayload []byte
+	}
+
 	rows, err := h.db.Query(ctx, `
-		SELECT id, COALESCE(title,''), started_at, ended_at
+		SELECT id, source, COALESCE(title,''), COALESCE(notes,''), started_at, ended_at, raw_payload
 		FROM workouts
 		WHERE user_id = $1
 		ORDER BY started_at DESC
@@ -197,52 +214,158 @@ func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	workouts := make([]Workout, 0)
+	workoutRows := make([]workoutRow, 0)
 	for rows.Next() {
-		var wk Workout
-		if err := rows.Scan(&wk.ID, &wk.Title, &wk.StartedAt, &wk.EndedAt); err != nil {
+		var row workoutRow
+		if err := rows.Scan(
+			&row.workout.ID,
+			&row.workout.Source,
+			&row.workout.Title,
+			&row.workout.Notes,
+			&row.workout.StartedAt,
+			&row.workout.EndedAt,
+			&row.rawPayload,
+		); err != nil {
 			continue
 		}
-		workouts = append(workouts, wk)
+		workoutRows = append(workoutRows, row)
 	}
 	rows.Close()
 
-	// Load exercises grouped by workout
-	for i := range workouts {
-		setRows, err := h.db.Query(ctx, `
-			SELECT exercise_name, COALESCE(exercise_category,''), set_index, COALESCE(set_type,'normal'), weight_kg, reps
-			FROM workout_sets
-			WHERE workout_id = $1
-			ORDER BY exercise_name, set_index
-		`, workouts[i].ID)
-		if err != nil {
-			continue
-		}
+	workouts := make([]Workout, 0, len(workoutRows))
+	for i := range workoutRows {
+		wk := workoutRows[i].workout
 
-		exMap := make(map[string]*WorkoutExercise)
-		exOrder := []string{}
-		for setRows.Next() {
-			var s WorkoutSet
-			var exName, exCat string
-			if err := setRows.Scan(&exName, &exCat, &s.SetIndex, &s.SetType, &s.WeightKg, &s.Reps); err != nil {
+		if wk.Source == "hevy" && len(workoutRows[i].rawPayload) > 0 {
+			if err := hydrateHevyWorkout(&wk, workoutRows[i].rawPayload); err == nil {
+				workouts = append(workouts, wk)
 				continue
+			} else {
+				h.logger.Warn().Str("workout_id", wk.ID).Err(err).Msg("failed to hydrate hevy workout from raw payload")
 			}
-			s.ExerciseName = exName
-			s.ExerciseCategory = exCat
-			if _, ok := exMap[exName]; !ok {
-				exMap[exName] = &WorkoutExercise{Name: exName, Category: exCat, Sets: []WorkoutSet{}}
-				exOrder = append(exOrder, exName)
-			}
-			exMap[exName].Sets = append(exMap[exName].Sets, s)
 		}
-		setRows.Close()
 
-		workouts[i].Exercises = make([]WorkoutExercise, 0, len(exOrder))
-		for _, name := range exOrder {
-			workouts[i].Exercises = append(workouts[i].Exercises, *exMap[name])
+		if err := h.loadNormalizedWorkoutExercises(ctx, &wk); err != nil {
+			h.logger.Warn().Str("workout_id", wk.ID).Err(err).Msg("failed to load normalized workout exercises")
 		}
+		workouts = append(workouts, wk)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(workouts)
+}
+
+func (h *FitnessHandler) loadNormalizedWorkoutExercises(ctx context.Context, workout *Workout) error {
+	setRows, err := h.db.Query(ctx, `
+		SELECT exercise_name, COALESCE(exercise_category,''), set_index, COALESCE(set_type,'normal'), weight_kg, reps
+		FROM workout_sets
+		WHERE workout_id = $1
+		ORDER BY exercise_name, set_index
+	`, workout.ID)
+	if err != nil {
+		return err
+	}
+	defer setRows.Close()
+
+	exMap := make(map[string]*WorkoutExercise)
+	exOrder := []string{}
+	for setRows.Next() {
+		var s WorkoutSet
+		var exName, exCat string
+		if err := setRows.Scan(&exName, &exCat, &s.SetIndex, &s.SetType, &s.WeightKg, &s.Reps); err != nil {
+			continue
+		}
+		s.ExerciseName = exName
+		s.ExerciseCategory = exCat
+		if _, ok := exMap[exName]; !ok {
+			exMap[exName] = &WorkoutExercise{Name: exName, Category: exCat, Sets: []WorkoutSet{}}
+			exOrder = append(exOrder, exName)
+		}
+		exMap[exName].Sets = append(exMap[exName].Sets, s)
+	}
+
+	workout.Exercises = make([]WorkoutExercise, 0, len(exOrder))
+	for _, name := range exOrder {
+		workout.Exercises = append(workout.Exercises, *exMap[name])
+	}
+
+	return nil
+}
+
+type hevyRawWorkout struct {
+	Title       string            `json:"title"`
+	Description string            `json:"description"`
+	CreatedAt   *time.Time        `json:"created_at"`
+	UpdatedAt   *time.Time        `json:"updated_at"`
+	Exercises   []hevyRawExercise `json:"exercises"`
+}
+
+type hevyRawExercise struct {
+	Index              int          `json:"index"`
+	Title              string       `json:"title"`
+	Notes              string       `json:"notes"`
+	ExerciseTemplateID string       `json:"exercise_template_id"`
+	Sets               []hevyRawSet `json:"sets"`
+}
+
+type hevyRawSet struct {
+	Index           int      `json:"index"`
+	Type            string   `json:"type"`
+	WeightKg        *float64 `json:"weight_kg"`
+	Reps            *int     `json:"reps"`
+	DistanceMeters  *float64 `json:"distance_meters"`
+	DurationSeconds *int     `json:"duration_seconds"`
+	RPE             *float64 `json:"rpe"`
+}
+
+func hydrateHevyWorkout(workout *Workout, rawPayload []byte) error {
+	var payload hevyRawWorkout
+	if err := json.Unmarshal(rawPayload, &payload); err != nil {
+		return err
+	}
+
+	if payload.Title != "" {
+		workout.Title = payload.Title
+	}
+	if payload.Description != "" {
+		workout.Notes = payload.Description
+	}
+	workout.SourceCreatedAt = payload.CreatedAt
+	workout.SourceUpdatedAt = payload.UpdatedAt
+	workout.Exercises = make([]WorkoutExercise, 0, len(payload.Exercises))
+
+	for _, ex := range payload.Exercises {
+		exercise := WorkoutExercise{
+			Index:      ex.Index,
+			Name:       ex.Title,
+			Notes:      ex.Notes,
+			TemplateID: ex.ExerciseTemplateID,
+			Sets:       make([]WorkoutSet, 0, len(ex.Sets)),
+		}
+
+		for _, set := range ex.Sets {
+			exercise.Sets = append(exercise.Sets, WorkoutSet{
+				ExerciseName:    ex.Title,
+				ExerciseIndex:   ex.Index,
+				SetIndex:        set.Index,
+				SetType:         coalesceWorkoutSetType(set.Type),
+				WeightKg:        set.WeightKg,
+				Reps:            set.Reps,
+				DistanceMeters:  set.DistanceMeters,
+				DurationSeconds: set.DurationSeconds,
+				RPE:             set.RPE,
+			})
+		}
+
+		workout.Exercises = append(workout.Exercises, exercise)
+	}
+
+	return nil
+}
+
+func coalesceWorkoutSetType(value string) string {
+	if value == "" {
+		return "normal"
+	}
+	return value
 }

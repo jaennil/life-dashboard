@@ -107,23 +107,34 @@ export interface Activity {
 export interface WorkoutSet {
   exercise_name: string
   exercise_category: string
+  exercise_index: number
   set_index: number
   set_type: string
   weight_kg: number | null
   reps: number | null
+  distance_meters: number | null
+  duration_seconds: number | null
+  rpe: number | null
 }
 
 export interface WorkoutExercise {
+  index: number
   name: string
   category: string
+  notes: string
+  template_id: string
   sets: WorkoutSet[]
 }
 
 export interface Workout {
   id: string
+  source: string
   title: string
+  notes: string
   started_at: string
   ended_at: string | null
+  source_created_at: string | null
+  source_updated_at: string | null
   exercises: WorkoutExercise[]
 }
 

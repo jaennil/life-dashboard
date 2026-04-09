@@ -18,6 +18,7 @@ const TYPE_COLORS: Record<string, string> = {
 }
 
 const FALLBACK_COLORS = ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#3b82f6', '#10b981', '#eab308', '#f43f5e']
+const DECIMAL_FORMATTER = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 
 type FitnessSource = 'strava' | 'hevy'
 
@@ -39,9 +40,29 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 
+function fmtDateTime(iso: string) {
+  return new Date(iso).toLocaleString('ru-RU', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function fmtWeek(iso: string) {
   const d = new Date(iso)
   return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function fmtMetric(value: number | null) {
+  if (value == null) return null
+  return DECIMAL_FORMATTER.format(value)
+}
+
+function fmtWorkoutDistance(meters: number | null) {
+  if (meters == null) return null
+  if (meters >= 1000) return `${DECIMAL_FORMATTER.format(meters / 1000)} км`
+  return `${Math.round(meters)} м`
 }
 
 function StatCard({
@@ -77,6 +98,8 @@ function WorkoutRow({ workout }: { workout: Workout }) {
   const dur = workout.ended_at
     ? Math.round((new Date(workout.ended_at).getTime() - new Date(workout.started_at).getTime()) / 60000)
     : null
+  const sourceUpdated = workout.source_updated_at ? fmtDateTime(workout.source_updated_at) : null
+  const sourceCreated = workout.source_created_at ? fmtDateTime(workout.source_created_at) : null
 
   const setTypeBadge = (t: string) => {
     if (t === 'warm-up') return <span className="text-xs text-amber-400">Разминка</span>
@@ -98,6 +121,7 @@ function WorkoutRow({ workout }: { workout: Workout }) {
             <span className="text-xs text-muted-foreground">{fmtDate(workout.started_at)}</span>
             {dur && <span className="text-xs text-muted-foreground">{fmtDuration(dur * 60)}</span>}
             {workout.exercises.length > 0 && <span className="text-xs text-muted-foreground">{workout.exercises.length} упр.</span>}
+            {sourceUpdated && <span className="text-xs text-muted-foreground">обн. {sourceUpdated}</span>}
           </div>
         </div>
         {workout.exercises.length > 0 && (
@@ -108,19 +132,41 @@ function WorkoutRow({ workout }: { workout: Workout }) {
       </button>
       {open && workout.exercises.length > 0 && (
         <div className="px-5 pb-3 flex flex-col gap-3">
+          {(workout.notes || sourceCreated || sourceUpdated) && (
+            <div className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              {workout.notes && <p className="text-foreground whitespace-pre-wrap">{workout.notes}</p>}
+              {sourceCreated && <p>{workout.notes ? 'Создано' : 'В Hevy создано'}: {sourceCreated}</p>}
+              {sourceUpdated && <p>{workout.notes || sourceCreated ? 'Обновлено' : 'В Hevy обновлено'}: {sourceUpdated}</p>}
+            </div>
+          )}
           {workout.exercises.map(ex => (
-            <div key={ex.name}>
+            <div key={`${ex.index}-${ex.name}`} className="rounded-lg border bg-muted/10 px-3 py-2">
               <p className="text-xs font-semibold text-foreground mb-1">
                 {ex.name}
                 {ex.category && <span className="font-normal text-muted-foreground ml-1">({ex.category})</span>}
               </p>
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <span className="text-[11px] text-muted-foreground">Блок #{ex.index}</span>
+                {ex.template_id && <span className="text-[11px] text-muted-foreground font-mono">tpl: {ex.template_id}</span>}
+              </div>
+              {ex.notes && <p className="text-xs text-muted-foreground mb-2 whitespace-pre-wrap">{ex.notes}</p>}
               <div className="flex flex-col gap-0.5">
                 {ex.sets.map(s => (
-                  <div key={s.set_index} className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <div key={`${s.exercise_index}-${s.set_index}`} className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span className="w-8 shrink-0">#{s.set_index}</span>
-                    <span className="font-medium text-foreground tabular-nums">
-                      {s.weight_kg != null ? `${s.weight_kg} кг` : '—'} × {s.reps != null ? `${s.reps}` : '—'}
-                    </span>
+                    {(s.weight_kg != null || s.reps != null) && (
+                      <span className="font-medium text-foreground tabular-nums">
+                        {s.weight_kg != null ? `${fmtMetric(s.weight_kg)} кг` : '—'} × {s.reps != null ? `${s.reps}` : '—'}
+                      </span>
+                    )}
+                    {s.distance_meters != null && <span className="text-cyan-400">{fmtWorkoutDistance(s.distance_meters)}</span>}
+                    {s.duration_seconds != null && (
+                      <span className="text-amber-300 flex items-center gap-0.5">
+                        <Timer className="w-3 h-3" />
+                        {fmtDuration(s.duration_seconds)}
+                      </span>
+                    )}
+                    {s.rpe != null && <span className="text-violet-400">RPE {fmtMetric(s.rpe)}</span>}
                     {setTypeBadge(s.set_type)}
                   </div>
                 ))}
