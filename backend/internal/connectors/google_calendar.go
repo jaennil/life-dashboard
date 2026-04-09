@@ -91,6 +91,17 @@ func (g *GoogleCalendarConnector) ExchangeCode(ctx context.Context, userID, code
 		ON CONFLICT (source, user_id) DO UPDATE SET
 			access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW()
 	`, result.AccessToken, result.RefreshToken, expiresAt, userID)
+	if err != nil {
+		return err
+	}
+	_, err = g.db.Exec(ctx, `
+		INSERT INTO sync_state (source, enabled, updated_at, user_id)
+		VALUES ('google_calendar', true, NOW(), $1)
+		ON CONFLICT (source, user_id) DO UPDATE SET enabled = true, updated_at = NOW()
+	`, userID)
+	if err != nil {
+		return err
+	}
 
 	g.logger.Info().Str("user_id", userID).Msg("google calendar authorized")
 	return err

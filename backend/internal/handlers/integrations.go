@@ -13,10 +13,10 @@ import (
 )
 
 type IntegrationsHandler struct {
-	db          *pgxpool.Pool
-	connectors  map[string]connectors.Connector
-	configured  map[string]bool
-	logger      zerolog.Logger
+	db         *pgxpool.Pool
+	connectors map[string]connectors.Connector
+	configured map[string]bool
+	logger     zerolog.Logger
 }
 
 func NewIntegrations(db *pgxpool.Pool, conns []connectors.Connector, configured map[string]bool, logger zerolog.Logger) *IntegrationsHandler {
@@ -39,6 +39,12 @@ type integrationMeta struct {
 }
 
 var knownIntegrations = []string{"strava", "hevy", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion"}
+
+var manualTokenIntegrations = map[string]bool{
+	"hevy":     true,
+	"notion":   true,
+	"zenmoney": true,
+}
 
 var integrationMeta_ = map[string]integrationMeta{
 	"strava": {
@@ -79,13 +85,14 @@ var integrationMeta_ = map[string]integrationMeta{
 }
 
 type IntegrationStatus struct {
-	Name        string     `json:"name"`
-	DisplayName string     `json:"display_name"`
-	Description string     `json:"description"`
-	Configured  bool       `json:"configured"`
-	Enabled     bool       `json:"enabled"`
-	LastSyncAt  *time.Time `json:"last_sync_at"`
-	RecordCount int        `json:"record_count"`
+	Name           string     `json:"name"`
+	DisplayName    string     `json:"display_name"`
+	Description    string     `json:"description"`
+	Configured     bool       `json:"configured"`
+	Enabled        bool       `json:"enabled"`
+	HasCredentials bool       `json:"has_credentials"`
+	LastSyncAt     *time.Time `json:"last_sync_at"`
+	RecordCount    int        `json:"record_count"`
 }
 
 func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +104,7 @@ func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Req
 		enabled    bool
 	}
 	syncStates := map[string]syncRow{}
+	hasCredentials := map[string]bool{}
 
 	rows, err := h.db.Query(ctx, `SELECT source, last_synced_at, enabled FROM sync_state WHERE user_id = $1`, userID)
 	if err == nil {
@@ -110,10 +118,26 @@ func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Req
 		rows.Close()
 	}
 
+	tokenRows, err := h.db.Query(ctx, `SELECT source, refresh_token FROM oauth_tokens WHERE user_id = $1`, userID)
+	if err == nil {
+		for tokenRows.Next() {
+			var source string
+			var refreshToken string
+			if err := tokenRows.Scan(&source, &refreshToken); err == nil {
+				hasCredentials[source] = source != "notion" || refreshToken != ""
+			}
+		}
+		tokenRows.Close()
+	}
+
 	result := make([]IntegrationStatus, 0, len(knownIntegrations))
 	for _, name := range knownIntegrations {
 		meta := integrationMeta_[name]
-		state := syncStates[name]
+		state, ok := syncStates[name]
+		enabled := true
+		if ok {
+			enabled = state.enabled
+		}
 
 		var count int
 		if meta.countQuery != "" {
@@ -121,13 +145,14 @@ func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Req
 		}
 
 		result = append(result, IntegrationStatus{
-			Name:        name,
-			DisplayName: meta.displayName,
-			Description: meta.description,
-			Configured:  h.configured[name],
-			Enabled:     state.enabled,
-			LastSyncAt:  state.lastSyncAt,
-			RecordCount: count,
+			Name:           name,
+			DisplayName:    meta.displayName,
+			Description:    meta.description,
+			Configured:     h.configured[name],
+			Enabled:        enabled,
+			HasCredentials: hasCredentials[name],
+			LastSyncAt:     state.lastSyncAt,
+			RecordCount:    count,
 		})
 	}
 
@@ -210,6 +235,10 @@ func (h *IntegrationsHandler) SaveMFPToken(w http.ResponseWriter, r *http.Reques
 // SaveToken saves a manually-entered access token for integrations like ZenMoney
 func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	if !manualTokenIntegrations[name] {
+		http.Error(w, "unsupported integration", http.StatusNotFound)
+		return
+	}
 
 	var body struct {
 		Token      string `json:"token"`
@@ -219,20 +248,27 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "token is required", http.StatusBadRequest)
 		return
 	}
+	if name == "notion" && body.DatabaseID == "" {
+		http.Error(w, "database_id is required", http.StatusBadRequest)
+		return
+	}
 
 	ctx := r.Context()
 	userID := ctx.Value(authmw.UserIDKey).(string)
+	refreshToken := ""
+	if name == "notion" {
+		refreshToken = body.DatabaseID
+	}
 
 	_, err := h.db.Exec(ctx, `
 		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, updated_at, user_id)
-		VALUES ($1, $2, '', NOW() + INTERVAL '100 years', NOW(), $3)
+		VALUES ($1, $2, $3, NOW() + INTERVAL '100 years', NOW(), $4)
 		ON CONFLICT (source, user_id) DO UPDATE SET
-			access_token = $2, updated_at = NOW()
-	`, name, body.Token, userID)
-	if err == nil && body.DatabaseID != "" {
-		h.db.Exec(ctx, `UPDATE oauth_tokens SET athlete_id = $1 WHERE source = $2 AND user_id = $3`,
-			body.DatabaseID, name, userID)
-	}
+			access_token = EXCLUDED.access_token,
+			refresh_token = EXCLUDED.refresh_token,
+			expires_at = EXCLUDED.expires_at,
+			updated_at = NOW()
+	`, name, body.Token, refreshToken, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Str("source", name).Msg("save token failed")
 		http.Error(w, "internal error", http.StatusInternalServerError)

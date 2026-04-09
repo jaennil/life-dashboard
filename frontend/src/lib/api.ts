@@ -192,6 +192,7 @@ export interface Integration {
   description: string
   configured: boolean
   enabled: boolean
+  has_credentials: boolean
   last_sync_at: string | null
   record_count: number
 }

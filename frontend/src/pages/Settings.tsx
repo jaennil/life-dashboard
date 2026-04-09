@@ -104,17 +104,27 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
   const isOAuth = !!OAUTH_INTEGRATIONS[integration.name]
   const tokenMeta = TOKEN_INTEGRATIONS[integration.name]
   const isDual = isOAuth && !!tokenMeta
-  const isConnected = integration.enabled && ((!isOAuth && !tokenMeta) || integration.record_count > 0 || integration.last_sync_at)
+  const requiresCredentials = isOAuth || !!tokenMeta
+  const hasSyncData = integration.record_count > 0 || !!integration.last_sync_at
+  const hasConnectionData = integration.has_credentials || hasSyncData
+  const isConnected = requiresCredentials ? hasConnectionData : integration.enabled
+  const isActive = integration.enabled && (requiresCredentials ? hasConnectionData : integration.configured)
 
   const statusIcon = !integration.configured
     ? <AlertCircle className="w-4 h-4 text-muted-foreground" />
-    : isConnected
+    : isActive
       ? <CheckCircle className="w-4 h-4 text-emerald-500" />
       : <XCircle className="w-4 h-4 text-muted-foreground" />
 
   const statusText = !integration.configured
     ? 'Не настроено'
-    : isConnected ? 'Подключено' : 'Отключено'
+    : requiresCredentials
+      ? isConnected
+        ? integration.enabled ? 'Подключено' : 'Отключено'
+        : 'Не подключено'
+      : integration.enabled
+        ? 'Включено'
+        : 'Отключено'
 
   return (
     <div className={cn(
@@ -137,15 +147,19 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
             <button
               onClick={handleToggle}
               disabled={toggling}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10 transition-colors shrink-0"
+              className={cn(
+                'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors shrink-0',
+                integration.enabled
+                  ? 'border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10'
+                  : 'border-border text-muted-foreground hover:bg-muted/50'
+              )}
             >
               <Power className="w-3 h-3" />
-              {toggling ? '...' : 'Отключить'}
+              {toggling ? '...' : integration.enabled ? 'Отключить' : 'Включить'}
             </button>
           ) : (
             <a
               href={OAUTH_INTEGRATIONS[integration.name]}
-              onClick={() => { if (!integration.enabled) handleToggle() }}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors shrink-0"
             >
               <ExternalLink className="w-3 h-3" />
@@ -157,16 +171,20 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
             <button
               onClick={handleToggle}
               disabled={toggling}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10 transition-colors shrink-0"
+              className={cn(
+                'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors shrink-0',
+                integration.enabled
+                  ? 'border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10'
+                  : 'border-border text-muted-foreground hover:bg-muted/50'
+              )}
             >
               <Power className="w-3 h-3" />
-              {toggling ? '...' : 'Отключить'}
+              {toggling ? '...' : integration.enabled ? 'Отключить' : 'Включить'}
             </button>
           ) : (
             <div className="flex items-center gap-2 shrink-0">
               <a
                 href={OAUTH_INTEGRATIONS[integration.name]}
-                onClick={() => { if (!integration.enabled) handleToggle() }}
                 className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
               >
                 <ExternalLink className="w-3 h-3" />
@@ -185,10 +203,15 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
             <button
               onClick={handleToggle}
               disabled={toggling}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10 transition-colors shrink-0"
+              className={cn(
+                'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors shrink-0',
+                integration.enabled
+                  ? 'border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10'
+                  : 'border-border text-muted-foreground hover:bg-muted/50'
+              )}
             >
               <Power className="w-3 h-3" />
-              {toggling ? '...' : 'Отключить'}
+              {toggling ? '...' : integration.enabled ? 'Отключить' : 'Включить'}
             </button>
           ) : (
             <button
@@ -255,7 +278,7 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
             {statusIcon}
             <span className="text-xs font-medium text-foreground">{statusText}</span>
           </div>
-          {isConnected && (
+          {(requiresCredentials ? isConnected : integration.enabled) && (
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <span>Синхр.: {fmtDate(integration.last_sync_at)}</span>
               <span>•</span>
@@ -264,7 +287,7 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
           )}
         </div>
 
-        {isConnected && (
+        {isActive && (
           <button
             onClick={handleSync}
             disabled={syncing}

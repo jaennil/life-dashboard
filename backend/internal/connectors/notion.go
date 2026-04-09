@@ -219,7 +219,7 @@ func (n *NotionConnector) autoDiscoverDatabase(ctx context.Context, userID, toke
 	n.logger.Info().Str("database_id", dbID).Str("title", dbTitle).Msg("auto-discovered notion database")
 
 	_, err = n.db.Exec(ctx, `
-		UPDATE oauth_tokens SET athlete_id = $1 WHERE source = 'notion' AND user_id = $2
+		UPDATE oauth_tokens SET refresh_token = $1 WHERE source = 'notion' AND user_id = $2
 	`, dbID, userID)
 	return err
 }
@@ -229,7 +229,7 @@ func (n *NotionConnector) Name() string { return "notion" }
 func (n *NotionConnector) loadCredentials(ctx context.Context, userID string) (apiToken string, databaseID string, err error) {
 	var dbID *string
 	err = n.db.QueryRow(ctx,
-		`SELECT access_token, athlete_id FROM oauth_tokens WHERE source = 'notion' AND user_id = $1`,
+		`SELECT access_token, refresh_token FROM oauth_tokens WHERE source = 'notion' AND user_id = $1`,
 		userID,
 	).Scan(&apiToken, &dbID)
 	if err != nil {

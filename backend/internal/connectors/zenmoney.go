@@ -24,18 +24,18 @@ type zenmoneyDiffRequest struct {
 }
 
 type zenmoneyDiffResponse struct {
-	ServerTimestamp int64                  `json:"serverTimestamp"`
-	Instrument      []zenmoneyInstrument   `json:"instrument"`
-	Account         []zenmoneyAccount      `json:"account"`
-	Transaction     []zenmoneyTransaction  `json:"transaction"`
-	Tag             []zenmoneyTag          `json:"tag"`
+	ServerTimestamp int64                 `json:"serverTimestamp"`
+	Instrument      []zenmoneyInstrument  `json:"instrument"`
+	Account         []zenmoneyAccount     `json:"account"`
+	Transaction     []zenmoneyTransaction `json:"transaction"`
+	Tag             []zenmoneyTag         `json:"tag"`
 }
 
 type zenmoneyTag struct {
-	ID       string  `json:"id"`
-	Title    string  `json:"title"`
-	Parent   *string `json:"parent"`
-	Deleted  bool    `json:"deleted"`
+	ID      string  `json:"id"`
+	Title   string  `json:"title"`
+	Parent  *string `json:"parent"`
+	Deleted bool    `json:"deleted"`
 }
 
 type zenmoneyInstrument struct {
@@ -137,6 +137,17 @@ func (z *ZenmoneyConnector) ExchangeCode(ctx context.Context, userID string, cod
 		ON CONFLICT (source, user_id) DO UPDATE SET
 			access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW()
 	`, result.AccessToken, result.RefreshToken, expiresAt, userID)
+	if err != nil {
+		return err
+	}
+	_, err = z.db.Exec(ctx, `
+		INSERT INTO sync_state (source, enabled, updated_at, user_id)
+		VALUES ('zenmoney', true, NOW(), $1)
+		ON CONFLICT (source, user_id) DO UPDATE SET enabled = true, updated_at = NOW()
+	`, userID)
+	if err != nil {
+		return err
+	}
 
 	z.logger.Info().Str("user_id", userID).Msg("zenmoney authorized")
 	return err

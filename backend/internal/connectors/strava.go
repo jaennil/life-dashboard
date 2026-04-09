@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	stravaBaseURL   = "https://www.strava.com/api/v3"
-	stravaTokenURL  = "https://www.strava.com/oauth/token"
-	stravaAuthURL   = "https://www.strava.com/oauth/authorize"
-	stravaPerPage   = 200
+	stravaBaseURL  = "https://www.strava.com/api/v3"
+	stravaTokenURL = "https://www.strava.com/oauth/token"
+	stravaAuthURL  = "https://www.strava.com/oauth/authorize"
+	stravaPerPage  = 200
 )
 
 // ---- API types ----
@@ -34,36 +34,36 @@ type stravaTokenResponse struct {
 }
 
 type stravaActivity struct {
-	ID                    int64      `json:"id"`
-	Name                  string     `json:"name"`
-	Description           string     `json:"description"`
-	Type                  string     `json:"type"`
-	SportType             string     `json:"sport_type"`
-	StartDate             time.Time  `json:"start_date"`
-	MovingTime            int        `json:"moving_time"`
-	ElapsedTime           int        `json:"elapsed_time"`
-	Distance              float64    `json:"distance"`
-	TotalElevationGain    float64    `json:"total_elevation_gain"`
-	AverageHeartrate      *float64   `json:"average_heartrate"`
-	MaxHeartrate          *float64   `json:"max_heartrate"`
-	AverageCadence        *float64   `json:"average_cadence"`
-	AverageWatts          *float64   `json:"average_watts"`
-	WeightedAverageWatts  *int       `json:"weighted_average_watts"`
-	MaxWatts              *int       `json:"max_watts"`
-	Calories              *float64   `json:"calories"`
-	AverageSpeed          *float64   `json:"average_speed"`
-	MaxSpeed              *float64   `json:"max_speed"`
-	AverageTemp           *float64   `json:"average_temp"`
-	Kilojoules            *float64   `json:"kilojoules"`
-	ElevHigh              *float64   `json:"elev_high"`
-	ElevLow               *float64   `json:"elev_low"`
-	SufferScore           *int       `json:"suffer_score"`
-	PRCount               *int       `json:"pr_count"`
-	WorkoutType           *int       `json:"workout_type"`
-	DeviceName            string     `json:"device_name"`
-	GearID                string     `json:"gear_id"`
-	StartLatlng           []float64  `json:"start_latlng"`
-	Map                   struct {
+	ID                   int64     `json:"id"`
+	Name                 string    `json:"name"`
+	Description          string    `json:"description"`
+	Type                 string    `json:"type"`
+	SportType            string    `json:"sport_type"`
+	StartDate            time.Time `json:"start_date"`
+	MovingTime           int       `json:"moving_time"`
+	ElapsedTime          int       `json:"elapsed_time"`
+	Distance             float64   `json:"distance"`
+	TotalElevationGain   float64   `json:"total_elevation_gain"`
+	AverageHeartrate     *float64  `json:"average_heartrate"`
+	MaxHeartrate         *float64  `json:"max_heartrate"`
+	AverageCadence       *float64  `json:"average_cadence"`
+	AverageWatts         *float64  `json:"average_watts"`
+	WeightedAverageWatts *int      `json:"weighted_average_watts"`
+	MaxWatts             *int      `json:"max_watts"`
+	Calories             *float64  `json:"calories"`
+	AverageSpeed         *float64  `json:"average_speed"`
+	MaxSpeed             *float64  `json:"max_speed"`
+	AverageTemp          *float64  `json:"average_temp"`
+	Kilojoules           *float64  `json:"kilojoules"`
+	ElevHigh             *float64  `json:"elev_high"`
+	ElevLow              *float64  `json:"elev_low"`
+	SufferScore          *int      `json:"suffer_score"`
+	PRCount              *int      `json:"pr_count"`
+	WorkoutType          *int      `json:"workout_type"`
+	DeviceName           string    `json:"device_name"`
+	GearID               string    `json:"gear_id"`
+	StartLatlng          []float64 `json:"start_latlng"`
+	Map                  struct {
 		SummaryPolyline string `json:"summary_polyline"`
 	} `json:"map"`
 	Gear *struct {
@@ -124,12 +124,12 @@ func (s *StravaConnector) Name() string { return "strava" }
 // AuthURL returns the Strava OAuth authorization URL
 func (s *StravaConnector) AuthURL(state string) string {
 	params := url.Values{
-		"client_id":     {s.clientID},
-		"redirect_uri":  {s.redirectURI},
-		"response_type": {"code"},
-		"scope":         {"activity:read_all"},
+		"client_id":       {s.clientID},
+		"redirect_uri":    {s.redirectURI},
+		"response_type":   {"code"},
+		"scope":           {"activity:read_all"},
 		"approval_prompt": {"auto"},
-		"state":         {state},
+		"state":           {state},
 	}
 	return stravaAuthURL + "?" + params.Encode()
 }
@@ -148,6 +148,13 @@ func (s *StravaConnector) ExchangeCode(ctx context.Context, userID string, code 
 
 	if err := s.saveToken(ctx, userID, resp); err != nil {
 		return fmt.Errorf("save token: %w", err)
+	}
+	if _, err := s.db.Exec(ctx, `
+		INSERT INTO sync_state (source, enabled, updated_at, user_id)
+		VALUES ('strava', true, NOW(), $1)
+		ON CONFLICT (source, user_id) DO UPDATE SET enabled = true, updated_at = NOW()
+	`, userID); err != nil {
+		return fmt.Errorf("mark strava enabled: %w", err)
 	}
 
 	s.logger.Info().Int64("athlete_id", resp.Athlete.ID).Msg("strava authorized")
