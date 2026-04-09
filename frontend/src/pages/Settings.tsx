@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, type Integration } from '@/lib/api'
@@ -64,11 +64,12 @@ function fmtCount(n: number, name: string) {
   return `${n.toLocaleString('ru-RU')} ${label}`
 }
 
-function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
+function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending = false }: {
   integration: Integration
   onToggle: (enabled: boolean) => void
   onSync: () => void
   onRefresh: () => void
+  syncPending?: boolean
 }) {
   const [syncing, setSyncing] = useState(false)
   const [toggling, setToggling] = useState(false)
@@ -112,15 +113,20 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
   const hasConnectionData = integration.has_credentials || hasSyncData
   const isConnected = requiresCredentials ? hasConnectionData : integration.enabled
   const isActive = integration.enabled && (requiresCredentials ? hasConnectionData : integration.configured)
+  const showSyncPending = syncPending && integration.enabled
 
   const statusIcon = !integration.configured
     ? <AlertCircle className="w-4 h-4 text-muted-foreground" />
-    : isActive
+    : showSyncPending
+      ? <RefreshCw className="w-4 h-4 text-primary animate-spin" />
+      : isActive
       ? <CheckCircle className="w-4 h-4 text-emerald-500" />
       : <XCircle className="w-4 h-4 text-muted-foreground" />
 
   const statusText = !integration.configured
     ? 'Не настроено'
+    : showSyncPending
+      ? 'Синхронизация...'
     : requiresCredentials
       ? isConnected
         ? integration.enabled ? 'Подключено' : 'Отключено'
@@ -305,7 +311,11 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
             {statusIcon}
             <span className="text-xs font-medium text-foreground">{statusText}</span>
           </div>
-          {(requiresCredentials ? isConnected : integration.enabled) && (
+          {showSyncPending ? (
+            <div className="text-xs text-muted-foreground">
+              Данные обновляются, карточка обновится автоматически
+            </div>
+          ) : (requiresCredentials ? isConnected : integration.enabled) && (
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <span>Синхр.: {fmtDate(integration.last_sync_at)}</span>
               <span>•</span>
@@ -317,11 +327,11 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
         {isActive && (
           <button
             onClick={handleSync}
-            disabled={syncing}
+            disabled={syncing || showSyncPending}
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-lg hover:bg-muted/50"
           >
-            <RefreshCw className={cn('w-3 h-3', syncing && 'animate-spin')} />
-            {syncing ? 'Синхронизация...' : 'Синхронизировать'}
+            <RefreshCw className={cn('w-3 h-3', (syncing || showSyncPending) && 'animate-spin')} />
+            {syncing || showSyncPending ? 'Синхронизация...' : 'Синхронизировать'}
           </button>
         )}
       </div>
@@ -572,6 +582,10 @@ export function Settings() {
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [loading, setLoading] = useState(true)
   const location = useLocation()
+  const navigate = useNavigate()
+  const syncTarget = new URLSearchParams(location.search).get('sync')
+  const syncStartedAtRaw = new URLSearchParams(location.search).get('started_at')
+  const [pendingSyncName, setPendingSyncName] = useState<string | null>(syncTarget)
 
   function load() {
     return api.getIntegrations()
@@ -582,6 +596,66 @@ export function Settings() {
   useEffect(() => {
     load().finally(() => setLoading(false))
   }, [location.key])
+
+  useEffect(() => {
+    if (!syncTarget || !syncStartedAtRaw) {
+      setPendingSyncName(null)
+      return
+    }
+
+    const syncStartedAt = Date.parse(syncStartedAtRaw)
+    if (Number.isNaN(syncStartedAt)) {
+      setPendingSyncName(null)
+      navigate(location.pathname, { replace: true })
+      return
+    }
+
+    let cancelled = false
+    let timer: number | undefined
+    let attempts = 0
+    const maxAttempts = 30
+
+    const finish = () => {
+      if (cancelled) return
+      setPendingSyncName(null)
+      navigate(location.pathname, { replace: true })
+    }
+
+    const poll = async () => {
+      try {
+        const next = await api.getIntegrations()
+        if (cancelled) return
+
+        setIntegrations(next)
+        setLoading(false)
+        setPendingSyncName(syncTarget)
+
+        const target = next.find(integration => integration.name === syncTarget)
+        const lastSyncedAt = target?.last_sync_at ? Date.parse(target.last_sync_at) : NaN
+        if (!target || (Number.isFinite(lastSyncedAt) && lastSyncedAt >= syncStartedAt)) {
+          finish()
+          return
+        }
+      } catch (err) {
+        console.error(err)
+      }
+
+      attempts += 1
+      if (attempts >= maxAttempts) {
+        finish()
+        return
+      }
+
+      timer = window.setTimeout(poll, 2000)
+    }
+
+    poll()
+
+    return () => {
+      cancelled = true
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [location.pathname, navigate, syncStartedAtRaw, syncTarget])
 
   async function handleToggle(name: string, enabled: boolean) {
     await api.toggleIntegration(name, enabled)
@@ -624,6 +698,7 @@ export function Settings() {
                 onToggle={enabled => handleToggle(integration.name, enabled)}
                 onSync={() => handleSync(integration.name)}
                 onRefresh={load}
+                syncPending={pendingSyncName === integration.name}
               />
             ))}
           </div>

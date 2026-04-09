@@ -7,7 +7,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 	"life-dashboard/internal/connectors"
@@ -92,7 +94,7 @@ func (h *AuthHandler) FatSecretCallback(w http.ResponseWriter, r *http.Request) 
 		}
 	}()
 
-	http.Redirect(w, r, "/settings", http.StatusFound)
+	redirectToSettingsAfterSync(w, r, "fatsecret")
 }
 
 // GET /api/v1/auth/strava/callback — exchange code for tokens
@@ -125,7 +127,7 @@ func (h *AuthHandler) StravaCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	http.Redirect(w, r, "/settings", http.StatusFound)
+	redirectToSettingsAfterSync(w, r, "strava")
 }
 
 // GET /api/v1/auth/zenmoney — redirect to ZenMoney OAuth
@@ -174,7 +176,7 @@ func (h *AuthHandler) ZenmoneyCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	http.Redirect(w, r, "/settings", http.StatusFound)
+	redirectToSettingsAfterSync(w, r, "zenmoney")
 }
 
 // GET /api/v1/auth/notion — redirect to Notion OAuth
@@ -221,7 +223,7 @@ func (h *AuthHandler) NotionCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	http.Redirect(w, r, "/settings", http.StatusFound)
+	redirectToSettingsAfterSync(w, r, "notion")
 }
 
 // GET /api/v1/auth/google — redirect to Google OAuth
@@ -267,7 +269,7 @@ func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	http.Redirect(w, r, "/settings", http.StatusFound)
+	redirectToSettingsAfterSync(w, r, "google_calendar")
 }
 
 func issueOAuthState(w http.ResponseWriter, r *http.Request, source string) (string, error) {
@@ -320,4 +322,12 @@ func oauthStateCookieName(source string) string {
 
 func isSecureRequest(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func redirectToSettingsAfterSync(w http.ResponseWriter, r *http.Request, source string) {
+	params := url.Values{
+		"sync":       {source},
+		"started_at": {time.Now().UTC().Format(time.RFC3339Nano)},
+	}
+	http.Redirect(w, r, "/settings?"+params.Encode(), http.StatusFound)
 }
