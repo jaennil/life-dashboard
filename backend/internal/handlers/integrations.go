@@ -40,6 +40,16 @@ type integrationMeta struct {
 
 var knownIntegrations = []string{"strava", "hevy", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion"}
 
+var personalIntegrations = map[string]bool{
+	"strava":          true,
+	"hevy":            true,
+	"zenmoney":        true,
+	"myfitnesspal":    true,
+	"fatsecret":       true,
+	"google_calendar": true,
+	"notion":          true,
+}
+
 var manualTokenIntegrations = map[string]bool{
 	"hevy":     true,
 	"notion":   true,
@@ -65,7 +75,7 @@ var integrationMeta_ = map[string]integrationMeta{
 	"myfitnesspal": {
 		displayName: "MyFitnessPal",
 		description: "Питание: дневник калорий и КБЖУ",
-		countQuery:  "SELECT COUNT(*) FROM nutrition_daily WHERE user_id = $1",
+		countQuery:  "SELECT COUNT(*) FROM nutrition_daily WHERE source='myfitnesspal' AND user_id = $1",
 	},
 	"fatsecret": {
 		displayName: "FatSecret",
@@ -134,14 +144,15 @@ func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Req
 	for _, name := range knownIntegrations {
 		meta := integrationMeta_[name]
 		state, ok := syncStates[name]
-		enabled := true
-		if ok {
-			enabled = state.enabled
-		}
 
 		var count int
 		if meta.countQuery != "" {
 			h.db.QueryRow(ctx, meta.countQuery, userID).Scan(&count)
+		}
+
+		enabled := ok && state.enabled
+		if !ok && (hasCredentials[name] || count > 0) {
+			enabled = true
 		}
 
 		result = append(result, IntegrationStatus{
@@ -177,6 +188,10 @@ func (h *IntegrationsHandler) ToggleIntegration(w http.ResponseWriter, r *http.R
 
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
+	if body.Enabled && personalIntegrations[name] && !hasIntegrationActivationState(ctx, h.db, name, userID) {
+		http.Error(w, "integration is not connected", http.StatusConflict)
+		return
+	}
 	_, err := h.db.Exec(ctx, `
 		INSERT INTO sync_state (source, last_synced_at, updated_at, enabled, user_id)
 		VALUES ($1, NULL, NOW(), $2, $3)
@@ -290,7 +305,41 @@ func IsEnabled(ctx context.Context, db *pgxpool.Pool, source string, userID stri
 	var enabled bool
 	err := db.QueryRow(ctx, `SELECT enabled FROM sync_state WHERE source = $1 AND user_id = $2`, source, userID).Scan(&enabled)
 	if err != nil {
-		return true // default to enabled if no row
+		return hasIntegrationActivationState(ctx, db, source, userID)
 	}
 	return enabled
+}
+
+func hasIntegrationActivationState(ctx context.Context, db *pgxpool.Pool, source string, userID string) bool {
+	if !personalIntegrations[source] {
+		return false
+	}
+	if hasStoredCredentials(ctx, db, source, userID) {
+		return true
+	}
+
+	meta, ok := integrationMeta_[source]
+	if !ok || meta.countQuery == "" {
+		return false
+	}
+
+	var count int
+	if err := db.QueryRow(ctx, meta.countQuery, userID).Scan(&count); err != nil {
+		return false
+	}
+	return count > 0
+}
+
+func hasStoredCredentials(ctx context.Context, db *pgxpool.Pool, source string, userID string) bool {
+	query := `SELECT 1 FROM oauth_tokens WHERE source = $1 AND user_id = $2 LIMIT 1`
+	args := []any{source, userID}
+	if source == "notion" {
+		query = `SELECT 1 FROM oauth_tokens WHERE source = $1 AND user_id = $2 AND refresh_token <> '' LIMIT 1`
+	}
+
+	var exists int
+	if err := db.QueryRow(ctx, query, args...).Scan(&exists); err != nil {
+		return false
+	}
+	return true
 }

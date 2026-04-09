@@ -18,5 +18,6 @@ frontend/.next/
 
 # OS
 .DS_Store
+.codex
 claude-code-api/
 backend/xiaomi-test

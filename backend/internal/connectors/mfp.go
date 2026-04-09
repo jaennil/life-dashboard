@@ -30,6 +30,7 @@ type MFPConnector struct {
 	bearerToken string
 	userID      string
 	tokenExpiry time.Time
+	cachedFor   string
 }
 
 func NewMFP(username, password, sessionCookie, accessToken, userID string, db *pgxpool.Pool, logger zerolog.Logger) *MFPConnector {
@@ -80,7 +81,7 @@ func (c *MFPConnector) Sync(ctx context.Context, userID string) error {
 }
 
 func (c *MFPConnector) ensureAuth(ctx context.Context, userID string) error {
-	if c.bearerToken != "" && time.Now().Before(c.tokenExpiry) {
+	if c.bearerToken != "" && c.cachedFor == userID && time.Now().Before(c.tokenExpiry) {
 		return nil
 	}
 
@@ -90,9 +91,9 @@ func (c *MFPConnector) ensureAuth(ctx context.Context, userID string) error {
 	}
 
 	if c.sessionCookie != "" {
-		return c.authWithSessionCookie(ctx)
+		return c.authWithSessionCookie(ctx, userID)
 	}
-	return c.authWithCredentials(ctx)
+	return c.authWithCredentials(ctx, userID)
 }
 
 func (c *MFPConnector) authFromDB(ctx context.Context, userID string) error {
@@ -111,6 +112,7 @@ func (c *MFPConnector) authFromDB(ctx context.Context, userID string) error {
 		c.bearerToken = accessToken
 		c.userID = fmt.Sprintf("%d", athleteID)
 		c.tokenExpiry = expiresAt
+		c.cachedFor = userID
 		c.logger.Info().Msg("loaded token from db")
 		return nil
 	}
@@ -162,6 +164,7 @@ func (c *MFPConnector) refreshToken(ctx context.Context, userID string, refreshT
 		c.userID = tokenData.UserID
 	}
 	c.tokenExpiry = expiresAt
+	c.cachedFor = userID
 
 	// Persist new tokens to DB
 	newRT := refreshTok
@@ -176,7 +179,7 @@ func (c *MFPConnector) refreshToken(ctx context.Context, userID string, refreshT
 	return nil
 }
 
-func (c *MFPConnector) authWithSessionCookie(ctx context.Context) error {
+func (c *MFPConnector) authWithSessionCookie(ctx context.Context, userID string) error {
 	c.logger.Info().Msg("authenticating with session cookie")
 
 	mfpURL, _ := url.Parse(mfpWebBase)
@@ -184,10 +187,10 @@ func (c *MFPConnector) authWithSessionCookie(ctx context.Context) error {
 		{Name: "_mfp_session", Value: c.sessionCookie, Domain: "www.myfitnesspal.com", Path: "/"},
 	})
 
-	return c.fetchBearerToken(ctx)
+	return c.fetchBearerToken(ctx, userID)
 }
 
-func (c *MFPConnector) authWithCredentials(ctx context.Context) error {
+func (c *MFPConnector) authWithCredentials(ctx context.Context, userID string) error {
 	c.logger.Info().Msg("authenticating with credentials")
 
 	// Step 1: get CSRF token
@@ -232,10 +235,10 @@ func (c *MFPConnector) authWithCredentials(ctx context.Context) error {
 		return fmt.Errorf("login failed with status %d", loginResp.StatusCode)
 	}
 
-	return c.fetchBearerToken(ctx)
+	return c.fetchBearerToken(ctx, userID)
 }
 
-func (c *MFPConnector) fetchBearerToken(ctx context.Context) error {
+func (c *MFPConnector) fetchBearerToken(ctx context.Context, userID string) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		mfpWebBase+"/user/auth_token?refresh=true", nil)
 	c.setWebHeaders(req)
@@ -266,6 +269,7 @@ func (c *MFPConnector) fetchBearerToken(ctx context.Context) error {
 	c.bearerToken = tokenData.AccessToken
 	c.userID = tokenData.UserID
 	c.tokenExpiry = time.Now().Add(time.Duration(tokenData.ExpiresIn-300) * time.Second)
+	c.cachedFor = userID
 	c.logger.Info().Str("user_id", c.userID).Msg("authenticated")
 	return nil
 }
@@ -309,19 +313,19 @@ type mfpNutrients struct {
 	Energy struct {
 		Value float64 `json:"value"`
 	} `json:"energy"`
-	Protein      float64 `json:"protein"`
+	Protein       float64 `json:"protein"`
 	Carbohydrates float64 `json:"carbohydrates"`
-	Fat          float64 `json:"fat"`
-	Fiber        float64 `json:"fiber"`
-	Sugar        float64 `json:"sugar"`
-	Sodium       float64 `json:"sodium"`
+	Fat           float64 `json:"fat"`
+	Fiber         float64 `json:"fiber"`
+	Sugar         float64 `json:"sugar"`
+	Sodium        float64 `json:"sodium"`
 }
 
 type mfpDiaryItem struct {
-	Type       string       `json:"type"`
-	MealName   string       `json:"meal_name"`
-	DiaryMeal  string       `json:"diary_meal"`
-	Food       *struct {
+	Type      string `json:"type"`
+	MealName  string `json:"meal_name"`
+	DiaryMeal string `json:"diary_meal"`
+	Food      *struct {
 		Description string `json:"description"`
 	} `json:"food"`
 	ServingSize *struct {

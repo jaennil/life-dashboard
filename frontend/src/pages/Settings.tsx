@@ -12,6 +12,8 @@ const OAUTH_INTEGRATIONS: Record<string, string> = {
   notion: '/api/v1/auth/notion',
 }
 
+const MANAGED_CONNECTION_INTEGRATIONS = new Set(['myfitnesspal'])
+
 const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.ReactNode; extraField?: { key: string; placeholder: string } }> = {
   zenmoney: {
     placeholder: 'Bearer токен от ZenMoney',
@@ -104,7 +106,8 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
   const isOAuth = !!OAUTH_INTEGRATIONS[integration.name]
   const tokenMeta = TOKEN_INTEGRATIONS[integration.name]
   const isDual = isOAuth && !!tokenMeta
-  const requiresCredentials = isOAuth || !!tokenMeta
+  const requiresCredentials = isOAuth || !!tokenMeta || MANAGED_CONNECTION_INTEGRATIONS.has(integration.name)
+  const canSelfConnect = isOAuth || !!tokenMeta
   const hasSyncData = integration.record_count > 0 || !!integration.last_sync_at
   const hasConnectionData = integration.has_credentials || hasSyncData
   const isConnected = requiresCredentials ? hasConnectionData : integration.enabled
@@ -220,6 +223,30 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
             >
               <ExternalLink className="w-3 h-3" />
               Подключить
+            </button>
+          )
+        ) : requiresCredentials && !canSelfConnect ? (
+          isConnected ? (
+            <button
+              onClick={handleToggle}
+              disabled={toggling}
+              className={cn(
+                'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors shrink-0',
+                integration.enabled
+                  ? 'border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10'
+                  : 'border-border text-muted-foreground hover:bg-muted/50'
+              )}
+            >
+              <Power className="w-3 h-3" />
+              {toggling ? '...' : integration.enabled ? 'Отключить' : 'Включить'}
+            </button>
+          ) : (
+            <button
+              disabled
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-muted-foreground/60 cursor-not-allowed shrink-0"
+            >
+              <Power className="w-3 h-3" />
+              Требуется настройка
             </button>
           )
         ) : (
