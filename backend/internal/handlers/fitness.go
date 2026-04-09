@@ -20,9 +20,10 @@ func NewFitness(db *pgxpool.Pool, logger zerolog.Logger) *FitnessHandler {
 }
 
 type WeekStat struct {
-	Week  string `json:"week"`
-	Count int    `json:"count"`
-	KM    float64 `json:"km"`
+	Week            string  `json:"week"`
+	ActivitiesCount int     `json:"activities_count"`
+	WorkoutsCount   int     `json:"workouts_count"`
+	KM              float64 `json:"km"`
 }
 
 type Activity struct {
@@ -64,6 +65,7 @@ type FitnessSummaryResponse struct {
 	WorkoutsThisWeek   int     `json:"workouts_this_week"`
 	DistanceThisWeek   float64 `json:"distance_km_this_week"`
 	ActivitiesTotal    int     `json:"activities_total"`
+	WorkoutsTotal      int     `json:"workouts_total"`
 	TotalDistanceKm    float64 `json:"total_distance_km"`
 }
 
@@ -80,6 +82,8 @@ func (h *FitnessHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		Scan(&s.WorkoutsThisWeek)
 	h.db.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE user_id = $1`, userID).
 		Scan(&s.ActivitiesTotal, &s.TotalDistanceKm)
+	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE user_id = $1`, userID).
+		Scan(&s.WorkoutsTotal)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s)
@@ -90,14 +94,37 @@ func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) 
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
+		WITH activity_stats AS (
+			SELECT
+				DATE_TRUNC('week', started_at) AS week,
+				COUNT(*) AS activities_count,
+				COALESCE(SUM(distance_meters) / 1000.0, 0) AS km
+			FROM activities
+			WHERE started_at >= NOW() - INTERVAL '10 weeks' AND user_id = $1
+			GROUP BY DATE_TRUNC('week', started_at)
+		),
+		workout_stats AS (
+			SELECT
+				DATE_TRUNC('week', started_at) AS week,
+				COUNT(*) AS workouts_count
+			FROM workouts
+			WHERE started_at >= NOW() - INTERVAL '10 weeks' AND user_id = $1
+			GROUP BY DATE_TRUNC('week', started_at)
+		),
+		weeks AS (
+			SELECT week FROM activity_stats
+			UNION
+			SELECT week FROM workout_stats
+		)
 		SELECT
-			TO_CHAR(DATE_TRUNC('week', started_at), 'YYYY-MM-DD') as week,
-			COUNT(*) as count,
-			COALESCE(SUM(distance_meters)/1000.0, 0) as km
-		FROM activities
-		WHERE started_at >= NOW() - INTERVAL '10 weeks' AND user_id = $1
-		GROUP BY DATE_TRUNC('week', started_at)
-		ORDER BY DATE_TRUNC('week', started_at) ASC
+			TO_CHAR(weeks.week, 'YYYY-MM-DD') AS week,
+			COALESCE(activity_stats.activities_count, 0) AS activities_count,
+			COALESCE(workout_stats.workouts_count, 0) AS workouts_count,
+			COALESCE(activity_stats.km, 0) AS km
+		FROM weeks
+		LEFT JOIN activity_stats ON activity_stats.week = weeks.week
+		LEFT JOIN workout_stats ON workout_stats.week = weeks.week
+		ORDER BY weeks.week ASC
 	`, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query weekly stats")
@@ -109,7 +136,7 @@ func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) 
 	stats := make([]WeekStat, 0)
 	for rows.Next() {
 		var s WeekStat
-		if err := rows.Scan(&s.Week, &s.Count, &s.KM); err != nil {
+		if err := rows.Scan(&s.Week, &s.ActivitiesCount, &s.WorkoutsCount, &s.KM); err != nil {
 			continue
 		}
 		stats = append(stats, s)

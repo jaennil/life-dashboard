@@ -94,11 +94,19 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
     if (tokenMeta?.extraField && !extra) return
     setSavingToken(true)
     try {
-      await api.saveToken(integration.name, tokenInput.trim(), extra ? { [tokenMeta!.extraField!.key]: extra } : undefined)
+      const result = await api.saveToken(integration.name, tokenInput.trim(), extra ? { [tokenMeta!.extraField!.key]: extra } : undefined)
       setTokenInput('')
       setExtraInput('')
       setShowTokenForm(false)
       onRefresh()
+      if (result.sync_started_at) {
+        window.dispatchEvent(new CustomEvent('integration-sync-started', {
+          detail: {
+            name: result.source ?? integration.name,
+            startedAt: result.sync_started_at,
+          },
+        }))
+      }
     } catch { /* ignore */ } finally {
       setSavingToken(false)
     }
@@ -585,7 +593,7 @@ export function Settings() {
   const navigate = useNavigate()
   const syncTarget = new URLSearchParams(location.search).get('sync')
   const syncStartedAtRaw = new URLSearchParams(location.search).get('started_at')
-  const [pendingSyncName, setPendingSyncName] = useState<string | null>(syncTarget)
+  const [pendingSync, setPendingSync] = useState<{ name: string; startedAt: number; clearUrl: boolean } | null>(null)
 
   function load() {
     return api.getIntegrations()
@@ -598,15 +606,37 @@ export function Settings() {
   }, [location.key])
 
   useEffect(() => {
+    const handler = (event: Event) => {
+      const customEvent = event as CustomEvent<{ name?: string; startedAt?: string }>
+      const name = customEvent.detail?.name
+      const startedAtRaw = customEvent.detail?.startedAt
+      if (!name || !startedAtRaw) return
+
+      const startedAt = Date.parse(startedAtRaw)
+      if (Number.isNaN(startedAt)) return
+
+      setPendingSync({ name, startedAt, clearUrl: false })
+    }
+
+    window.addEventListener('integration-sync-started', handler as EventListener)
+    return () => window.removeEventListener('integration-sync-started', handler as EventListener)
+  }, [])
+
+  useEffect(() => {
     if (!syncTarget || !syncStartedAtRaw) {
-      setPendingSyncName(null)
       return
     }
 
     const syncStartedAt = Date.parse(syncStartedAtRaw)
     if (Number.isNaN(syncStartedAt)) {
-      setPendingSyncName(null)
       navigate(location.pathname, { replace: true })
+      return
+    }
+    setPendingSync({ name: syncTarget, startedAt: syncStartedAt, clearUrl: true })
+  }, [location.pathname, navigate, syncStartedAtRaw, syncTarget])
+
+  useEffect(() => {
+    if (!pendingSync) {
       return
     }
 
@@ -617,8 +647,12 @@ export function Settings() {
 
     const finish = () => {
       if (cancelled) return
-      setPendingSyncName(null)
-      navigate(location.pathname, { replace: true })
+      setPendingSync(current =>
+        current?.name === pendingSync.name && current.startedAt === pendingSync.startedAt ? null : current
+      )
+      if (pendingSync.clearUrl) {
+        navigate(location.pathname, { replace: true })
+      }
     }
 
     const poll = async () => {
@@ -628,11 +662,10 @@ export function Settings() {
 
         setIntegrations(next)
         setLoading(false)
-        setPendingSyncName(syncTarget)
 
-        const target = next.find(integration => integration.name === syncTarget)
+        const target = next.find(integration => integration.name === pendingSync.name)
         const lastSyncedAt = target?.last_sync_at ? Date.parse(target.last_sync_at) : NaN
-        if (!target || (Number.isFinite(lastSyncedAt) && lastSyncedAt >= syncStartedAt)) {
+        if (!target || (Number.isFinite(lastSyncedAt) && lastSyncedAt >= pendingSync.startedAt)) {
           finish()
           return
         }
@@ -655,7 +688,7 @@ export function Settings() {
       cancelled = true
       if (timer) window.clearTimeout(timer)
     }
-  }, [location.pathname, navigate, syncStartedAtRaw, syncTarget])
+  }, [location.pathname, navigate, pendingSync])
 
   async function handleToggle(name: string, enabled: boolean) {
     await api.toggleIntegration(name, enabled)
@@ -698,7 +731,7 @@ export function Settings() {
                 onToggle={enabled => handleToggle(integration.name, enabled)}
                 onSync={() => handleSync(integration.name)}
                 onRefresh={load}
-                syncPending={pendingSyncName === integration.name}
+                syncPending={pendingSync?.name === integration.name}
               />
             ))}
           </div>

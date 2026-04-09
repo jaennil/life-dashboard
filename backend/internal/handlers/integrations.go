@@ -244,7 +244,7 @@ func (h *IntegrationsHandler) SaveMFPToken(w http.ResponseWriter, r *http.Reques
 	h.configured["myfitnesspal"] = true
 	h.logger.Info().Str("user_id", body.UserID).Msg("mfp token saved")
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	json.NewEncoder(w).Encode(connectionResponse("myfitnesspal", h.startInitialSync("myfitnesspal", userID)))
 }
 
 // SaveToken saves a manually-entered access token for integrations like ZenMoney
@@ -297,7 +297,7 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 
 	h.logger.Info().Str("source", name).Str("user_id", userID).Msg("token saved")
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	json.NewEncoder(w).Encode(connectionResponse(name, h.startInitialSync(name, userID)))
 }
 
 // IsEnabled checks DB state for use in scheduler/sync
@@ -342,4 +342,32 @@ func hasStoredCredentials(ctx context.Context, db *pgxpool.Pool, source string, 
 		return false
 	}
 	return true
+}
+
+func (h *IntegrationsHandler) startInitialSync(source string, userID string) *time.Time {
+	conn, ok := h.connectors[source]
+	if !ok {
+		return nil
+	}
+
+	startedAt := time.Now().UTC()
+	go func() {
+		if err := conn.Sync(context.Background(), userID); err != nil {
+			h.logger.Error().Err(err).Str("source", source).Str("user_id", userID).Msg("initial sync failed")
+			return
+		}
+		h.logger.Info().Str("source", source).Str("user_id", userID).Msg("initial sync complete")
+	}()
+	return &startedAt
+}
+
+func connectionResponse(source string, startedAt *time.Time) map[string]any {
+	resp := map[string]any{
+		"status": "ok",
+		"source": source,
+	}
+	if startedAt != nil {
+		resp["sync_started_at"] = startedAt.Format(time.RFC3339Nano)
+	}
+	return resp
 }

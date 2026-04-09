@@ -82,12 +82,14 @@ export interface FitnessSummary {
   workouts_this_week: number
   distance_km_this_week: number
   activities_total: number
+  workouts_total: number
   total_distance_km: number
 }
 
 export interface WeekStat {
   week: string
-  count: number
+  activities_count: number
+  workouts_count: number
   km: number
 }
 
@@ -197,6 +199,12 @@ export interface Integration {
   record_count: number
 }
 
+export interface ConnectionResult {
+  status: string
+  source?: string
+  sync_started_at?: string
+}
+
 export const api = {
   getDashboardSummary: () => get<DashboardSummary>('/dashboard/summary'),
   getRecentTransactions: () => get<Transaction[]>('/dashboard/transactions'),
@@ -248,7 +256,10 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, ...extra }),
-    }).then(r => { if (!r.ok) throw new Error(r.statusText) }),
+    }).then(async r => {
+      if (!r.ok) throw new Error(r.statusText)
+      return r.json() as Promise<ConnectionResult>
+    }),
   me: () => get<User>('/auth/me'),
   register: (username: string, password: string) =>
     fetch(BASE + '/auth/register', {
