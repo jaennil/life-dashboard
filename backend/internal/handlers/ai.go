@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -285,70 +286,10 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string) (string, er
 	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).Scan(&weekWorkouts)
 	sb.WriteString(fmt.Sprintf("За эту неделю: %d тренировок\n", weekWorkouts))
 
-	wRows, err := h.db.Query(ctx, `
-		SELECT id, started_at, title FROM workouts WHERE user_id = $1 ORDER BY started_at DESC LIMIT 10
-	`, userID)
+	workoutContext, err := h.buildRecentWorkoutContext(ctx, userID)
 	if err == nil {
-		type workoutEntry struct {
-			id        string
-			startedAt time.Time
-			title     string
-		}
-		var recentWorkouts []workoutEntry
-		for wRows.Next() {
-			var w workoutEntry
-			if err := wRows.Scan(&w.id, &w.startedAt, &w.title); err == nil {
-				recentWorkouts = append(recentWorkouts, w)
-			}
-		}
-		wRows.Close()
-
-		for _, w := range recentWorkouts {
-			sb.WriteString(fmt.Sprintf("\nТренировка %s: %s\n", w.startedAt.Format("02.01.2006 15:04"), w.title))
-
-			setRows, err := h.db.Query(ctx, `
-				SELECT exercise_name, exercise_category, set_index, set_type,
-				       COALESCE(weight_kg::text, '-'), COALESCE(reps::text, '-')
-				FROM workout_sets
-				WHERE workout_id = $1
-				ORDER BY exercise_name, set_index
-			`, w.id)
-			if err != nil {
-				continue
-			}
-
-			type exKey = string
-			exSets := map[exKey][]string{}
-			exOrder := []string{}
-			for setRows.Next() {
-				var exName, exCat, setIdx, setType, weightKg, reps string
-				if err := setRows.Scan(&exName, &exCat, &setIdx, &setType, &weightKg, &reps); err != nil {
-					continue
-				}
-				if _, ok := exSets[exName]; !ok {
-					label := exName
-					if exCat != "" {
-						label += " (" + exCat + ")"
-					}
-					exOrder = append(exOrder, exName)
-					exSets[exName] = []string{}
-					_ = label
-				}
-				setDesc := fmt.Sprintf("Подход %s: %s кг x %s", setIdx, weightKg, reps)
-				if setType != "normal" && setType != "" {
-					setDesc += " [" + setType + "]"
-				}
-				exSets[exName] = append(exSets[exName], setDesc)
-			}
-			setRows.Close()
-
-			for _, exName := range exOrder {
-				sb.WriteString(fmt.Sprintf("  %s:\n", exName))
-				for _, s := range exSets[exName] {
-					sb.WriteString(fmt.Sprintf("    %s\n", s))
-				}
-			}
-		}
+		sb.WriteString("Ниже приведены последние тренировки с реальными упражнениями и подходами, если они сохранены в базе:\n")
+		sb.WriteString(workoutContext)
 	}
 
 	// === ПИТАНИЕ ===
@@ -506,4 +447,125 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string) (string, er
 	}
 
 	return sb.String(), nil
+}
+
+func (h *AIHandler) buildRecentWorkoutContext(ctx context.Context, userID string) (string, error) {
+	rows, err := h.db.Query(ctx, `
+		SELECT id, source, started_at, COALESCE(title,''), COALESCE(notes,''), raw_payload
+		FROM workouts
+		WHERE user_id = $1
+		ORDER BY started_at DESC
+		LIMIT 10
+	`, userID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	fitnessHelper := &FitnessHandler{db: h.db, logger: h.logger}
+	var sb strings.Builder
+
+	for rows.Next() {
+		var workout Workout
+		var rawPayload []byte
+		if err := rows.Scan(
+			&workout.ID,
+			&workout.Source,
+			&workout.StartedAt,
+			&workout.Title,
+			&workout.Notes,
+			&rawPayload,
+		); err != nil {
+			continue
+		}
+
+		if workout.Source == "hevy" && len(rawPayload) > 0 {
+			if err := hydrateHevyWorkout(&workout, rawPayload); err != nil {
+				h.logger.Warn().Str("workout_id", workout.ID).Err(err).Msg("failed to hydrate hevy workout for ai context")
+			}
+		}
+		if len(workout.Exercises) == 0 {
+			if err := fitnessHelper.loadNormalizedWorkoutExercises(ctx, &workout); err != nil {
+				h.logger.Warn().Str("workout_id", workout.ID).Err(err).Msg("failed to load workout exercises for ai context")
+			}
+		}
+
+		sb.WriteString(formatAIWorkoutContext(workout))
+	}
+
+	return sb.String(), nil
+}
+
+func formatAIWorkoutContext(workout Workout) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("\nТренировка %s: %s\n", workout.StartedAt.Format("02.01.2006 15:04"), workout.Title))
+	if workout.Notes != "" {
+		sb.WriteString(fmt.Sprintf("  Заметки: %s\n", truncateAIText(workout.Notes, 240)))
+	}
+	if len(workout.Exercises) == 0 {
+		sb.WriteString("  Деталей по упражнениям и подходам нет.\n")
+		return sb.String()
+	}
+
+	for _, ex := range workout.Exercises {
+		exerciseHeader := ex.Name
+		if ex.Category != "" {
+			exerciseHeader += " (" + ex.Category + ")"
+		}
+		if ex.Index > 0 {
+			exerciseHeader += fmt.Sprintf(" [блок %d]", ex.Index)
+		}
+		sb.WriteString(fmt.Sprintf("  %s:\n", exerciseHeader))
+		if ex.Notes != "" {
+			sb.WriteString(fmt.Sprintf("    Заметки: %s\n", truncateAIText(ex.Notes, 180)))
+		}
+
+		for _, set := range ex.Sets {
+			parts := make([]string, 0, 4)
+			if set.WeightKg != nil || set.Reps != nil {
+				weight := "-"
+				reps := "-"
+				if set.WeightKg != nil {
+					weight = formatAIFloat(*set.WeightKg)
+				}
+				if set.Reps != nil {
+					reps = strconv.Itoa(*set.Reps)
+				}
+				parts = append(parts, fmt.Sprintf("%s кг x %s", weight, reps))
+			}
+			if set.DistanceMeters != nil {
+				parts = append(parts, fmt.Sprintf("%s м", formatAIFloat(*set.DistanceMeters)))
+			}
+			if set.DurationSeconds != nil {
+				parts = append(parts, fmt.Sprintf("%d сек", *set.DurationSeconds))
+			}
+			if set.RPE != nil {
+				parts = append(parts, fmt.Sprintf("RPE %s", formatAIFloat(*set.RPE)))
+			}
+			if len(parts) == 0 {
+				parts = append(parts, "без числовых метрик")
+			}
+
+			sb.WriteString(fmt.Sprintf("    Подход %d: %s", set.SetIndex, strings.Join(parts, ", ")))
+			if set.SetType != "" && set.SetType != "normal" {
+				sb.WriteString(fmt.Sprintf(" [%s]", set.SetType))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
+}
+
+func truncateAIText(value string, maxLen int) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\n", " "))
+	if len(value) <= maxLen {
+		return value
+	}
+	return value[:maxLen] + "..."
+}
+
+func formatAIFloat(value float64) string {
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.1f", value), "0"), ".")
 }
