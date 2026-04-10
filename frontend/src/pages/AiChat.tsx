@@ -17,6 +17,26 @@ const SUGGESTIONS = [
   'Проанализируй мои финансы за месяц',
 ]
 
+function looksLikeHTML(value: string) {
+  const text = value.trim().toLowerCase()
+  return text.startsWith('<!doctype html') || text.startsWith('<html') || text.includes('<body') || text.includes('<title>')
+}
+
+function formatChatError(status: number, body: string) {
+  const text = body.trim()
+
+  if (status === 403) return 'AI чат сейчас отключён.'
+  if (status === 502 || status === 503 || status === 504) {
+    return 'AI сервис сейчас недоступен. Попробуй позже.'
+  }
+
+  if (!text || looksLikeHTML(text)) {
+    return 'Не удалось получить ответ от AI.'
+  }
+
+  return `Ошибка: ${text}`
+}
+
 export function AiChat() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -52,7 +72,7 @@ export function AiChat() {
         const err = await res.text()
         setMessages(prev => [
           ...prev.slice(0, -1),
-          { role: 'assistant', content: `Ошибка: ${err}` },
+          { role: 'assistant', content: formatChatError(res.status, err) },
         ])
         return
       }

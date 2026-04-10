@@ -6,24 +6,26 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	unleashclient "github.com/Unleash/unleash-client-go/v4"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	authmw "life-dashboard/internal/middleware"
 )
 
 type AIHandler struct {
-	db       *pgxpool.Pool
-	baseURL  string
-	model    string
-	apiKey   string
-	weather  *WeatherHandler
-	unleash  *unleashclient.Client
-	logger   zerolog.Logger
+	db      *pgxpool.Pool
+	baseURL string
+	model   string
+	apiKey  string
+	weather *WeatherHandler
+	unleash *unleashclient.Client
+	logger  zerolog.Logger
 }
 
 func NewAI(db *pgxpool.Pool, baseURL, model, apiKey string, weather *WeatherHandler, unleashClient *unleashclient.Client, logger zerolog.Logger) *AIHandler {
@@ -47,6 +49,13 @@ type ChatRequest struct {
 	Message string        `json:"message"`
 	History []ChatMessage `json:"history"`
 }
+
+const (
+	aiUpstreamDialTimeout     = 5 * time.Second
+	aiUpstreamHeaderTimeout   = 10 * time.Second
+	aiUpstreamRequestTimeout  = 15 * time.Second
+	aiUpstreamResponseLogSize = 512
+)
 
 func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	if h.unleash != nil && !h.unleash.IsEnabled("ai-chat") {
@@ -86,13 +95,21 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	messages = append(messages, req.History...)
 	messages = append(messages, ChatMessage{Role: "user", Content: req.Message})
 
-	body, _ := json.Marshal(map[string]any{
+	body, err := json.Marshal(map[string]any{
 		"model":    h.model,
 		"messages": messages,
 		"stream":   true,
 	})
+	if err != nil {
+		h.logger.Error().Err(err).Msg("marshal ai request")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
-	apiReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+	upstreamCtx, cancel := context.WithTimeout(ctx, aiUpstreamRequestTimeout)
+	defer cancel()
+
+	apiReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost,
 		h.baseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -103,18 +120,33 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		apiReq.Header.Set("Authorization", "Bearer "+h.apiKey)
 	}
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := &http.Client{
+		Timeout: aiUpstreamRequestTimeout,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   aiUpstreamDialTimeout,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   aiUpstreamDialTimeout,
+			ResponseHeaderTimeout: aiUpstreamHeaderTimeout,
+		},
+	}
 	resp, err := client.Do(apiReq)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("ai api request")
-		http.Error(w, "AI недоступен", http.StatusServiceUnavailable)
+		http.Error(w, "AI сервис временно недоступен. Попробуй позже.", http.StatusServiceUnavailable)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		h.logger.Error().Int("status", resp.StatusCode).Msg("ai api error")
-		http.Error(w, "AI вернул ошибку", http.StatusBadGateway)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, aiUpstreamResponseLogSize))
+		h.logger.Error().
+			Int("status", resp.StatusCode).
+			Str("body", strings.TrimSpace(string(body))).
+			Msg("ai api error")
+		http.Error(w, "AI сервис вернул ошибку. Попробуй позже.", http.StatusBadGateway)
 		return
 	}
 
@@ -258,9 +290,9 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string) (string, er
 	`, userID)
 	if err == nil {
 		type workoutEntry struct {
-			id       string
+			id        string
 			startedAt time.Time
-			title    string
+			title     string
 		}
 		var recentWorkouts []workoutEntry
 		for wRows.Next() {
@@ -429,11 +461,21 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string) (string, er
 			if calRows.Scan(&title, &startTime, &endTime, &allDay, &location) == nil {
 				if allDay {
 					calEvents = append(calEvents, fmt.Sprintf("  %s: %s (весь день)%s",
-						startTime.Format("02.01"), title, func() string { if location != "" { return " @ " + location }; return "" }()))
+						startTime.Format("02.01"), title, func() string {
+							if location != "" {
+								return " @ " + location
+							}
+							return ""
+						}()))
 				} else {
 					calEvents = append(calEvents, fmt.Sprintf("  %s %s-%s: %s%s",
 						startTime.Format("02.01"), startTime.Format("15:04"), endTime.Format("15:04"),
-						title, func() string { if location != "" { return " @ " + location }; return "" }()))
+						title, func() string {
+							if location != "" {
+								return " @ " + location
+							}
+							return ""
+						}()))
 				}
 			}
 		}

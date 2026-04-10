@@ -29,7 +29,7 @@ spec:
             - name: HTTP_PROXY
               value: "http://xray.proxy.svc.cluster.local:1081"
             - name: NO_PROXY
-              value: "localhost,127.0.0.1,postgres-rw,claude-code-api,.svc.cluster.local,.cluster.local,10.0.0.0/8,192.168.0.0/16"
+              value: "localhost,127.0.0.1,postgres-rw,claude-code-api,192.168.3.4,.svc.cluster.local,.cluster.local,10.0.0.0/8,192.168.0.0/16"
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
@@ -63,7 +63,7 @@ spec:
             - name: NOTION_REDIRECT_URI
               value: https://lifedash.dubrovskih.ru/api/v1/auth/notion/callback
             - name: AI_BASE_URL
-              value: http://claude-code-api.claude-code-api.svc.cluster.local:8000
+              value: http://192.168.3.4:8000
             - name: AI_MODEL
               value: claude-sonnet-4-5-20250514
 
