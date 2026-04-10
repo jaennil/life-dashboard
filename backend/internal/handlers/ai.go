@@ -53,8 +53,8 @@ type ChatRequest struct {
 
 const (
 	aiUpstreamDialTimeout     = 5 * time.Second
-	aiUpstreamHeaderTimeout   = 10 * time.Second
-	aiUpstreamRequestTimeout  = 15 * time.Second
+	aiUpstreamHeaderTimeout   = 30 * time.Second
+	aiUpstreamRequestTimeout  = 60 * time.Second
 	aiUpstreamResponseLogSize = 512
 )
 
