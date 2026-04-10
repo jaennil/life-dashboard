@@ -61,11 +61,11 @@ export function AiChat() {
     const assistantMsg: Message = { role: 'assistant', content: '', loading: true }
     setMessages(prev => [...prev, userMsg, assistantMsg])
 
-    try {
-      const res = await fetch('/api/v1/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, history }),
+	    try {
+	      const res = await fetch('/api/v1/ai/chat', {
+	        method: 'POST',
+	        headers: { 'Content-Type': 'application/json' },
+	        body: JSON.stringify({ message: text, history }),
       })
 
       if (!res.ok) {
@@ -77,32 +77,43 @@ export function AiChat() {
         return
       }
 
-      const reader = res.body!.getReader()
-      const decoder = new TextDecoder()
-      let accumulated = ''
+	      const reader = res.body!.getReader()
+	      const decoder = new TextDecoder()
+	      let accumulated = ''
+	      let streamFinished = false
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+	      while (!streamFinished) {
+	        const { done, value } = await reader.read()
+	        if (done) break
 
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n')
+	        const chunk = decoder.decode(value, { stream: true })
+	        const lines = chunk.split('\n')
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') break
-          accumulated += data.replaceAll('\\n', '\n')
-          setMessages(prev => [
-            ...prev.slice(0, -1),
-            { role: 'assistant', content: accumulated, loading: false },
-          ])
-        }
-      }
-    } catch (e) {
-      setMessages(prev => [
-        ...prev.slice(0, -1),
-        { role: 'assistant', content: 'Не удалось подключиться к AI.' },
+	        for (const line of lines) {
+	          if (!line.startsWith('data: ')) continue
+	          const data = line.slice(6)
+	          if (data === '[DONE]') {
+	            streamFinished = true
+	            break
+	          }
+	          accumulated += data.replaceAll('\\n', '\n')
+	          setMessages(prev => [
+	            ...prev.slice(0, -1),
+	            { role: 'assistant', content: accumulated, loading: false },
+	          ])
+	        }
+	      }
+
+	      if (!accumulated.trim()) {
+	        setMessages(prev => [
+	          ...prev.slice(0, -1),
+	          { role: 'assistant', content: 'AI сервис не вернул ответ. Попробуй ещё раз.' },
+	        ])
+	      }
+	    } catch (e) {
+	      setMessages(prev => [
+	        ...prev.slice(0, -1),
+	        { role: 'assistant', content: 'Не удалось подключиться к AI.' },
       ])
     } finally {
       setLoading(false)

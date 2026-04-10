@@ -56,6 +56,7 @@ const (
 	aiUpstreamHeaderTimeout   = 30 * time.Second
 	aiUpstreamRequestTimeout  = 60 * time.Second
 	aiUpstreamResponseLogSize = 512
+	aiUpstreamScannerMaxToken = 1024 * 1024
 )
 
 func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
@@ -159,8 +160,13 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
 
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), aiUpstreamScannerMaxToken)
+	sentContent := false
+	sawDone := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
@@ -168,6 +174,10 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		}
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
+			sawDone = true
+			if !sentContent {
+				fmt.Fprint(w, "data: AI сервис не вернул содержимого. Попробуй ещё раз.\n\n")
+			}
 			fmt.Fprint(w, "data: [DONE]\n\n")
 			flusher.Flush()
 			break
@@ -187,9 +197,25 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		if content == "" {
 			continue
 		}
+		sentContent = true
 		// Escape newlines so they don't break SSE protocol (\n\n ends an event)
 		encoded := strings.ReplaceAll(content, "\n", "\\n")
 		fmt.Fprintf(w, "data: %s\n\n", encoded)
+		flusher.Flush()
+	}
+	if err := scanner.Err(); err != nil {
+		h.logger.Error().Err(err).Msg("ai stream read error")
+		if !sentContent {
+			fmt.Fprint(w, "data: AI сервис сейчас недоступен. Попробуй позже.\n\n")
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			flusher.Flush()
+		}
+		return
+	}
+	if !sawDone && !sentContent {
+		h.logger.Warn().Msg("ai stream ended without content")
+		fmt.Fprint(w, "data: AI сервис не вернул ответ. Попробуй ещё раз.\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
 		flusher.Flush()
 	}
 }
