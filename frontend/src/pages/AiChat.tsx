@@ -9,6 +9,10 @@ interface Message {
   loading?: boolean
 }
 
+interface ChatResponse {
+  content: string
+}
+
 const SUGGESTIONS = [
   'Сколько я потратил в этом месяце?',
   'На что больше всего трачу деньги?',
@@ -52,10 +56,10 @@ export function AiChat() {
     .filter(m => !m.loading)
     .map(m => ({ role: m.role, content: m.content }))
 
-  async function send(text: string) {
-    if (!text.trim() || loading) return
-    setInput('')
-    setLoading(true)
+	  async function send(text: string) {
+	    if (!text.trim() || loading) return
+	    setInput('')
+	    setLoading(true)
 
     const userMsg: Message = { role: 'user', content: text }
     const assistantMsg: Message = { role: 'assistant', content: '', loading: true }
@@ -66,59 +70,44 @@ export function AiChat() {
 	        method: 'POST',
 	        headers: { 'Content-Type': 'application/json' },
 	        body: JSON.stringify({ message: text, history }),
-      })
+	      })
+	      const raw = await res.text()
 
-      if (!res.ok) {
-        const err = await res.text()
-        setMessages(prev => [
-          ...prev.slice(0, -1),
-          { role: 'assistant', content: formatChatError(res.status, err) },
-        ])
-        return
-      }
-
-	      const reader = res.body!.getReader()
-	      const decoder = new TextDecoder()
-	      let accumulated = ''
-	      let streamFinished = false
-
-	      while (!streamFinished) {
-	        const { done, value } = await reader.read()
-	        if (done) break
-
-	        const chunk = decoder.decode(value, { stream: true })
-	        const lines = chunk.split('\n')
-
-	        for (const line of lines) {
-	          if (!line.startsWith('data: ')) continue
-	          const data = line.slice(6)
-	          if (data === '[DONE]') {
-	            streamFinished = true
-	            break
-	          }
-	          accumulated += data.replaceAll('\\n', '\n')
-	          setMessages(prev => [
-	            ...prev.slice(0, -1),
-	            { role: 'assistant', content: accumulated, loading: false },
-	          ])
-	        }
-	      }
-
-	      if (!accumulated.trim()) {
+	      if (!res.ok) {
 	        setMessages(prev => [
 	          ...prev.slice(0, -1),
-	          { role: 'assistant', content: 'AI сервис не вернул ответ. Попробуй ещё раз.' },
+	          { role: 'assistant', content: formatChatError(res.status, raw) },
 	        ])
+	        return
 	      }
-	    } catch (e) {
+
+	      let content = raw
+	      try {
+	        const parsed = JSON.parse(raw) as ChatResponse
+	        if (typeof parsed.content === 'string') {
+	          content = parsed.content
+	        }
+	      } catch {
+	        // Keep raw body as fallback if proxy/service returns plain text.
+	      }
+
+	      if (!content.trim() || looksLikeHTML(content)) {
+	        content = 'AI сервис не вернул ответ. Попробуй ещё раз.'
+	      }
+
+	      setMessages(prev => [
+	        ...prev.slice(0, -1),
+	        { role: 'assistant', content, loading: false },
+	      ])
+	    } catch {
 	      setMessages(prev => [
 	        ...prev.slice(0, -1),
 	        { role: 'assistant', content: 'Не удалось подключиться к AI.' },
-      ])
-    } finally {
-      setLoading(false)
-    }
-  }
+	      ])
+	    } finally {
+	      setLoading(false)
+	    }
+	  }
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
