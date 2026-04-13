@@ -330,7 +330,7 @@ export function Dashboard() {
           <StatCard
             title="Баланс"
             value={summary ? fmt(summary.finance.total_balance, 'RUB') : '—'}
-            sub="по всем счетам"
+            sub="по счетам в балансе"
             icon={Wallet}
             color="bg-blue-500"
             loading={loading}

@@ -65,6 +65,7 @@ export interface Account {
   type: string
   currency: string
   balance: number
+  in_balance: boolean
 }
 
 export interface FinanceTransaction {

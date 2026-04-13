@@ -33,11 +33,12 @@ type MonthStat struct {
 }
 
 type Account struct {
-	ID       string  `json:"id"`
-	Title    string  `json:"title"`
-	Type     string  `json:"type"`
-	Currency string  `json:"currency"`
-	Balance  float64 `json:"balance"`
+	ID        string  `json:"id"`
+	Title     string  `json:"title"`
+	Type      string  `json:"type"`
+	Currency  string  `json:"currency"`
+	Balance   float64 `json:"balance"`
+	InBalance bool    `json:"in_balance"`
 }
 
 type FinanceTransaction struct {
@@ -68,15 +69,18 @@ func (h *FinanceHandler) GetMonthly(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.Query(ctx, `
 		SELECT
-			TO_CHAR(DATE_TRUNC('month', occurred_at), 'YYYY-MM') as month,
-			COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as spending,
-			COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as income
-		FROM transactions
-		WHERE currency = 'RUB' AND is_transfer = false
-			AND occurred_at >= DATE_TRUNC('month', NOW()) - INTERVAL '5 months'
-			AND user_id = $1
-		GROUP BY DATE_TRUNC('month', occurred_at)
-		ORDER BY DATE_TRUNC('month', occurred_at) ASC
+			TO_CHAR(DATE_TRUNC('month', t.occurred_at), 'YYYY-MM') as month,
+			COALESCE(SUM(CASE WHEN t.amount < 0 THEN ABS(t.amount) ELSE 0 END), 0) as spending,
+			COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0) as income
+		FROM transactions t
+		LEFT JOIN accounts a ON a.id = t.account_id
+		WHERE t.currency = 'RUB'
+			AND t.is_transfer = false
+			AND t.occurred_at >= DATE_TRUNC('month', NOW()) - INTERVAL '5 months'
+			AND t.user_id = $1
+			AND COALESCE(a.in_balance, TRUE) = TRUE
+		GROUP BY DATE_TRUNC('month', t.occurred_at)
+		ORDER BY DATE_TRUNC('month', t.occurred_at) ASC
 	`, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query monthly")
@@ -103,10 +107,10 @@ func (h *FinanceHandler) GetAccounts(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
-		SELECT id, title, COALESCE(type, ''), currency, COALESCE(balance, 0)
+		SELECT id, title, COALESCE(type, ''), currency, COALESCE(balance, 0), in_balance
 		FROM accounts
 		WHERE balance != 0 AND user_id = $1
-		ORDER BY currency, balance DESC
+		ORDER BY in_balance DESC, currency, balance DESC
 	`, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query accounts")
@@ -118,7 +122,7 @@ func (h *FinanceHandler) GetAccounts(w http.ResponseWriter, r *http.Request) {
 	accounts := make([]Account, 0)
 	for rows.Next() {
 		var a Account
-		if err := rows.Scan(&a.ID, &a.Title, &a.Type, &a.Currency, &a.Balance); err != nil {
+		if err := rows.Scan(&a.ID, &a.Title, &a.Type, &a.Currency, &a.Balance, &a.InBalance); err != nil {
 			continue
 		}
 		accounts = append(accounts, a)
@@ -142,13 +146,15 @@ func (h *FinanceHandler) GetSpendingByCategory(w http.ResponseWriter, r *http.Re
 	}
 
 	rows, err := h.db.Query(ctx, `
-		SELECT COALESCE(category, 'Без категории') as category, SUM(ABS(amount)) as total
-		FROM transactions
-		WHERE amount < 0
-		  AND is_transfer = false
-		  AND currency = 'RUB'
-		  AND occurred_at >= $1
-		  AND user_id = $2
+		SELECT COALESCE(t.category, 'Без категории') as category, SUM(ABS(t.amount)) as total
+		FROM transactions t
+		LEFT JOIN accounts a ON a.id = t.account_id
+		WHERE t.amount < 0
+		  AND t.is_transfer = false
+		  AND t.currency = 'RUB'
+		  AND t.occurred_at >= $1
+		  AND t.user_id = $2
+		  AND COALESCE(a.in_balance, TRUE) = TRUE
 		GROUP BY category
 		ORDER BY total DESC
 		LIMIT 15
@@ -193,56 +199,57 @@ func (h *FinanceHandler) GetTransactions(w http.ResponseWriter, r *http.Request)
 	limit := 30
 	offset := (page - 1) * limit
 
-	conditions := "is_transfer = false AND user_id = $1"
+	conditions := "t.is_transfer = false AND t.user_id = $1 AND COALESCE(a.in_balance, TRUE) = TRUE"
 	args := []any{userID}
 	argN := 2
 
 	switch filter {
 	case "income":
-		conditions += " AND amount > 0"
+		conditions += " AND t.amount > 0"
 	case "expense":
-		conditions += " AND amount < 0"
+		conditions += " AND t.amount < 0"
 	}
 
 	if category != "" {
-		conditions += fmt.Sprintf(" AND category = $%d", argN)
+		conditions += fmt.Sprintf(" AND t.category = $%d", argN)
 		args = append(args, category)
 		argN++
 	}
 
 	if search != "" {
-		conditions += fmt.Sprintf(" AND (COALESCE(comment,'') ILIKE $%d OR COALESCE(payee,'') ILIKE $%d)", argN, argN)
+		conditions += fmt.Sprintf(" AND (COALESCE(t.comment,'') ILIKE $%d OR COALESCE(t.payee,'') ILIKE $%d)", argN, argN)
 		args = append(args, "%"+search+"%")
 		argN++
 	}
 
 	if from != "" {
-		conditions += fmt.Sprintf(" AND occurred_at >= $%d", argN)
+		conditions += fmt.Sprintf(" AND t.occurred_at >= $%d", argN)
 		args = append(args, from)
 		argN++
 	}
 	if to != "" {
-		conditions += fmt.Sprintf(" AND occurred_at <= $%d", argN)
+		conditions += fmt.Sprintf(" AND t.occurred_at <= $%d", argN)
 		args = append(args, to)
 		argN++
 	}
 
-	orderBy := "occurred_at DESC"
+	orderBy := "t.occurred_at DESC"
 	switch sortBy {
 	case "amount":
-		orderBy = "ABS(amount) DESC"
+		orderBy = "ABS(t.amount) DESC"
 	case "amount_asc":
-		orderBy = "ABS(amount) ASC"
+		orderBy = "ABS(t.amount) ASC"
 	case "date_asc":
-		orderBy = "occurred_at ASC"
+		orderBy = "t.occurred_at ASC"
 	case "category":
-		orderBy = "category, occurred_at DESC"
+		orderBy = "t.category, t.occurred_at DESC"
 	}
 
 	args = append(args, limit, offset)
 	query := fmt.Sprintf(`
-		SELECT id, occurred_at, amount, currency, COALESCE(comment, ''), payee, category
-		FROM transactions
+		SELECT t.id, t.occurred_at, t.amount, t.currency, COALESCE(t.comment, ''), t.payee, t.category
+		FROM transactions t
+		LEFT JOIN accounts a ON a.id = t.account_id
 		WHERE %s
 		ORDER BY %s
 		LIMIT $%d OFFSET $%d
@@ -284,15 +291,19 @@ func (h *FinanceHandler) GetDailyTotals(w http.ResponseWriter, r *http.Request) 
 	}
 
 	rows, err := h.db.Query(ctx, `
-		SELECT TO_CHAR(occurred_at::date, 'YYYY-MM-DD'),
-			COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0)
-		FROM transactions
-		WHERE is_transfer = false AND currency = 'RUB'
-			AND occurred_at >= $1 AND occurred_at <= $2
-			AND user_id = $3
-		GROUP BY occurred_at::date
-		ORDER BY occurred_at::date
+		SELECT TO_CHAR(t.occurred_at::date, 'YYYY-MM-DD'),
+			COALESCE(SUM(CASE WHEN t.amount < 0 THEN ABS(t.amount) ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0)
+		FROM transactions t
+		LEFT JOIN accounts a ON a.id = t.account_id
+		WHERE t.is_transfer = false
+			AND t.currency = 'RUB'
+			AND t.occurred_at >= $1
+			AND t.occurred_at <= $2
+			AND t.user_id = $3
+			AND COALESCE(a.in_balance, TRUE) = TRUE
+		GROUP BY t.occurred_at::date
+		ORDER BY t.occurred_at::date
 	`, from, to, userID)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -326,14 +337,19 @@ func (h *FinanceHandler) GetTopExpenses(w http.ResponseWriter, r *http.Request) 
 	}
 
 	rows, err := h.db.Query(ctx, `
-		SELECT COALESCE(NULLIF(payee,''), NULLIF(comment,''), 'Без описания'),
-			SUM(ABS(amount)), COUNT(*)
-		FROM transactions
-		WHERE amount < 0 AND is_transfer = false AND currency = 'RUB'
-			AND occurred_at >= $1 AND occurred_at <= $2
-			AND user_id = $3
-		GROUP BY COALESCE(NULLIF(payee,''), NULLIF(comment,''), 'Без описания')
-		ORDER BY SUM(ABS(amount)) DESC
+		SELECT COALESCE(NULLIF(t.payee,''), NULLIF(t.comment,''), 'Без описания'),
+			SUM(ABS(t.amount)), COUNT(*)
+		FROM transactions t
+		LEFT JOIN accounts a ON a.id = t.account_id
+		WHERE t.amount < 0
+			AND t.is_transfer = false
+			AND t.currency = 'RUB'
+			AND t.occurred_at >= $1
+			AND t.occurred_at <= $2
+			AND t.user_id = $3
+			AND COALESCE(a.in_balance, TRUE) = TRUE
+		GROUP BY COALESCE(NULLIF(t.payee,''), NULLIF(t.comment,''), 'Без описания')
+		ORDER BY SUM(ABS(t.amount)) DESC
 		LIMIT 10
 	`, from, to, userID)
 	if err != nil {
@@ -359,8 +375,12 @@ func (h *FinanceHandler) GetCategoryList(w http.ResponseWriter, r *http.Request)
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
-		SELECT DISTINCT COALESCE(category, 'Без категории')
-		FROM transactions WHERE user_id = $1 AND is_transfer = false
+		SELECT DISTINCT COALESCE(t.category, 'Без категории')
+		FROM transactions t
+		LEFT JOIN accounts a ON a.id = t.account_id
+		WHERE t.user_id = $1
+			AND t.is_transfer = false
+			AND COALESCE(a.in_balance, TRUE) = TRUE
 		ORDER BY 1
 	`, userID)
 	if err != nil {

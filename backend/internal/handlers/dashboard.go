@@ -20,15 +20,15 @@ func NewDashboard(db *pgxpool.Pool, logger zerolog.Logger) *DashboardHandler {
 }
 
 type DashboardSummary struct {
-	Finance  FinanceSummary  `json:"finance"`
-	Fitness  FitnessSummary  `json:"fitness"`
+	Finance FinanceSummary `json:"finance"`
+	Fitness FitnessSummary `json:"fitness"`
 }
 
 type FinanceSummary struct {
-	TotalBalance     float64 `json:"total_balance"`
-	Currency         string  `json:"currency"`
-	MonthlySpending  float64 `json:"monthly_spending"`
-	MonthlyIncome    float64 `json:"monthly_income"`
+	TotalBalance    float64 `json:"total_balance"`
+	Currency        string  `json:"currency"`
+	MonthlySpending float64 `json:"monthly_spending"`
+	MonthlyIncome   float64 `json:"monthly_income"`
 }
 
 type FitnessSummary struct {
@@ -48,7 +48,7 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	_ = h.db.QueryRow(ctx, `
 		SELECT COALESCE(SUM(balance), 0)
 		FROM accounts
-		WHERE currency = 'RUB' AND balance > 0 AND user_id = $1
+		WHERE currency = 'RUB' AND in_balance = TRUE AND user_id = $1
 	`, userID).Scan(&summary.Finance.TotalBalance)
 
 	// Monthly spending / income
@@ -58,8 +58,13 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0)
-		FROM transactions
-		WHERE currency = 'RUB' AND occurred_at >= $1 AND is_transfer = false AND user_id = $2
+		FROM transactions t
+		LEFT JOIN accounts a ON a.id = t.account_id
+		WHERE t.currency = 'RUB'
+			AND t.occurred_at >= $1
+			AND t.is_transfer = false
+			AND t.user_id = $2
+			AND COALESCE(a.in_balance, TRUE) = TRUE
 	`, monthStart, userID).Scan(&summary.Finance.MonthlySpending, &summary.Finance.MonthlyIncome)
 
 	// Activities this week
@@ -98,10 +103,13 @@ func (h *DashboardHandler) GetRecentTransactions(w http.ResponseWriter, r *http.
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
-		SELECT id, occurred_at, amount, currency, COALESCE(comment, ''), payee, is_transfer
-		FROM transactions
-		WHERE is_transfer = false AND user_id = $1
-		ORDER BY occurred_at DESC
+		SELECT t.id, t.occurred_at, t.amount, t.currency, COALESCE(t.comment, ''), t.payee, t.is_transfer
+		FROM transactions t
+		LEFT JOIN accounts a ON a.id = t.account_id
+		WHERE t.is_transfer = false
+			AND t.user_id = $1
+			AND COALESCE(a.in_balance, TRUE) = TRUE
+		ORDER BY t.occurred_at DESC
 		LIMIT 10
 	`, userID)
 	if err != nil {

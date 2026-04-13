@@ -44,13 +44,14 @@ type zenmoneyInstrument struct {
 }
 
 type zenmoneyAccount struct {
-	ID       string  `json:"id"`
-	Title    string  `json:"title"`
-	Type     string  `json:"type"`
-	Currency int     `json:"currency"`
-	Balance  float64 `json:"balance"`
-	Archived bool    `json:"archived"`
-	Deleted  bool    `json:"deleted"`
+	ID        string  `json:"id"`
+	Title     string  `json:"title"`
+	Type      string  `json:"type"`
+	Currency  int     `json:"currency"`
+	Balance   float64 `json:"balance"`
+	InBalance *bool   `json:"inBalance"`
+	Archived  bool    `json:"archived"`
+	Deleted   bool    `json:"deleted"`
 }
 
 type zenmoneyTransaction struct {
@@ -356,21 +357,34 @@ func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, userID string, ac
 	}
 
 	_, err := z.db.Exec(ctx, `
-		INSERT INTO accounts (external_id, title, type, currency, balance, last_updated, user_id)
-		VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+		INSERT INTO accounts (external_id, title, type, currency, balance, in_balance, last_updated, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)
 		ON CONFLICT (user_id, external_id) DO UPDATE SET
 			title        = EXCLUDED.title,
 			type         = EXCLUDED.type,
 			currency     = EXCLUDED.currency,
 			balance      = EXCLUDED.balance,
+			in_balance   = EXCLUDED.in_balance,
 			last_updated = EXCLUDED.last_updated
-	`, acc.ID, acc.Title, acc.Type, currency, acc.Balance, userID)
+	`, acc.ID, acc.Title, acc.Type, currency, acc.Balance, zenmoneyAccountInBalance(acc), userID)
 	if err != nil {
 		return err
 	}
 
-	z.logger.Debug().Str("id", acc.ID).Str("title", acc.Title).Float64("balance", acc.Balance).Msg("account upserted")
+	z.logger.Debug().
+		Str("id", acc.ID).
+		Str("title", acc.Title).
+		Float64("balance", acc.Balance).
+		Bool("in_balance", zenmoneyAccountInBalance(acc)).
+		Msg("account upserted")
 	return nil
+}
+
+func zenmoneyAccountInBalance(acc *zenmoneyAccount) bool {
+	if acc.InBalance == nil {
+		return true
+	}
+	return *acc.InBalance
 }
 
 func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, userID string, tx *zenmoneyTransaction, currencies map[int]string, tagNames map[string]string) error {

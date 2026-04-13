@@ -254,30 +254,41 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 		sb.WriteString("=== ФИНАНСЫ ===\n")
 
 		rows, err := h.db.Query(ctx, `
-			SELECT title, currency, balance, type
-			FROM accounts WHERE balance != 0 AND user_id = $1
-			ORDER BY balance DESC LIMIT 10
+			SELECT title, currency, balance, type, in_balance
+			FROM accounts
+			WHERE balance != 0 AND user_id = $1
+			ORDER BY in_balance DESC, balance DESC LIMIT 10
 		`, userID)
 		if err == nil {
 			sb.WriteString("Счета:\n")
 			for rows.Next() {
 				var title, currency, accType string
 				var balance float64
-				if err := rows.Scan(&title, &currency, &balance, &accType); err == nil {
-					sb.WriteString(fmt.Sprintf("  - %s (%s): %.0f %s\n", title, accType, balance, currency))
+				var inBalance bool
+				if err := rows.Scan(&title, &currency, &balance, &accType, &inBalance); err == nil {
+					visibility := ""
+					if !inBalance {
+						visibility = " [вне баланса]"
+					}
+					sb.WriteString(fmt.Sprintf("  - %s (%s%s): %.0f %s\n", title, accType, visibility, balance, currency))
 				}
 			}
 			rows.Close()
 		}
 
 		var totalBalance, monthSpending, monthIncome float64
-		h.db.QueryRow(ctx, `SELECT COALESCE(SUM(balance),0) FROM accounts WHERE currency='RUB' AND balance > 0 AND user_id = $1`, userID).Scan(&totalBalance)
+		h.db.QueryRow(ctx, `SELECT COALESCE(SUM(balance),0) FROM accounts WHERE currency='RUB' AND in_balance = TRUE AND user_id = $1`, userID).Scan(&totalBalance)
 		h.db.QueryRow(ctx, `
 			SELECT
-				COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0),
-				COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0)
-			FROM transactions
-			WHERE currency='RUB' AND occurred_at >= $1 AND is_transfer=false AND user_id = $2
+				COALESCE(SUM(CASE WHEN t.amount < 0 THEN ABS(t.amount) ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0)
+			FROM transactions t
+			LEFT JOIN accounts a ON a.id = t.account_id
+			WHERE t.currency='RUB'
+				AND t.occurred_at >= $1
+				AND t.is_transfer=false
+				AND t.user_id = $2
+				AND COALESCE(a.in_balance, TRUE) = TRUE
 		`, monthStart, userID).Scan(&monthSpending, &monthIncome)
 
 		sb.WriteString(fmt.Sprintf("Общий баланс (RUB): %.0f ₽\n", totalBalance))
@@ -285,9 +296,13 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 		sb.WriteString(fmt.Sprintf("Доходы за текущий месяц: %.0f ₽\n", monthIncome))
 
 		txRows, err := h.db.Query(ctx, `
-			SELECT occurred_at, amount, currency, COALESCE(payee, comment, '') as label
-			FROM transactions WHERE is_transfer=false AND user_id = $1
-			ORDER BY occurred_at DESC LIMIT 30
+			SELECT t.occurred_at, t.amount, t.currency, COALESCE(t.payee, t.comment, '') as label
+			FROM transactions t
+			LEFT JOIN accounts a ON a.id = t.account_id
+			WHERE t.is_transfer=false
+				AND t.user_id = $1
+				AND COALESCE(a.in_balance, TRUE) = TRUE
+			ORDER BY t.occurred_at DESC LIMIT 30
 		`, userID)
 		if err == nil {
 			sb.WriteString("Последние транзакции:\n")

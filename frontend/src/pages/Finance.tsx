@@ -140,7 +140,7 @@ export function Finance() {
 
   const currentMonth = monthly[monthly.length - 1]
   const totalBalance = accounts
-    .filter(a => a.currency === 'RUB' && a.balance > 0)
+    .filter(a => a.currency === 'RUB' && a.in_balance)
     .reduce((sum, a) => sum + a.balance, 0)
 
   return (
@@ -188,7 +188,7 @@ export function Finance() {
           {loading
             ? <div className="h-8 w-32 bg-muted rounded animate-pulse" />
             : <div className="text-2xl font-bold text-foreground">{fmt(totalBalance)}</div>}
-          <span className="text-xs text-muted-foreground">по всем счетам</span>
+          <span className="text-xs text-muted-foreground">по счетам в балансе</span>
         </div>
 
         <div className="rounded-xl border bg-card p-5 flex flex-col gap-2">
@@ -324,7 +324,14 @@ export function Finance() {
                 <div key={a.id} className="px-5 py-3 flex items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-foreground truncate">{a.title}</p>
-                    <p className="text-xs text-muted-foreground">{a.type}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs text-muted-foreground">{a.type}</p>
+                      {!a.in_balance ? (
+                        <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-200">
+                          Вне баланса
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   <span className={cn('text-sm font-medium tabular-nums shrink-0', a.balance >= 0 ? 'text-foreground' : 'text-rose-500')}>
                     {fmt(a.balance, a.currency)}
