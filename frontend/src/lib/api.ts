@@ -216,6 +216,13 @@ export interface ConnectionResult {
   sync_started_at?: string
 }
 
+export interface AIHistoryMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+}
+
 export const api = {
   getDashboardSummary: () => get<DashboardSummary>('/dashboard/summary'),
   getRecentTransactions: () => get<Transaction[]>('/dashboard/transactions'),
@@ -262,6 +269,11 @@ export const api = {
   syncIntegration: (name: string) =>
     fetch(BASE + `/sync/${name}`, { method: 'POST' })
       .then(r => { if (!r.ok) throw new Error(r.statusText) }),
+  getAIHistory: () => get<AIHistoryMessage[]>('/ai/history'),
+  clearAIHistory: () =>
+    fetch(BASE + '/ai/history', { method: 'DELETE' }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+    }),
   saveToken: (name: string, token: string, extra?: Record<string, string>) =>
     fetch(BASE + `/integrations/${name}/token`, {
       method: 'POST',

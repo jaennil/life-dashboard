@@ -282,6 +282,8 @@ func main() {
 		}
 
 		aiHandler := handlers.NewAI(pool, cfg.AI.BaseURL, cfg.AI.Model, cfg.AI.APIKey, weatherHandler, unleashClient, log.Logger)
+		r.Get("/api/v1/ai/history", aiHandler.GetHistory)
+		r.Delete("/api/v1/ai/history", aiHandler.ClearHistory)
 		r.Post("/api/v1/ai/chat", aiHandler.Chat)
 
 		if stravaConn != nil {

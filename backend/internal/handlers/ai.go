@@ -194,6 +194,8 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.storeChatExchange(ctx, userID, req.Message, content)
+
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(respBody); err != nil {
 		h.logger.Error().Err(err).Msg("write ai response")
