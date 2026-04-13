@@ -52,8 +52,8 @@ type ChatRequest struct {
 
 const (
 	aiUpstreamDialTimeout     = 5 * time.Second
-	aiUpstreamHeaderTimeout   = 30 * time.Second
-	aiUpstreamRequestTimeout  = 60 * time.Second
+	aiUpstreamHeaderTimeout   = 150 * time.Second
+	aiUpstreamRequestTimeout  = 150 * time.Second
 	aiUpstreamResponseLogSize = 512
 )
 
@@ -182,8 +182,15 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	respBody, err := json.Marshal(map[string]string{"content": content})
+	if err != nil {
+		h.logger.Error().Err(err).Msg("marshal ai response")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{"content": content}); err != nil {
+	if _, err := w.Write(respBody); err != nil {
 		h.logger.Error().Err(err).Msg("write ai response")
 	}
 }

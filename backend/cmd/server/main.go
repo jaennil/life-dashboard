@@ -9,12 +9,12 @@ import (
 	"syscall"
 	"time"
 
+	unleashclient "github.com/Unleash/unleash-client-go/v4"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
-	unleashclient "github.com/Unleash/unleash-client-go/v4"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -224,13 +224,13 @@ func main() {
 		r.Post("/api/v1/sync/{source}", syncHandler.TriggerSync)
 
 		configuredMap := map[string]bool{
-			"strava":           cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
-			"hevy":             true,
-			"zenmoney":         true,
-			"myfitnesspal":     mfpEnabled,
-			"fatsecret":        fsc.ClientID != "" && fsc.ClientSecret != "",
-			"google_calendar":  gc.ClientID != "" && gc.ClientSecret != "",
-			"notion":           true,
+			"strava":          cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
+			"hevy":            true,
+			"zenmoney":        true,
+			"myfitnesspal":    mfpEnabled,
+			"fatsecret":       fsc.ClientID != "" && fsc.ClientSecret != "",
+			"google_calendar": gc.ClientID != "" && gc.ClientSecret != "",
+			"notion":          true,
 		}
 		integrationsHandler := handlers.NewIntegrations(pool, activeConnectors, configuredMap, log.Logger)
 		r.Get("/api/v1/integrations", integrationsHandler.GetIntegrations)
@@ -315,7 +315,7 @@ func main() {
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 120 * time.Second,
+		WriteTimeout: 180 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

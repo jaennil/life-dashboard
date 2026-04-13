@@ -13,6 +13,11 @@ interface ChatResponse {
   content: string
 }
 
+interface SendResult {
+  content: string
+  isError?: boolean
+}
+
 const SUGGESTIONS = [
   'Сколько я потратил в этом месяце?',
   'На что больше всего трачу деньги?',
@@ -41,6 +46,79 @@ function formatChatError(status: number, body: string) {
   return `Ошибка: ${text}`
 }
 
+const RETRYABLE_CHAT_STATUSES = new Set([502, 503, 504])
+const CHAT_RETRY_DELAY_MS = 400
+
+function sleep(ms: number) {
+  return new Promise(resolve => window.setTimeout(resolve, ms))
+}
+
+async function requestChat(message: string, history: Message[]): Promise<SendResult> {
+  const payload = JSON.stringify({
+    message,
+    history: history
+      .filter(m => !m.loading)
+      .map(m => ({ role: m.role, content: m.content })),
+  })
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch('/api/v1/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+      })
+      const raw = await res.text()
+
+      if (!res.ok) {
+        if (attempt === 0 && RETRYABLE_CHAT_STATUSES.has(res.status)) {
+          await sleep(CHAT_RETRY_DELAY_MS)
+          continue
+        }
+
+        return {
+          content: formatChatError(res.status, raw),
+          isError: true,
+        }
+      }
+
+      let content = raw
+      try {
+        const parsed = JSON.parse(raw) as ChatResponse
+        if (typeof parsed.content === 'string') {
+          content = parsed.content
+        }
+      } catch {
+        // Keep raw body as fallback if proxy/service returns plain text.
+      }
+
+      if (!content.trim() || looksLikeHTML(content)) {
+        if (attempt === 0) {
+          await sleep(CHAT_RETRY_DELAY_MS)
+          continue
+        }
+
+        return {
+          content: 'AI сервис не вернул ответ. Попробуй ещё раз.',
+          isError: true,
+        }
+      }
+
+      return { content }
+    } catch {
+      if (attempt === 0) {
+        await sleep(CHAT_RETRY_DELAY_MS)
+        continue
+      }
+    }
+  }
+
+  return {
+    content: 'Не удалось подключиться к AI.',
+    isError: true,
+  }
+}
+
 export function AiChat() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -52,62 +130,25 @@ export function AiChat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const history = messages
-    .filter(m => !m.loading)
-    .map(m => ({ role: m.role, content: m.content }))
-
-	  async function send(text: string) {
-	    if (!text.trim() || loading) return
-	    setInput('')
-	    setLoading(true)
+  async function send(text: string) {
+    if (!text.trim() || loading) return
+    setInput('')
+    setLoading(true)
 
     const userMsg: Message = { role: 'user', content: text }
     const assistantMsg: Message = { role: 'assistant', content: '', loading: true }
     setMessages(prev => [...prev, userMsg, assistantMsg])
 
-	    try {
-	      const res = await fetch('/api/v1/ai/chat', {
-	        method: 'POST',
-	        headers: { 'Content-Type': 'application/json' },
-	        body: JSON.stringify({ message: text, history }),
-	      })
-	      const raw = await res.text()
-
-	      if (!res.ok) {
-	        setMessages(prev => [
-	          ...prev.slice(0, -1),
-	          { role: 'assistant', content: formatChatError(res.status, raw) },
-	        ])
-	        return
-	      }
-
-	      let content = raw
-	      try {
-	        const parsed = JSON.parse(raw) as ChatResponse
-	        if (typeof parsed.content === 'string') {
-	          content = parsed.content
-	        }
-	      } catch {
-	        // Keep raw body as fallback if proxy/service returns plain text.
-	      }
-
-	      if (!content.trim() || looksLikeHTML(content)) {
-	        content = 'AI сервис не вернул ответ. Попробуй ещё раз.'
-	      }
-
-	      setMessages(prev => [
-	        ...prev.slice(0, -1),
-	        { role: 'assistant', content, loading: false },
-	      ])
-	    } catch {
-	      setMessages(prev => [
-	        ...prev.slice(0, -1),
-	        { role: 'assistant', content: 'Не удалось подключиться к AI.' },
-	      ])
-	    } finally {
-	      setLoading(false)
-	    }
-	  }
+    try {
+      const result = await requestChat(text, messages)
+      setMessages(prev => [
+        ...prev.slice(0, -1),
+        { role: 'assistant', content: result.content, loading: false },
+      ])
+    } finally {
+      setLoading(false)
+    }
+  }
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
