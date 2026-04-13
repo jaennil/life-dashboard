@@ -3,7 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
   PieChart, Pie, Cell, AreaChart, Area,
 } from 'recharts'
-import { Wallet, TrendingDown, TrendingUp, Search } from 'lucide-react'
+import { Wallet, TrendingDown, TrendingUp, Search, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   api,
@@ -54,6 +54,14 @@ function dateOffset(days: number) {
   const d = new Date()
   d.setDate(d.getDate() - days)
   return d.toISOString().split('T')[0]
+}
+
+function formatAccountCount(count: number) {
+  const mod10 = count % 10
+  const mod100 = count % 100
+  if (mod10 === 1 && mod100 !== 11) return `${count} счёт`
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} счёта`
+  return `${count} счетов`
 }
 
 const ChartTooltip = ({ active, payload, label, formatter }: any) => {
@@ -139,8 +147,12 @@ export function Finance() {
   }
 
   const currentMonth = monthly[monthly.length - 1]
-  const totalBalance = accounts
-    .filter(a => a.currency === 'RUB' && a.in_balance)
+  const includedAccounts = accounts.filter(a => a.in_balance)
+  const excludedAccounts = accounts.filter(a => !a.in_balance)
+  const totalBalance = includedAccounts
+    .reduce((sum, a) => sum + a.balance, 0)
+  const excludedBalance = excludedAccounts
+    .filter(a => a.currency === 'RUB')
     .reduce((sum, a) => sum + a.balance, 0)
 
   return (
@@ -177,7 +189,7 @@ export function Finance() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <div className="rounded-xl border bg-card p-5 flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Баланс</span>
@@ -188,7 +200,24 @@ export function Finance() {
           {loading
             ? <div className="h-8 w-32 bg-muted rounded animate-pulse" />
             : <div className="text-2xl font-bold text-foreground">{fmt(totalBalance)}</div>}
-          <span className="text-xs text-muted-foreground">по счетам в балансе</span>
+          <span className="text-xs text-muted-foreground">
+            {loading ? 'загрузка...' : `${formatAccountCount(includedAccounts.length)} в балансе`}
+          </span>
+        </div>
+
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Вне баланса</span>
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-500">
+              <EyeOff className="w-4 h-4 text-white" />
+            </div>
+          </div>
+          {loading
+            ? <div className="h-8 w-32 bg-muted rounded animate-pulse" />
+            : <div className="text-2xl font-bold text-foreground">{fmt(excludedBalance)}</div>}
+          <span className="text-xs text-muted-foreground">
+            {loading ? 'загрузка...' : `${formatAccountCount(excludedAccounts.length)} исключено из общего баланса`}
+          </span>
         </div>
 
         <div className="rounded-xl border bg-card p-5 flex flex-col gap-2">
@@ -217,6 +246,17 @@ export function Finance() {
           <span className="text-xs text-muted-foreground">текущий месяц</span>
         </div>
       </div>
+
+      {!loading && excludedAccounts.length > 0 ? (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-5 py-4">
+          <p className="text-sm font-medium text-foreground">Часть счетов исключена из общего баланса</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            ZenMoney помечает {formatAccountCount(excludedAccounts.length)} как не участвующие в общем балансе.
+            Их сумма: {fmt(excludedBalance)}. Эти счета показаны ниже отдельной секцией и не участвуют
+            в карточке "Баланс" и агрегатах по финансам.
+          </p>
+        </div>
+      ) : null}
 
       {/* Charts row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -309,6 +349,12 @@ export function Finance() {
         <div className="rounded-xl border bg-card overflow-hidden">
           <div className="px-5 py-4 border-b">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Счета</h2>
+            {!loading ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {formatAccountCount(includedAccounts.length)} в балансе
+                {excludedAccounts.length > 0 ? ` • ${formatAccountCount(excludedAccounts.length)} вне баланса` : ''}
+              </p>
+            ) : null}
           </div>
           {loading ? (
             <div className="divide-y">
@@ -319,25 +365,36 @@ export function Finance() {
           ) : accounts.length === 0 ? (
             <div className="px-5 py-4 text-sm text-muted-foreground text-center">Нет данных</div>
           ) : (
-            <div className="divide-y max-h-80 overflow-y-auto">
-              {accounts.map(a => (
-                <div key={a.id} className="px-5 py-3 flex items-center gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-foreground truncate">{a.title}</p>
-                    <div className="flex items-center gap-2">
-                      <p className="text-xs text-muted-foreground">{a.type}</p>
-                      {!a.in_balance ? (
-                        <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-200">
-                          Вне баланса
-                        </span>
-                      ) : null}
-                    </div>
+            <div className="max-h-80 overflow-y-auto">
+              {includedAccounts.length > 0 ? (
+                <div>
+                  <div className="sticky top-0 z-10 border-y bg-card/95 px-5 py-2 backdrop-blur">
+                    <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      В балансе
+                    </span>
                   </div>
-                  <span className={cn('text-sm font-medium tabular-nums shrink-0', a.balance >= 0 ? 'text-foreground' : 'text-rose-500')}>
-                    {fmt(a.balance, a.currency)}
-                  </span>
+                  <div className="divide-y">
+                    {includedAccounts.map(a => (
+                      <AccountRow key={a.id} account={a} />
+                    ))}
+                  </div>
                 </div>
-              ))}
+              ) : null}
+
+              {excludedAccounts.length > 0 ? (
+                <div>
+                  <div className="sticky top-0 z-10 border-y border-amber-500/20 bg-amber-500/5 px-5 py-2 backdrop-blur">
+                    <span className="text-[11px] font-medium uppercase tracking-wide text-amber-200">
+                      Вне баланса
+                    </span>
+                  </div>
+                  <div className="divide-y divide-amber-500/10">
+                    {excludedAccounts.map(a => (
+                      <AccountRow key={a.id} account={a} muted />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
         </div>
@@ -408,6 +465,27 @@ export function Finance() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function AccountRow({ account, muted = false }: { account: Account; muted?: boolean }) {
+  return (
+    <div className={cn('px-5 py-3 flex items-center gap-3', muted && 'bg-amber-500/5')}>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-foreground truncate">{account.title}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-muted-foreground">{account.type}</p>
+          {!account.in_balance ? (
+            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-200">
+              Вне баланса
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <span className={cn('text-sm font-medium tabular-nums shrink-0', account.balance >= 0 ? 'text-foreground' : 'text-rose-500')}>
+        {fmt(account.balance, account.currency)}
+      </span>
     </div>
   )
 }
