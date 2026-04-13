@@ -50,6 +50,16 @@ type ChatRequest struct {
 	History []ChatMessage `json:"history"`
 }
 
+type aiContextScope struct {
+	finance    bool
+	activities bool
+	workouts   bool
+	nutrition  bool
+	journal    bool
+	calendar   bool
+	weather    bool
+}
+
 const (
 	aiUpstreamDialTimeout     = 5 * time.Second
 	aiUpstreamHeaderTimeout   = 150 * time.Second
@@ -76,20 +86,15 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 
-	dataContext, err := h.buildContext(ctx, userID)
+	scope := selectAIContextScope(req.Message, req.History)
+
+	dataContext, err := h.buildContext(ctx, userID, scope)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("build context")
 		dataContext = "Данные пользователя временно недоступны."
 	}
 
-	systemPrompt := fmt.Sprintf(`Ты персональный AI-ассистент приложения Life Dashboard.
-Твоя единственная функция — анализировать данные пользователя: финансы, физическую активность, тренировки.
-Отвечай на русском языке. Давай конкретные ответы основанные на реальных данных ниже. Будь краток и по делу.
-Ты не можешь выполнять команды, изменять данные или делать что-либо за пределами анализа предоставленных данных.
-Если просят что-то сделать с базой данных, кодом или системой — вежливо объясни что ты только аналитик данных.
-
-Текущие данные пользователя (обновлено %s):
-%s`, time.Now().Format("02.01.2006 15:04"), dataContext)
+	systemPrompt := buildAISystemPrompt(time.Now(), dataContext, scope)
 
 	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
 	messages = append(messages, req.History...)
@@ -195,6 +200,26 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func buildAISystemPrompt(now time.Time, dataContext string, scope aiContextScope) string {
+	return fmt.Sprintf(`Ты персональный AI-ассистент приложения Life Dashboard.
+Твоя единственная функция — анализировать данные пользователя: финансы, физическую активность, тренировки.
+Отвечай на русском языке. Давай конкретные ответы основанные на реальных данных ниже. Будь краток и по делу.
+Ты не можешь выполнять команды, изменять данные или делать что-либо за пределами анализа предоставленных данных.
+Если просят что-то сделать с базой данных, кодом или системой — вежливо объясни что ты только аналитик данных.
+
+Используй историю текущего диалога как рабочий контекст.
+- Если пользователь уточнил или исправил тебя, считай это более приоритетным, чем свои предыдущие предположения.
+- Если нужные числа или ограничения даны пользователем прямо в чате, используй их в расчётах и явно отмечай, что это данные из текущего диалога.
+- Не отвечай, что данных нет, если нужная информация уже была дана пользователем несколькими сообщениями выше.
+- Для арифметики и рекомендаций показывай короткий расчёт.
+- Для упражнений с гантелями, блинами и штангой не путай вес на одну гантель, вес пары и общий вес штанги. Если это неясно, сначала уточни.
+
+Сейчас особенно релевантны разделы данных: %s.
+
+Текущие данные пользователя (обновлено %s):
+%s`, strings.Join(scope.sectionNames(), ", "), now.Format("02.01.2006 15:04"), dataContext)
+}
+
 func normalizeAIContent(content any) string {
 	switch v := content.(type) {
 	case string:
@@ -216,245 +241,274 @@ func normalizeAIContent(content any) string {
 	}
 }
 
-func (h *AIHandler) buildContext(ctx context.Context, userID string) (string, error) {
+func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiContextScope) (string, error) {
 	var sb strings.Builder
 	now := time.Now()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	weekStart := now.AddDate(0, 0, -int(now.Weekday()))
 
 	// === ФИНАНСЫ ===
-	sb.WriteString("=== ФИНАНСЫ ===\n")
+	if scope.finance {
+		sb.WriteString("=== ФИНАНСЫ ===\n")
 
-	rows, err := h.db.Query(ctx, `
-		SELECT title, currency, balance, type
-		FROM accounts WHERE balance != 0 AND user_id = $1
-		ORDER BY balance DESC LIMIT 10
-	`, userID)
-	if err == nil {
-		sb.WriteString("Счета:\n")
-		for rows.Next() {
-			var title, currency, accType string
-			var balance float64
-			if err := rows.Scan(&title, &currency, &balance, &accType); err == nil {
-				sb.WriteString(fmt.Sprintf("  - %s (%s): %.0f %s\n", title, accType, balance, currency))
-			}
-		}
-		rows.Close()
-	}
-
-	var totalBalance, monthSpending, monthIncome float64
-	h.db.QueryRow(ctx, `SELECT COALESCE(SUM(balance),0) FROM accounts WHERE currency='RUB' AND balance > 0 AND user_id = $1`, userID).Scan(&totalBalance)
-	h.db.QueryRow(ctx, `
-		SELECT
-			COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0)
-		FROM transactions
-		WHERE currency='RUB' AND occurred_at >= $1 AND is_transfer=false AND user_id = $2
-	`, monthStart, userID).Scan(&monthSpending, &monthIncome)
-
-	sb.WriteString(fmt.Sprintf("Общий баланс (RUB): %.0f ₽\n", totalBalance))
-	sb.WriteString(fmt.Sprintf("Расходы за текущий месяц: %.0f ₽\n", monthSpending))
-	sb.WriteString(fmt.Sprintf("Доходы за текущий месяц: %.0f ₽\n", monthIncome))
-
-	txRows, err := h.db.Query(ctx, `
-		SELECT occurred_at, amount, currency, COALESCE(payee, comment, '') as label
-		FROM transactions WHERE is_transfer=false AND user_id = $1
-		ORDER BY occurred_at DESC LIMIT 30
-	`, userID)
-	if err == nil {
-		sb.WriteString("Последние транзакции:\n")
-		for txRows.Next() {
-			var t time.Time
-			var amount float64
-			var currency, label string
-			if err := txRows.Scan(&t, &amount, &currency, &label); err == nil {
-				sign := ""
-				if amount > 0 {
-					sign = "+"
+		rows, err := h.db.Query(ctx, `
+			SELECT title, currency, balance, type
+			FROM accounts WHERE balance != 0 AND user_id = $1
+			ORDER BY balance DESC LIMIT 10
+		`, userID)
+		if err == nil {
+			sb.WriteString("Счета:\n")
+			for rows.Next() {
+				var title, currency, accType string
+				var balance float64
+				if err := rows.Scan(&title, &currency, &balance, &accType); err == nil {
+					sb.WriteString(fmt.Sprintf("  - %s (%s): %.0f %s\n", title, accType, balance, currency))
 				}
-				sb.WriteString(fmt.Sprintf("  %s %s%.0f %s %s\n", t.Format("02.01"), sign, amount, currency, label))
 			}
+			rows.Close()
 		}
-		txRows.Close()
+
+		var totalBalance, monthSpending, monthIncome float64
+		h.db.QueryRow(ctx, `SELECT COALESCE(SUM(balance),0) FROM accounts WHERE currency='RUB' AND balance > 0 AND user_id = $1`, userID).Scan(&totalBalance)
+		h.db.QueryRow(ctx, `
+			SELECT
+				COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0)
+			FROM transactions
+			WHERE currency='RUB' AND occurred_at >= $1 AND is_transfer=false AND user_id = $2
+		`, monthStart, userID).Scan(&monthSpending, &monthIncome)
+
+		sb.WriteString(fmt.Sprintf("Общий баланс (RUB): %.0f ₽\n", totalBalance))
+		sb.WriteString(fmt.Sprintf("Расходы за текущий месяц: %.0f ₽\n", monthSpending))
+		sb.WriteString(fmt.Sprintf("Доходы за текущий месяц: %.0f ₽\n", monthIncome))
+
+		txRows, err := h.db.Query(ctx, `
+			SELECT occurred_at, amount, currency, COALESCE(payee, comment, '') as label
+			FROM transactions WHERE is_transfer=false AND user_id = $1
+			ORDER BY occurred_at DESC LIMIT 30
+		`, userID)
+		if err == nil {
+			sb.WriteString("Последние транзакции:\n")
+			for txRows.Next() {
+				var t time.Time
+				var amount float64
+				var currency, label string
+				if err := txRows.Scan(&t, &amount, &currency, &label); err == nil {
+					sign := ""
+					if amount > 0 {
+						sign = "+"
+					}
+					sb.WriteString(fmt.Sprintf("  %s %s%.0f %s %s\n", t.Format("02.01"), sign, amount, currency, label))
+				}
+			}
+			txRows.Close()
+		}
 	}
 
 	// === АКТИВНОСТИ ===
-	sb.WriteString("\n=== АКТИВНОСТИ ===\n")
-	var weekActivities int
-	var weekDistanceKm float64
-	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM activities WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).Scan(&weekActivities)
-	h.db.QueryRow(ctx, `SELECT COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).Scan(&weekDistanceKm)
-	sb.WriteString(fmt.Sprintf("За эту неделю: %d активностей, %.1f км\n", weekActivities, weekDistanceKm))
-
-	actRows, err := h.db.Query(ctx, `
-		SELECT started_at, type, COALESCE(distance_meters/1000.0,0), COALESCE(duration_seconds/60,0), name
-		FROM activities WHERE user_id = $1 ORDER BY started_at DESC LIMIT 10
-	`, userID)
-	if err == nil {
-		for actRows.Next() {
-			var t time.Time
-			var actType, name string
-			var distKm, durationMin float64
-			if err := actRows.Scan(&t, &actType, &distKm, &durationMin, &name); err == nil {
-				sb.WriteString(fmt.Sprintf("  %s %s: %s %.1fкм %.0fмин\n", t.Format("02.01"), actType, name, distKm, durationMin))
-			}
+	if scope.activities {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
 		}
-		actRows.Close()
+		sb.WriteString("=== АКТИВНОСТИ ===\n")
+		var weekActivities int
+		var weekDistanceKm float64
+		h.db.QueryRow(ctx, `SELECT COUNT(*) FROM activities WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).Scan(&weekActivities)
+		h.db.QueryRow(ctx, `SELECT COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).Scan(&weekDistanceKm)
+		sb.WriteString(fmt.Sprintf("За эту неделю: %d активностей, %.1f км\n", weekActivities, weekDistanceKm))
+
+		actRows, err := h.db.Query(ctx, `
+			SELECT started_at, type, COALESCE(distance_meters/1000.0,0), COALESCE(duration_seconds/60,0), name
+			FROM activities WHERE user_id = $1 ORDER BY started_at DESC LIMIT 10
+		`, userID)
+		if err == nil {
+			for actRows.Next() {
+				var t time.Time
+				var actType, name string
+				var distKm, durationMin float64
+				if err := actRows.Scan(&t, &actType, &distKm, &durationMin, &name); err == nil {
+					sb.WriteString(fmt.Sprintf("  %s %s: %s %.1fкм %.0fмин\n", t.Format("02.01"), actType, name, distKm, durationMin))
+				}
+			}
+			actRows.Close()
+		}
 	}
 
 	// === ТРЕНИРОВКИ ===
-	sb.WriteString("\n=== ТРЕНИРОВКИ ===\n")
-	var weekWorkouts int
-	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).Scan(&weekWorkouts)
-	sb.WriteString(fmt.Sprintf("За эту неделю: %d тренировок\n", weekWorkouts))
+	if scope.workouts {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("=== ТРЕНИРОВКИ ===\n")
+		var weekWorkouts int
+		h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).Scan(&weekWorkouts)
+		sb.WriteString(fmt.Sprintf("За эту неделю: %d тренировок\n", weekWorkouts))
 
-	workoutContext, err := h.buildRecentWorkoutContext(ctx, userID)
-	if err == nil {
-		sb.WriteString("Ниже приведены последние тренировки с реальными упражнениями и подходами, если они сохранены в базе:\n")
-		sb.WriteString(workoutContext)
+		workoutContext, err := h.buildRecentWorkoutContext(ctx, userID)
+		if err == nil {
+			sb.WriteString("Ниже приведены последние тренировки с реальными упражнениями и подходами, если они сохранены в базе:\n")
+			sb.WriteString(workoutContext)
+		}
 	}
 
 	// === ПИТАНИЕ ===
-	sb.WriteString("\n=== ПИТАНИЕ ===\n")
-	nutritionRows, err := h.db.Query(ctx, `
-		SELECT date, calories_total, protein_g, carbs_g, fat_g, fiber_g
-		FROM nutrition_daily
-		WHERE user_id = $1
-		ORDER BY date DESC LIMIT 14
-	`, userID)
-	if err == nil {
-		for nutritionRows.Next() {
-			var date time.Time
-			var cal, protein, carbs, fat, fiber float64
-			if err := nutritionRows.Scan(&date, &cal, &protein, &carbs, &fat, &fiber); err == nil {
-				sb.WriteString(fmt.Sprintf("  %s: %.0f ккал | Б:%.0fг Ж:%.0fг У:%.0fг Клетч:%.0fг\n",
-					date.Format("02.01"), cal, protein, fat, carbs, fiber))
-			}
+	if scope.nutrition {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
 		}
-		nutritionRows.Close()
-	}
+		sb.WriteString("=== ПИТАНИЕ ===\n")
+		nutritionRows, err := h.db.Query(ctx, `
+			SELECT date, calories_total, protein_g, carbs_g, fat_g, fiber_g
+			FROM nutrition_daily
+			WHERE user_id = $1
+			ORDER BY date DESC LIMIT 14
+		`, userID)
+		if err == nil {
+			for nutritionRows.Next() {
+				var date time.Time
+				var cal, protein, carbs, fat, fiber float64
+				if err := nutritionRows.Scan(&date, &cal, &protein, &carbs, &fat, &fiber); err == nil {
+					sb.WriteString(fmt.Sprintf("  %s: %.0f ккал | Б:%.0fг Ж:%.0fг У:%.0fг Клетч:%.0fг\n",
+						date.Format("02.01"), cal, protein, fat, carbs, fiber))
+				}
+			}
+			nutritionRows.Close()
+		}
 
-	// Детали по приёмам пищи за последние 2 дня
-	mealRows, err := h.db.Query(ctx, `
-		SELECT nd.date, ni.meal_type, ni.food_name, ni.serving_description, ni.calories
-		FROM nutrition_items ni
-		JOIN nutrition_daily nd ON nd.id = ni.daily_id
-		WHERE nd.date >= $1 AND nd.user_id = $2
-		ORDER BY nd.date DESC, ni.meal_type, ni.calories DESC
-	`, now.AddDate(0, 0, -2), userID)
-	if err == nil {
-		var curDay string
-		var curMeal string
-		for mealRows.Next() {
-			var date time.Time
-			var mealType, foodName, serving string
-			var calories float64
-			if err := mealRows.Scan(&date, &mealType, &foodName, &serving, &calories); err != nil {
-				continue
+		// Детали по приёмам пищи за последние 2 дня
+		mealRows, err := h.db.Query(ctx, `
+			SELECT nd.date, ni.meal_type, ni.food_name, ni.serving_description, ni.calories
+			FROM nutrition_items ni
+			JOIN nutrition_daily nd ON nd.id = ni.daily_id
+			WHERE nd.date >= $1 AND nd.user_id = $2
+			ORDER BY nd.date DESC, ni.meal_type, ni.calories DESC
+		`, now.AddDate(0, 0, -2), userID)
+		if err == nil {
+			var curDay string
+			var curMeal string
+			for mealRows.Next() {
+				var date time.Time
+				var mealType, foodName, serving string
+				var calories float64
+				if err := mealRows.Scan(&date, &mealType, &foodName, &serving, &calories); err != nil {
+					continue
+				}
+				day := date.Format("02.01")
+				if day != curDay {
+					sb.WriteString(fmt.Sprintf("  Детали %s:\n", day))
+					curDay = day
+					curMeal = ""
+				}
+				if mealType != curMeal {
+					sb.WriteString(fmt.Sprintf("    [%s]\n", mealType))
+					curMeal = mealType
+				}
+				sb.WriteString(fmt.Sprintf("      - %s (%s): %.0f ккал\n", foodName, serving, calories))
 			}
-			day := date.Format("02.01")
-			if day != curDay {
-				sb.WriteString(fmt.Sprintf("  Детали %s:\n", day))
-				curDay = day
-				curMeal = ""
-			}
-			if mealType != curMeal {
-				sb.WriteString(fmt.Sprintf("    [%s]\n", mealType))
-				curMeal = mealType
-			}
-			sb.WriteString(fmt.Sprintf("      - %s (%s): %.0f ккал\n", foodName, serving, calories))
+			mealRows.Close()
 		}
-		mealRows.Close()
 	}
 
 	// === ДНЕВНИК ===
-	journalRows, err := h.db.Query(ctx, `
-		SELECT date, title, content, tags, mood
-		FROM journal_entries
-		WHERE user_id = $1 AND date >= NOW() - INTERVAL '30 days'
-		ORDER BY date DESC LIMIT 20
-	`, userID)
-	if err == nil {
-		var journalEntries []string
-		for journalRows.Next() {
-			var date time.Time
-			var title, content string
-			var tags []string
-			var mood *int
-			if journalRows.Scan(&date, &title, &content, &tags, &mood) == nil {
-				entry := fmt.Sprintf("  %s: %s", date.Format("02.01"), title)
-				if mood != nil {
-					entry += fmt.Sprintf(" (настроение: %d/10)", *mood)
+	if scope.journal {
+		journalRows, err := h.db.Query(ctx, `
+			SELECT date, title, content, tags, mood
+			FROM journal_entries
+			WHERE user_id = $1 AND date >= NOW() - INTERVAL '30 days'
+			ORDER BY date DESC LIMIT 20
+		`, userID)
+		if err == nil {
+			var journalEntries []string
+			for journalRows.Next() {
+				var date time.Time
+				var title, content string
+				var tags []string
+				var mood *int
+				if journalRows.Scan(&date, &title, &content, &tags, &mood) == nil {
+					entry := fmt.Sprintf("  %s: %s", date.Format("02.01"), title)
+					if mood != nil {
+						entry += fmt.Sprintf(" (настроение: %d/10)", *mood)
+					}
+					if len(tags) > 0 {
+						entry += " [" + strings.Join(tags, ", ") + "]"
+					}
+					if len(content) > 300 {
+						content = content[:300] + "..."
+					}
+					if content != "" {
+						entry += "\n    " + strings.ReplaceAll(content, "\n", "\n    ")
+					}
+					journalEntries = append(journalEntries, entry)
 				}
-				if len(tags) > 0 {
-					entry += " [" + strings.Join(tags, ", ") + "]"
-				}
-				// Truncate content for context (max 300 chars)
-				if len(content) > 300 {
-					content = content[:300] + "..."
-				}
-				if content != "" {
-					entry += "\n    " + strings.ReplaceAll(content, "\n", "\n    ")
-				}
-				journalEntries = append(journalEntries, entry)
 			}
-		}
-		journalRows.Close()
-		if len(journalEntries) > 0 {
-			sb.WriteString("\n=== ДНЕВНИК (последние 30 дней) ===\n")
-			for _, e := range journalEntries {
-				sb.WriteString(e + "\n")
+			journalRows.Close()
+			if len(journalEntries) > 0 {
+				if sb.Len() > 0 {
+					sb.WriteString("\n")
+				}
+				sb.WriteString("=== ДНЕВНИК (последние 30 дней) ===\n")
+				for _, e := range journalEntries {
+					sb.WriteString(e + "\n")
+				}
 			}
 		}
 	}
 
 	// === КАЛЕНДАРЬ ===
-	calRows, err := h.db.Query(ctx, `
-		SELECT title, start_time, end_time, all_day, COALESCE(location, '')
-		FROM calendar_events
-		WHERE user_id = $1 AND start_time >= NOW() - INTERVAL '30 days' AND start_time <= NOW() + INTERVAL '30 days'
-		ORDER BY start_time LIMIT 50
-	`, userID)
-	if err == nil {
-		var calEvents []string
-		for calRows.Next() {
-			var title, location string
-			var startTime, endTime time.Time
-			var allDay bool
-			if calRows.Scan(&title, &startTime, &endTime, &allDay, &location) == nil {
-				if allDay {
-					calEvents = append(calEvents, fmt.Sprintf("  %s: %s (весь день)%s",
-						startTime.Format("02.01"), title, func() string {
-							if location != "" {
-								return " @ " + location
-							}
-							return ""
-						}()))
-				} else {
-					calEvents = append(calEvents, fmt.Sprintf("  %s %s-%s: %s%s",
-						startTime.Format("02.01"), startTime.Format("15:04"), endTime.Format("15:04"),
-						title, func() string {
-							if location != "" {
-								return " @ " + location
-							}
-							return ""
-						}()))
+	if scope.calendar {
+		calRows, err := h.db.Query(ctx, `
+			SELECT title, start_time, end_time, all_day, COALESCE(location, '')
+			FROM calendar_events
+			WHERE user_id = $1 AND start_time >= NOW() - INTERVAL '30 days' AND start_time <= NOW() + INTERVAL '30 days'
+			ORDER BY start_time LIMIT 50
+		`, userID)
+		if err == nil {
+			var calEvents []string
+			for calRows.Next() {
+				var title, location string
+				var startTime, endTime time.Time
+				var allDay bool
+				if calRows.Scan(&title, &startTime, &endTime, &allDay, &location) == nil {
+					if allDay {
+						calEvents = append(calEvents, fmt.Sprintf("  %s: %s (весь день)%s",
+							startTime.Format("02.01"), title, func() string {
+								if location != "" {
+									return " @ " + location
+								}
+								return ""
+							}()))
+					} else {
+						calEvents = append(calEvents, fmt.Sprintf("  %s %s-%s: %s%s",
+							startTime.Format("02.01"), startTime.Format("15:04"), endTime.Format("15:04"),
+							title, func() string {
+								if location != "" {
+									return " @ " + location
+								}
+								return ""
+							}()))
+					}
 				}
 			}
-		}
-		calRows.Close()
-		if len(calEvents) > 0 {
-			sb.WriteString("\n=== КАЛЕНДАРЬ (30 дней назад — 30 дней вперёд) ===\n")
-			for _, e := range calEvents {
-				sb.WriteString(e + "\n")
+			calRows.Close()
+			if len(calEvents) > 0 {
+				if sb.Len() > 0 {
+					sb.WriteString("\n")
+				}
+				sb.WriteString("=== КАЛЕНДАРЬ (30 дней назад — 30 дней вперёд) ===\n")
+				for _, e := range calEvents {
+					sb.WriteString(e + "\n")
+				}
 			}
 		}
 	}
 
 	// === ПОГОДА ===
-	if h.weather != nil {
+	if scope.weather && h.weather != nil {
 		if wd, err := h.weather.Fetch(0, 0, ""); err == nil {
-			sb.WriteString("\n=== ПОГОДА ===\n")
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString("=== ПОГОДА ===\n")
 			sb.WriteString(fmt.Sprintf("Город: %s\n", wd.City))
 			sb.WriteString(fmt.Sprintf("Сейчас: %.1f°C, ощущается %.1f°C, %s\n", wd.Temp, wd.FeelsLike, wd.Description))
 			sb.WriteString(fmt.Sprintf("Влажность: %d%%, ветер %.1f км/ч\n", wd.Humidity, wd.WindSpeed))
@@ -469,6 +523,129 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string) (string, er
 	}
 
 	return sb.String(), nil
+}
+
+func defaultAIContextScope() aiContextScope {
+	return aiContextScope{
+		finance:    true,
+		activities: true,
+		workouts:   true,
+		nutrition:  true,
+		journal:    true,
+		calendar:   true,
+		weather:    true,
+	}
+}
+
+func (s aiContextScope) empty() bool {
+	return !s.finance && !s.activities && !s.workouts && !s.nutrition && !s.journal && !s.calendar && !s.weather
+}
+
+func (s aiContextScope) sectionNames() []string {
+	names := make([]string, 0, 7)
+	if s.finance {
+		names = append(names, "финансы")
+	}
+	if s.activities {
+		names = append(names, "активности")
+	}
+	if s.workouts {
+		names = append(names, "тренировки")
+	}
+	if s.nutrition {
+		names = append(names, "питание")
+	}
+	if s.journal {
+		names = append(names, "дневник")
+	}
+	if s.calendar {
+		names = append(names, "календарь")
+	}
+	if s.weather {
+		names = append(names, "погода")
+	}
+	if len(names) == 0 {
+		return defaultAIContextScope().sectionNames()
+	}
+	return names
+}
+
+func selectAIContextScope(message string, history []ChatMessage) aiContextScope {
+	scope := aiContextScope{}
+	text := strings.ToLower(message)
+	recentHistory := recentHistoryText(history, 6)
+	combined := strings.TrimSpace(strings.Join([]string{text, recentHistory}, "\n"))
+
+	financeKeywords := []string{"финанс", "деньг", "расход", "доход", "баланс", "трат", "бюджет", "транзак", "счет", "счёт", "руб"}
+	activityKeywords := []string{"актив", "бег", "пробеж", "килом", "км", "ходьб", "вел", "плав", "дистанц", "шаг", "strava", "run", "ride"}
+	workoutKeywords := []string{"тренир", "упражнен", "жим", "тяга", "присед", "гантел", "штанг", "блин", "гриф", "подход", "повтор", "hevy", "workout", "pull", "push", "legs", "зал", "вес"}
+	nutritionKeywords := []string{"питан", "калор", "кбжу", "бжу", "еда", "ккал", "углев", "белк", "жир", "fatsecret", "myfitnesspal", "mfp"}
+	journalKeywords := []string{"дневник", "journal", "ноушн", "notion", "настроен", "рефлекс", "запис"}
+	calendarKeywords := []string{"календар", "встреч", "событи", "созвон", "митинг", "расписан", "план"}
+	weatherKeywords := []string{"погод", "температ", "дожд", "ветер", "на улице"}
+	generalKeywords := []string{"сводк", "обзор", "проанализ", "анализ", "итог", "общ", "что происходит", "что нового", "удивил"}
+
+	if containsAny(combined, financeKeywords...) {
+		scope.finance = true
+	}
+	if containsAny(combined, activityKeywords...) {
+		scope.activities = true
+	}
+	if containsAny(combined, workoutKeywords...) {
+		scope.workouts = true
+	}
+	if containsAny(combined, nutritionKeywords...) {
+		scope.nutrition = true
+	}
+	if containsAny(combined, journalKeywords...) {
+		scope.journal = true
+	}
+	if containsAny(combined, calendarKeywords...) {
+		scope.calendar = true
+	}
+	if containsAny(combined, weatherKeywords...) {
+		scope.weather = true
+	}
+
+	if strings.Contains(combined, "фитнес") || strings.Contains(combined, "нагруз") {
+		scope.activities = true
+		scope.workouts = true
+	}
+
+	if scope.empty() && containsAny(combined, generalKeywords...) {
+		return defaultAIContextScope()
+	}
+	if scope.empty() {
+		return defaultAIContextScope()
+	}
+	return scope
+}
+
+func recentHistoryText(history []ChatMessage, limit int) string {
+	if len(history) == 0 || limit <= 0 {
+		return ""
+	}
+	start := len(history) - limit
+	if start < 0 {
+		start = 0
+	}
+	parts := make([]string, 0, len(history)-start)
+	for _, msg := range history[start:] {
+		if strings.TrimSpace(msg.Content) == "" {
+			continue
+		}
+		parts = append(parts, strings.ToLower(msg.Content))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func containsAny(text string, keywords ...string) bool {
+	for _, keyword := range keywords {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *AIHandler) buildRecentWorkoutContext(ctx context.Context, userID string) (string, error) {
