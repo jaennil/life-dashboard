@@ -6,7 +6,7 @@ on:
 
 concurrency:
   group: cd-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -22,7 +22,7 @@ jobs:
           - runner: ubuntu-latest
             platform: linux/amd64
             suffix: amd64
-          - runner: ["self-hosted", "ARM64", "Linux"]
+          - runner: ubuntu-24.04-arm
             platform: linux/arm64
             suffix: arm64
     permissions:
@@ -57,7 +57,7 @@ jobs:
           - runner: ubuntu-latest
             platform: linux/amd64
             suffix: amd64
-          - runner: ["self-hosted", "ARM64", "Linux"]
+          - runner: ubuntu-24.04-arm
             platform: linux/arm64
             suffix: arm64
     permissions:
