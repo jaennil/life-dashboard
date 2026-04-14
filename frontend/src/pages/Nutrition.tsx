@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   AreaChart, Area, Legend, PieChart, Pie,
 } from 'recharts'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { PageSyncButton } from '@/components/PageSyncButton'
 import { cn } from '@/lib/utils'
-import { api, type NutritionSummary, type NutritionDay } from '@/lib/api'
+import { api, type NutritionSummary, type NutritionDay, type Integration } from '@/lib/api'
 
 const MEAL_LABELS: Record<string, string> = {
   breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', snacks: 'Перекус', other: 'Прочее',
@@ -107,15 +108,45 @@ export function Nutrition() {
   const [loading, setLoading] = useState(true)
   const [period, setPeriod] = useState(14)
   const [mealFilter, setMealFilter] = useState('')
+  const [syncing, setSyncing] = useState(false)
+  const [integrations, setIntegrations] = useState<Integration[]>([])
 
-  useEffect(() => {
-    Promise.all([api.getNutritionSummary(), api.getNutritionDaily()])
-      .then(([s, d]) => { setSummary(s); setDaily(d) })
-      .catch(console.error)
-      .finally(() => setLoading(false))
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [s, d] = await Promise.all([api.getNutritionSummary(), api.getNutritionDaily()])
+      setSummary(s)
+      setDaily(d)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
+  const loadIntegrations = useCallback(async () => {
+    try {
+      setIntegrations(await api.getIntegrations())
+    } catch (error) {
+      console.error(error)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadData()
+  }, [loadData])
+
+  useEffect(() => {
+    void loadIntegrations()
+  }, [loadIntegrations])
+
   const chartData = [...daily].reverse().slice(-period)
+  const enabledNutritionIntegrations = integrations.filter(i =>
+    (i.name === 'myfitnesspal' || i.name === 'fatsecret') && i.enabled
+  )
+  const nutritionSyncLabel = enabledNutritionIntegrations.length === 1
+    ? `Синхронизировать ${enabledNutritionIntegrations[0].display_name}`
+    : 'Синхронизировать питание'
 
   // Macro averages for summary
   const avgProtein = chartData.length ? chartData.reduce((s, d) => s + d.protein, 0) / chartData.length : 0
@@ -147,23 +178,46 @@ export function Nutrition() {
     ? daily.map(d => ({ ...d, meals: d.meals.filter(m => m.meal_type === mealFilter) }))
     : daily
 
+  async function handleSyncNutrition() {
+    if (enabledNutritionIntegrations.length === 0) return
+    setSyncing(true)
+    try {
+      for (const integration of enabledNutritionIntegrations) {
+        await api.syncIntegration(integration.name)
+      }
+      await Promise.all([loadData(), loadIntegrations()])
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Питание</h1>
           <p className="text-sm text-muted-foreground mt-1">
             {new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
           </p>
         </div>
-        <div className="flex gap-1">
-          {PERIODS.map(p => (
-            <button key={p.days} onClick={() => setPeriod(p.days)}
-              className={cn('px-3 py-1 text-xs rounded-lg transition-colors',
-                period === p.days ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent')}>
-              {p.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+          <PageSyncButton
+            label={nutritionSyncLabel}
+            syncing={syncing}
+            disabled={enabledNutritionIntegrations.length === 0}
+            onClick={handleSyncNutrition}
+          />
+          <div className="flex gap-1">
+            {PERIODS.map(p => (
+              <button key={p.days} onClick={() => setPeriod(p.days)}
+                className={cn('px-3 py-1 text-xs rounded-lg transition-colors',
+                  period === p.days ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent')}>
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

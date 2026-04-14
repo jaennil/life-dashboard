@@ -17,11 +17,12 @@ import {
   WalletCards,
   type LucideIcon,
 } from 'lucide-react'
+import { PageSyncButton } from '@/components/PageSyncButton'
 import { cn } from '@/lib/utils'
 import {
   api,
   type MonthStat, type Account, type FinanceTransaction,
-  type CategoryStat, type DailyTotal, type TopExpense,
+  type CategoryStat, type DailyTotal, type TopExpense, type Integration,
 } from '@/lib/api'
 
 const CATEGORY_COLORS = [
@@ -181,26 +182,48 @@ export function Finance() {
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
   const [txLoading, setTxLoading] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [integrations, setIntegrations] = useState<Integration[]>([])
 
   const from = customFrom || dateOffset(period)
   const to = customTo || undefined
 
-  useEffect(() => {
-    Promise.all([
+  const loadPageData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [m, a, c, d, t, cl] = await Promise.all([
       api.getMonthlyStats(),
       api.getAccounts(),
       api.getSpendingByCategory(from),
       api.getDailyTotals(from, to),
       api.getTopExpenses(from, to),
       api.getCategoryList(),
-    ])
-      .then(([m, a, c, d, t, cl]) => {
-        setMonthly(m); setAccounts(a); setCategories(c)
-        setDaily(d); setTopExpenses(t); setCategoryList(cl)
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [period, customFrom, customTo])
+      ])
+
+      setMonthly(m); setAccounts(a); setCategories(c)
+      setDaily(d); setTopExpenses(t); setCategoryList(cl)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setLoading(false)
+    }
+  }, [from, to])
+
+  const loadIntegrations = useCallback(async () => {
+    try {
+      setIntegrations(await api.getIntegrations())
+    } catch (error) {
+      console.error(error)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadPageData()
+  }, [loadPageData])
+
+  useEffect(() => {
+    void loadIntegrations()
+  }, [loadIntegrations])
 
   const loadTxs = useCallback(async (p: number, replace: boolean) => {
     setTxLoading(true)
@@ -213,7 +236,7 @@ export function Finance() {
     } catch { /* ignore */ } finally {
       setTxLoading(false)
     }
-  }, [filter, sort, search, catFilter, from])
+  }, [filter, sort, search, catFilter, from, to])
 
   useEffect(() => {
     setPage(1)
@@ -228,6 +251,7 @@ export function Finance() {
   }
 
   const currentMonth = monthly[monthly.length - 1]
+  const zenmoneyIntegration = integrations.find(i => i.name === 'zenmoney')
   const includedAccounts = accounts.filter(a => a.in_balance)
   const excludedAccounts = accounts.filter(a => !a.in_balance)
   const totalBalance = includedAccounts
@@ -236,36 +260,57 @@ export function Finance() {
     .filter(a => a.currency === 'RUB')
     .reduce((sum, a) => sum + a.balance, 0)
 
+  async function handleSyncFinance() {
+    if (!zenmoneyIntegration?.enabled) return
+    setSyncing(true)
+    try {
+      await api.syncIntegration('zenmoney')
+      await Promise.all([loadPageData(), loadIntegrations()])
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Финансы</h1>
           <p className="text-sm text-muted-foreground mt-1">
             {new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
           </p>
         </div>
-        <div className="flex gap-1 items-center flex-wrap">
-          {PERIODS.map(p => (
-            <button
-              key={p.days}
-              onClick={() => { setPeriod(p.days); setCustomFrom(''); setCustomTo('') }}
-              className={cn(
-                'px-3 py-1 text-xs rounded-lg transition-colors',
-                period === p.days && !customFrom
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-accent'
-              )}
-            >
-              {p.label}
-            </button>
-          ))}
-          <span className="text-xs text-muted-foreground mx-1">|</span>
-          <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-            className="text-xs rounded-lg border bg-background px-2 py-1 outline-none" />
-          <span className="text-xs text-muted-foreground">—</span>
-          <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-            className="text-xs rounded-lg border bg-background px-2 py-1 outline-none" />
+        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+          <PageSyncButton
+            label="Синхронизировать ZenMoney"
+            syncing={syncing}
+            disabled={!zenmoneyIntegration?.enabled}
+            onClick={handleSyncFinance}
+          />
+          <div className="flex gap-1 items-center flex-wrap">
+            {PERIODS.map(p => (
+              <button
+                key={p.days}
+                onClick={() => { setPeriod(p.days); setCustomFrom(''); setCustomTo('') }}
+                className={cn(
+                  'px-3 py-1 text-xs rounded-lg transition-colors',
+                  period === p.days && !customFrom
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-muted-foreground hover:bg-accent'
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+            <span className="text-xs text-muted-foreground mx-1">|</span>
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+              className="text-xs rounded-lg border bg-background px-2 py-1 outline-none" />
+            <span className="text-xs text-muted-foreground">—</span>
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+              className="text-xs rounded-lg border bg-background px-2 py-1 outline-none" />
+          </div>
         </div>
       </div>
 

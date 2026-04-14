@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   XAxis, YAxis, Tooltip, ResponsiveContainer,
   AreaChart, Area, Legend, PieChart, Pie, Cell,
 } from 'recharts'
 import { Route, Dumbbell, Flame, Heart, ChevronDown, ChevronUp, Timer } from 'lucide-react'
+import { PageSyncButton } from '@/components/PageSyncButton'
 import { cn } from '@/lib/utils'
-import { api, type FitnessSummary, type WeekStat, type Activity, type Workout } from '@/lib/api'
+import { api, type FitnessSummary, type WeekStat, type Activity, type Workout, type Integration } from '@/lib/api'
 
 const ACTIVITY_ICONS: Record<string, string> = {
   Run: '🏃', Ride: '🚴', Swim: '🏊', Walk: '🚶', WeightTraining: '🏋️',
@@ -187,18 +188,44 @@ export function Fitness() {
   const [loading, setLoading] = useState(true)
   const [typeFilter, setTypeFilter] = useState('')
   const [sourceTab, setSourceTab] = useState<FitnessSource>('strava')
+  const [syncing, setSyncing] = useState(false)
+  const [integrations, setIntegrations] = useState<Integration[]>([])
+
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [nextSummary, nextWeekly, nextActivities, nextWorkouts] = await Promise.all([
+        api.getFitnessSummary(),
+        api.getFitnessWeekly(),
+        api.getActivities(),
+        api.getWorkouts(),
+      ])
+      setSummary(nextSummary)
+      setWeekly(nextWeekly)
+      setActivities(nextActivities)
+      setWorkouts(nextWorkouts)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const loadIntegrations = useCallback(async () => {
+    try {
+      setIntegrations(await api.getIntegrations())
+    } catch (error) {
+      console.error(error)
+    }
+  }, [])
 
   useEffect(() => {
-    Promise.all([api.getFitnessSummary(), api.getFitnessWeekly(), api.getActivities(), api.getWorkouts()])
-      .then(([nextSummary, nextWeekly, nextActivities, nextWorkouts]) => {
-        setSummary(nextSummary)
-        setWeekly(nextWeekly)
-        setActivities(nextActivities)
-        setWorkouts(nextWorkouts)
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [])
+    void loadData()
+  }, [loadData])
+
+  useEffect(() => {
+    void loadIntegrations()
+  }, [loadIntegrations])
 
   useEffect(() => {
     if (!summary) return
@@ -209,6 +236,7 @@ export function Fitness() {
 
   const stravaTotal = summary?.activities_total ?? activities.length
   const hevyTotal = summary?.workouts_total ?? workouts.length
+  const activeIntegration = integrations.find(i => i.name === sourceTab)
 
   const activityTypes = useMemo(() => {
     const types = new Set(activities.map(a => a.type))
@@ -280,14 +308,35 @@ export function Fitness() {
         { label: 'Ср. упр./трен.', value: hevyExerciseStats.avgExercises, icon: Dumbbell, color: 'bg-emerald-500' },
       ]
 
+  async function handleSyncFitness() {
+    if (!activeIntegration?.enabled) return
+    setSyncing(true)
+    try {
+      await api.syncIntegration(sourceTab)
+      await Promise.all([loadData(), loadIntegrations()])
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Фитнес</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
-          </p>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Фитнес</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              {new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
+            </p>
+          </div>
+          <PageSyncButton
+            label={`Синхронизировать ${sourceTab === 'strava' ? 'Strava' : 'Hevy'}`}
+            syncing={syncing}
+            disabled={!activeIntegration?.enabled}
+            onClick={handleSyncFitness}
+          />
         </div>
 
         <div className="flex flex-wrap gap-2">

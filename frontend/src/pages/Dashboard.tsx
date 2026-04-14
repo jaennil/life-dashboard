@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Wallet, Dumbbell, TrendingUp, TrendingDown, Zap, Route, Droplets, Wind, MapPin, LocateFixed, Search, X } from 'lucide-react'
+import { PageSyncButton } from '@/components/PageSyncButton'
 import { cn } from '@/lib/utils'
-import { api, type DashboardSummary, type Transaction, type WeatherData } from '@/lib/api'
+import { api, type DashboardSummary, type Transaction, type WeatherData, type Integration } from '@/lib/api'
 
 const LOC_KEY = 'weather_location'
 
@@ -258,6 +259,29 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [weatherLoading, setWeatherLoading] = useState(true)
   const [showPicker, setShowPicker] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [integrations, setIntegrations] = useState<Integration[]>([])
+
+  const loadDashboardData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [s, t] = await Promise.all([api.getDashboardSummary(), api.getRecentTransactions()])
+      setSummary(s)
+      setTxs(t)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const loadIntegrations = useCallback(async () => {
+    try {
+      setIntegrations(await api.getIntegrations())
+    } catch (error) {
+      console.error(error)
+    }
+  }, [])
 
   function fetchWeather(loc?: SavedLocation) {
     setWeatherLoading(true)
@@ -274,10 +298,8 @@ export function Dashboard() {
   }
 
   useEffect(() => {
-    Promise.all([api.getDashboardSummary(), api.getRecentTransactions()])
-      .then(([s, t]) => { setSummary(s); setTxs(t) })
-      .catch(console.error)
-      .finally(() => setLoading(false))
+    void loadDashboardData()
+    void loadIntegrations()
 
     const saved = loadLocation()
     fetchWeather(saved ?? undefined)
@@ -293,7 +315,26 @@ export function Dashboard() {
         { timeout: 5000 }
       )
     }
-  }, [])
+  }, [loadDashboardData, loadIntegrations])
+
+  const enabledDashboardSources = integrations.filter(i =>
+    (i.name === 'zenmoney' || i.name === 'strava' || i.name === 'hevy') && i.enabled
+  )
+
+  async function handleSyncDashboard() {
+    if (enabledDashboardSources.length === 0) return
+    setSyncing(true)
+    try {
+      for (const integration of enabledDashboardSources) {
+        await api.syncIntegration(integration.name)
+      }
+      await Promise.all([loadDashboardData(), loadIntegrations()])
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const insights: { text: string; type: 'info' | 'warn' | 'good' }[] = []
   if (summary) {
@@ -314,11 +355,19 @@ export function Dashboard() {
   return (
     <div className="flex flex-col gap-6">
       {showPicker && <LocationPicker onSelect={handleLocationSelect} onClose={() => setShowPicker(false)} />}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}
-        </p>
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}
+          </p>
+        </div>
+        <PageSyncButton
+          label="Синхронизировать всё"
+          syncing={syncing}
+          disabled={enabledDashboardSources.length === 0}
+          onClick={handleSyncDashboard}
+        />
       </div>
 
       {/* Weather + Stats */}
