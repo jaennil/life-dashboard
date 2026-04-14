@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   XAxis, YAxis, Tooltip, ResponsiveContainer,
   AreaChart, Area, Legend, PieChart, Pie, Cell,
+  type TooltipValueType,
 } from 'recharts'
+import type { TooltipContentProps } from 'recharts/types/component/Tooltip'
 import { Route, Dumbbell, Flame, Heart, ChevronDown, ChevronUp, Timer } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { cn } from '@/lib/utils'
@@ -24,6 +26,16 @@ const DECIMAL_FORMATTER = new Intl.NumberFormat('ru-RU', { maximumFractionDigits
 type FitnessSource = 'strava' | 'hevy'
 
 function activityIcon(type: string) { return ACTIVITY_ICONS[type] ?? '⚡' }
+
+function tooltipNumber(value: TooltipValueType | undefined) {
+  const scalar = Array.isArray(value) ? value[0] : value
+  if (typeof scalar === 'number') return scalar
+  if (typeof scalar === 'string') {
+    const parsed = Number(scalar)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
 
 function fmtDuration(seconds: number | null) {
   if (!seconds) return '—'
@@ -388,12 +400,12 @@ export function Fitness() {
                     <XAxis dataKey="week" tickFormatter={fmtWeek} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                     <YAxis yAxisId="activities" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={24} />
                     <YAxis yAxisId="km" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={30} />
-                    <Tooltip content={({ active, payload, label }: any) => active && payload?.length ? (
+                    <Tooltip content={({ active, payload, label }: TooltipContentProps<TooltipValueType, string | number>) => active && payload?.length ? (
                       <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
-                        <p className="font-medium text-foreground mb-1">Нед. с {fmtWeek(label)}</p>
-                        {payload.map((point: any) => (
-                          <p key={point.name} style={{ color: point.color }}>
-                            {point.name === 'activities' ? 'Активностей' : 'Км'}: {point.name === 'km' ? point.value?.toFixed(1) : point.value}
+                        <p className="font-medium text-foreground mb-1">Нед. с {typeof label === 'string' ? fmtWeek(label) : String(label ?? '')}</p>
+                        {payload.map((point, index) => (
+                          <p key={`${point.name ?? 'series'}-${index}`} style={{ color: point.color }}>
+                            {point.name === 'activities' ? 'Активностей' : 'Км'}: {point.name === 'km' ? tooltipNumber(point.value).toFixed(1) : tooltipNumber(point.value)}
                           </p>
                         ))}
                       </div>
@@ -415,7 +427,7 @@ export function Fitness() {
                       <Pie data={activityTypePie} dataKey="value" cx={90} cy={90} innerRadius={50} outerRadius={80} paddingAngle={3}>
                         {activityTypePie.map((segment, index) => <Cell key={index} fill={segment.color} />)}
                       </Pie>
-                      <Tooltip formatter={(value: any) => `${value} активностей`} />
+                      <Tooltip formatter={(value) => `${tooltipNumber(value)} активностей`} />
                     </PieChart>
                   </div>
                   <div className="flex flex-col gap-2">
@@ -507,10 +519,10 @@ export function Fitness() {
                   <AreaChart data={hevyWeekly}>
                     <XAxis dataKey="week" tickFormatter={fmtWeek} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={24} />
-                    <Tooltip content={({ active, payload, label }: any) => active && payload?.length ? (
+                    <Tooltip content={({ active, payload, label }: TooltipContentProps<TooltipValueType, string | number>) => active && payload?.length ? (
                       <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
-                        <p className="font-medium text-foreground mb-1">Нед. с {fmtWeek(label)}</p>
-                        <p style={{ color: payload[0].color }}>Тренировок: {payload[0].value}</p>
+                        <p className="font-medium text-foreground mb-1">Нед. с {typeof label === 'string' ? fmtWeek(label) : String(label ?? '')}</p>
+                        <p style={{ color: payload[0].color }}>Тренировок: {tooltipNumber(payload[0].value)}</p>
                       </div>
                     ) : null} />
                     <Area type="monotone" dataKey="workouts" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.18} strokeWidth={2} />
@@ -528,7 +540,7 @@ export function Fitness() {
                       <Pie data={workoutCategoryPie} dataKey="value" cx={90} cy={90} innerRadius={50} outerRadius={80} paddingAngle={3}>
                         {workoutCategoryPie.map((segment, index) => <Cell key={index} fill={segment.color} />)}
                       </Pie>
-                      <Tooltip formatter={(value: any) => `${value} упражнений`} />
+                      <Tooltip formatter={(value) => `${tooltipNumber(value)} упражнений`} />
                     </PieChart>
                   </div>
                   <div className="flex flex-col gap-2">

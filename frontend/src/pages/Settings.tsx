@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { startTransition, useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -632,7 +632,9 @@ export function Settings() {
       navigate(location.pathname, { replace: true })
       return
     }
-    setPendingSync({ name: syncTarget, startedAt: syncStartedAt, clearUrl: true })
+    startTransition(() => {
+      setPendingSync({ name: syncTarget, startedAt: syncStartedAt, clearUrl: true })
+    })
   }, [location.pathname, navigate, syncStartedAtRaw, syncTarget])
 
   useEffect(() => {

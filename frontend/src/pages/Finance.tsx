@@ -146,14 +146,43 @@ function getAccountTypeLabel(type: string) {
   }
 }
 
-const ChartTooltip = ({ active, payload, label, formatter }: any) => {
+type TooltipDatum = {
+  name?: string
+  value?: number | string
+  color?: string
+  fill?: string
+  payload?: {
+    count?: number
+  }
+}
+
+function toTooltipNumber(value: number | string | undefined) {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
+
+const ChartTooltip = ({
+  active,
+  payload,
+  label,
+  formatter,
+}: {
+  active?: boolean
+  payload?: TooltipDatum[]
+  label?: string | number
+  formatter?: (point: TooltipDatum) => string
+}) => {
   if (!active || !payload?.length) return null
   return (
     <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
       <p className="font-medium text-foreground mb-1">{typeof label === 'string' && label.includes('-') ? fmtDate(label) : label}</p>
-      {payload.map((p: any) => (
-        <p key={p.name} style={{ color: p.color ?? p.fill }}>
-          {formatter ? formatter(p) : `${p.name}: ${fmt(p.value)}`}
+      {payload.map((point, index) => (
+        <p key={`${point.name ?? 'series'}-${index}`} style={{ color: point.color ?? point.fill }}>
+          {formatter ? formatter(point) : `${point.name}: ${fmt(toTooltipNumber(point.value))}`}
         </p>
       ))}
     </div>
@@ -394,7 +423,7 @@ export function Finance() {
               <BarChart data={monthly} barCategoryGap="30%" barGap={4}>
                 <XAxis dataKey="month" tickFormatter={formatMonth} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
                 <YAxis tickFormatter={fmtShort} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} width={36} />
-                <Tooltip content={<ChartTooltip formatter={(p: any) => `${p.name === 'spending' ? 'Расходы' : 'Доходы'}: ${fmt(p.value)}`} />} cursor={{ opacity: 0.1 }} />
+                <Tooltip content={<ChartTooltip formatter={(point) => `${point.name === 'spending' ? 'Расходы' : 'Доходы'}: ${fmt(toTooltipNumber(point.value))}`} />} cursor={{ opacity: 0.1 }} />
                 <Legend formatter={v => v === 'spending' ? 'Расходы' : 'Доходы'} wrapperStyle={{ fontSize: 12 }} />
                 <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="spending" fill="#f43f5e" radius={[4, 4, 0, 0]} />
@@ -411,7 +440,7 @@ export function Finance() {
               <AreaChart data={daily}>
                 <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis tickFormatter={fmtShort} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} width={36} />
-                <Tooltip content={<ChartTooltip formatter={(p: any) => `${p.name === 'spending' ? 'Расходы' : 'Доходы'}: ${fmt(p.value)}`} />} />
+                <Tooltip content={<ChartTooltip formatter={(point) => `${point.name === 'spending' ? 'Расходы' : 'Доходы'}: ${fmt(toTooltipNumber(point.value))}`} />} />
                 <Area type="monotone" dataKey="spending" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.15} strokeWidth={2} />
                 <Area type="monotone" dataKey="income" stroke="#10b981" fill="#10b981" fillOpacity={0.1} strokeWidth={1.5} />
               </AreaChart>
@@ -434,7 +463,7 @@ export function Finance() {
                   <Pie data={categories} dataKey="amount" nameKey="category" cx={100} cy={100} innerRadius={55} outerRadius={90} paddingAngle={2}>
                     {categories.map((_, i) => <Cell key={i} fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]} />)}
                   </Pie>
-                  <Tooltip content={<ChartTooltip formatter={(p: any) => fmt(p.value)} />} />
+                  <Tooltip content={<ChartTooltip formatter={(point) => fmt(toTooltipNumber(point.value))} />} />
                 </PieChart>
               </div>
               <div className="flex flex-col gap-1.5 flex-1 min-w-0 py-1">
@@ -461,7 +490,7 @@ export function Finance() {
               <BarChart data={topExpenses} layout="vertical" margin={{ left: 0, right: 10 }}>
                 <XAxis type="number" tickFormatter={fmtShort} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis type="category" dataKey="payee" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={120} />
-                <Tooltip content={<ChartTooltip formatter={(p: any) => `${fmt(p.value)} (${p.payload.count} операций)`} />} cursor={{ opacity: 0.1 }} />
+                <Tooltip content={<ChartTooltip formatter={(point) => `${fmt(toTooltipNumber(point.value))} (${point.payload?.count ?? 0} операций)`} />} cursor={{ opacity: 0.1 }} />
                 <Bar dataKey="amount" fill="#f97316" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>

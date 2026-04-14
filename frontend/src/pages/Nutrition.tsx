@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   AreaChart, Area, Legend, PieChart, Pie,
+  type TooltipValueType,
 } from 'recharts'
+import type { TooltipContentProps } from 'recharts/types/component/Tooltip'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { cn } from '@/lib/utils'
@@ -21,6 +23,16 @@ function fmtDate(iso: string) {
 function fmtShort(iso: string) {
   const d = new Date(iso)
   return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function tooltipNumber(value: TooltipValueType | undefined) {
+  const scalar = Array.isArray(value) ? value[0] : value
+  if (typeof scalar === 'number') return scalar
+  if (typeof scalar === 'string') {
+    const parsed = Number(scalar)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
 }
 
 const CALORIE_TARGET = 2000
@@ -251,10 +263,10 @@ export function Nutrition() {
               <BarChart data={chartData} barCategoryGap="25%">
                 <XAxis dataKey="date" tickFormatter={fmtShort} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={36} />
-                <Tooltip content={({ active, payload, label }: any) => active && payload?.length ? (
+                <Tooltip content={({ active, payload, label }: TooltipContentProps<TooltipValueType, string | number>) => active && payload?.length ? (
                   <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
-                    <p className="font-medium text-foreground mb-1">{fmtDate(label)}</p>
-                    <p className="text-orange-400">{payload[0]?.value?.toFixed(0)} ккал</p>
+                    <p className="font-medium text-foreground mb-1">{typeof label === 'string' ? fmtDate(label) : String(label ?? '')}</p>
+                    <p className="text-orange-400">{tooltipNumber(payload[0]?.value).toFixed(0)} ккал</p>
                   </div>
                 ) : null} cursor={{ opacity: 0.1 }} />
                 <Bar dataKey="calories" radius={[4, 4, 0, 0]}>
@@ -275,10 +287,10 @@ export function Nutrition() {
               <AreaChart data={chartData}>
                 <XAxis dataKey="date" tickFormatter={fmtShort} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={30} />
-                <Tooltip content={({ active, payload, label }: any) => active && payload?.length ? (
+                <Tooltip content={({ active, payload, label }: TooltipContentProps<TooltipValueType, string | number>) => active && payload?.length ? (
                   <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
-                    <p className="font-medium text-foreground mb-1">{fmtDate(label)}</p>
-                    {payload.map((p: any) => <p key={p.name} style={{ color: p.color }}>{p.name === 'protein' ? 'Белки' : p.name === 'fat' ? 'Жиры' : p.name === 'carbs' ? 'Углеводы' : 'Клетчатка'}: {p.value?.toFixed(0)}г</p>)}
+                    <p className="font-medium text-foreground mb-1">{typeof label === 'string' ? fmtDate(label) : String(label ?? '')}</p>
+                    {payload.map((point, index) => <p key={`${point.name ?? 'series'}-${index}`} style={{ color: point.color }}>{point.name === 'protein' ? 'Белки' : point.name === 'fat' ? 'Жиры' : point.name === 'carbs' ? 'Углеводы' : 'Клетчатка'}: {tooltipNumber(point.value).toFixed(0)}г</p>)}
                   </div>
                 ) : null} />
                 <Legend formatter={v => v === 'protein' ? 'Белки' : v === 'fat' ? 'Жиры' : v === 'carbs' ? 'Углеводы' : 'Клетчатка'} wrapperStyle={{ fontSize: 11 }} />
@@ -303,7 +315,7 @@ export function Nutrition() {
                   <Pie data={macroPie} dataKey="value" cx={80} cy={80} innerRadius={45} outerRadius={72} paddingAngle={3}>
                     {macroPie.map((m, i) => <Cell key={i} fill={m.color} />)}
                   </Pie>
-                  <Tooltip formatter={(v: any) => `${Number(v).toFixed(0)} ккал`} />
+                  <Tooltip formatter={(value) => `${tooltipNumber(value).toFixed(0)} ккал`} />
                 </PieChart>
               </div>
               <div className="flex flex-col gap-2">
@@ -329,7 +341,7 @@ export function Nutrition() {
                   <Pie data={mealPie} dataKey="value" cx={80} cy={80} innerRadius={45} outerRadius={72} paddingAngle={3}>
                     {mealPie.map((_, i) => <Cell key={i} fill={mealColors[i % mealColors.length]} />)}
                   </Pie>
-                  <Tooltip formatter={(v: any) => `${v} ккал`} />
+                  <Tooltip formatter={(value) => `${tooltipNumber(value)} ккал`} />
                 </PieChart>
               </div>
               <div className="flex flex-col gap-2">

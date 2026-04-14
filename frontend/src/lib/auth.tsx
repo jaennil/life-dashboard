@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { api, type User } from '@/lib/api'
 
 interface AuthContextValue {
@@ -15,18 +15,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     try {
       const u = await api.me()
       setUser(u)
     } catch {
       setUser(null)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    refresh().finally(() => setLoading(false))
-  }, [])
+    let cancelled = false
+
+    const bootstrap = async () => {
+      await refresh()
+      if (!cancelled) {
+        setLoading(false)
+      }
+    }
+
+    void bootstrap()
+    return () => {
+      cancelled = true
+    }
+  }, [refresh])
 
   async function login(username: string, password: string, totpCode?: string) {
     const result = await api.login(username, password, totpCode)
@@ -48,6 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used inside AuthProvider')
