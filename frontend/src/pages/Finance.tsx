@@ -3,7 +3,20 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
   PieChart, Pie, Cell, AreaChart, Area,
 } from 'recharts'
-import { Wallet, TrendingDown, TrendingUp, Search, EyeOff } from 'lucide-react'
+import {
+  BadgeRussianRuble,
+  CreditCard,
+  EyeOff,
+  HandCoins,
+  Landmark,
+  PiggyBank,
+  Search,
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+  WalletCards,
+  type LucideIcon,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   api,
@@ -62,6 +75,74 @@ function formatAccountCount(count: number) {
   if (mod10 === 1 && mod100 !== 11) return `${count} счёт`
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} счёта`
   return `${count} счетов`
+}
+
+function getAccountVisual(type: string): { icon: LucideIcon; accent: string; bg: string } {
+  switch (type) {
+    case 'ccard':
+      return { icon: CreditCard, accent: 'text-amber-300', bg: 'bg-amber-500/12' }
+    case 'checking':
+      return { icon: Landmark, accent: 'text-sky-300', bg: 'bg-sky-500/12' }
+    case 'cash':
+      return { icon: BadgeRussianRuble, accent: 'text-emerald-300', bg: 'bg-emerald-500/12' }
+    case 'deposit':
+      return { icon: PiggyBank, accent: 'text-violet-300', bg: 'bg-violet-500/12' }
+    case 'loan':
+      return { icon: HandCoins, accent: 'text-rose-300', bg: 'bg-rose-500/12' }
+    case 'emoney':
+      return { icon: WalletCards, accent: 'text-cyan-300', bg: 'bg-cyan-500/12' }
+    default:
+      return { icon: Wallet, accent: 'text-muted-foreground', bg: 'bg-muted' }
+  }
+}
+
+function getAccountBrandBadge(account: Account): { label: string; bg: string; text: string } | null {
+  const source = `${account.company_title ?? ''} ${account.title}`.toLowerCase()
+
+  if (source.includes('тинь') || source.includes('t-bank') || source.includes('t bank')) {
+    return { label: 'T', bg: 'bg-yellow-300', text: 'text-black' }
+  }
+  if (source.includes('альфа') || source.includes('alfa')) {
+    return { label: 'A', bg: 'bg-red-500', text: 'text-white' }
+  }
+  if (source.includes('втб') || source.includes('vtb')) {
+    return { label: 'ВТБ', bg: 'bg-sky-500', text: 'text-white' }
+  }
+  if (source.includes('озон') || source.includes('ozon')) {
+    return { label: 'OZ', bg: 'bg-blue-600', text: 'text-white' }
+  }
+  if (source.includes('сбер') || source.includes('sber')) {
+    return { label: 'C', bg: 'bg-emerald-500', text: 'text-white' }
+  }
+  if (source.includes('райфф') || source.includes('raif') || source.includes('raiffeisen')) {
+    return { label: 'R', bg: 'bg-yellow-400', text: 'text-black' }
+  }
+  if (source.includes('яндекс') || source.includes('yandex')) {
+    return { label: 'Я', bg: 'bg-red-500', text: 'text-white' }
+  }
+
+  return null
+}
+
+function getAccountTypeLabel(type: string) {
+  switch (type) {
+    case 'ccard':
+      return 'Карта'
+    case 'checking':
+      return 'Счёт'
+    case 'cash':
+      return 'Наличные'
+    case 'deposit':
+      return 'Вклад'
+    case 'loan':
+      return 'Кредит'
+    case 'emoney':
+      return 'Электронный кошелёк'
+    case 'debt':
+      return 'Долг'
+    default:
+      return type || 'Счёт'
+  }
 }
 
 const ChartTooltip = ({ active, payload, label, formatter }: any) => {
@@ -470,12 +551,28 @@ export function Finance() {
 }
 
 function AccountRow({ account, muted = false }: { account: Account; muted?: boolean }) {
+  const visual = getAccountVisual(account.type)
+  const Icon = visual.icon
+  const brandBadge = getAccountBrandBadge(account)
+  const secondaryMeta = account.company_title
+    ? `${account.company_title} • ${getAccountTypeLabel(account.type)}`
+    : getAccountTypeLabel(account.type)
+
   return (
     <div className={cn('px-5 py-3 flex items-center gap-3', muted && 'bg-amber-500/5')}>
+      {brandBadge ? (
+        <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/5 text-[10px] font-black uppercase tracking-tight', brandBadge.bg, brandBadge.text)}>
+          {brandBadge.label}
+        </div>
+      ) : (
+        <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/5', visual.bg)}>
+          <Icon className={cn('h-4 w-4', visual.accent)} />
+        </div>
+      )}
       <div className="flex-1 min-w-0">
         <p className="text-sm text-foreground truncate">{account.title}</p>
         <div className="flex items-center gap-2">
-          <p className="text-xs text-muted-foreground">{account.type}</p>
+          <p className="text-xs text-muted-foreground truncate">{secondaryMeta}</p>
           {!account.in_balance ? (
             <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-200">
               Вне баланса

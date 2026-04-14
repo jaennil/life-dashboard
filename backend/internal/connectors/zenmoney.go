@@ -26,6 +26,7 @@ type zenmoneyDiffRequest struct {
 type zenmoneyDiffResponse struct {
 	ServerTimestamp int64                 `json:"serverTimestamp"`
 	Instrument      []zenmoneyInstrument  `json:"instrument"`
+	Company         []zenmoneyCompany     `json:"company"`
 	Account         []zenmoneyAccount     `json:"account"`
 	Transaction     []zenmoneyTransaction `json:"transaction"`
 	Tag             []zenmoneyTag         `json:"tag"`
@@ -43,11 +44,17 @@ type zenmoneyInstrument struct {
 	ShortTitle string `json:"shortTitle"`
 }
 
+type zenmoneyCompany struct {
+	ID    int    `json:"id"`
+	Title string `json:"title"`
+}
+
 type zenmoneyAccount struct {
 	ID        string  `json:"id"`
 	Title     string  `json:"title"`
 	Type      string  `json:"type"`
 	Currency  int     `json:"currency"`
+	Company   *int    `json:"company"`
 	Balance   float64 `json:"balance"`
 	InBalance *bool   `json:"inBalance"`
 	Archived  bool    `json:"archived"`
@@ -240,6 +247,11 @@ func (z *ZenmoneyConnector) Sync(ctx context.Context, userID string) error {
 		currencies[inst.ID] = inst.ShortTitle
 	}
 
+	companies := make(map[int]string, len(resp.Company))
+	for _, company := range resp.Company {
+		companies[company.ID] = company.Title
+	}
+
 	// Upsert tags and build id→title map
 	tagNames := make(map[string]string)
 	for i := range resp.Tag {
@@ -271,7 +283,7 @@ func (z *ZenmoneyConnector) Sync(ctx context.Context, userID string) error {
 	z.logger.Info().Int("count", len(resp.Tag)).Msg("tags synced")
 
 	for i := range resp.Account {
-		if err := z.upsertAccount(ctx, userID, &resp.Account[i], currencies); err != nil {
+		if err := z.upsertAccount(ctx, userID, &resp.Account[i], currencies, companies); err != nil {
 			return fmt.Errorf("upsert account %s: %w", resp.Account[i].ID, err)
 		}
 	}
@@ -345,7 +357,7 @@ func (z *ZenmoneyConnector) fetchDiff(ctx context.Context, token string, lastSer
 
 // ---- DB ----
 
-func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, userID string, acc *zenmoneyAccount, currencies map[int]string) error {
+func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, userID string, acc *zenmoneyAccount, currencies map[int]string, companies map[int]string) error {
 	if acc.Deleted {
 		_, err := z.db.Exec(ctx, `DELETE FROM accounts WHERE external_id = $1 AND user_id = $2`, acc.ID, userID)
 		return err
@@ -356,17 +368,26 @@ func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, userID string, ac
 		currency = "RUB"
 	}
 
+	var companyID any
+	var companyTitle string
+	if acc.Company != nil {
+		companyID = *acc.Company
+		companyTitle = companies[*acc.Company]
+	}
+
 	_, err := z.db.Exec(ctx, `
-		INSERT INTO accounts (external_id, title, type, currency, balance, in_balance, last_updated, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)
+		INSERT INTO accounts (external_id, title, type, currency, balance, in_balance, company_id, company_title, last_updated, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), NOW(), $9)
 		ON CONFLICT (user_id, external_id) DO UPDATE SET
 			title        = EXCLUDED.title,
 			type         = EXCLUDED.type,
 			currency     = EXCLUDED.currency,
 			balance      = EXCLUDED.balance,
 			in_balance   = EXCLUDED.in_balance,
+			company_id   = COALESCE(EXCLUDED.company_id, accounts.company_id),
+			company_title = COALESCE(EXCLUDED.company_title, accounts.company_title),
 			last_updated = EXCLUDED.last_updated
-	`, acc.ID, acc.Title, acc.Type, currency, acc.Balance, zenmoneyAccountInBalance(acc), userID)
+	`, acc.ID, acc.Title, acc.Type, currency, acc.Balance, zenmoneyAccountInBalance(acc), companyID, companyTitle, userID)
 	if err != nil {
 		return err
 	}
@@ -374,6 +395,7 @@ func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, userID string, ac
 	z.logger.Debug().
 		Str("id", acc.ID).
 		Str("title", acc.Title).
+		Str("company_title", companyTitle).
 		Float64("balance", acc.Balance).
 		Bool("in_balance", zenmoneyAccountInBalance(acc)).
 		Msg("account upserted")

@@ -66,6 +66,8 @@ export interface Account {
   currency: string
   balance: number
   in_balance: boolean
+  company_id: number | null
+  company_title: string | null
 }
 
 export interface FinanceTransaction {

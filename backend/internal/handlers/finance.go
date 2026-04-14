@@ -33,12 +33,14 @@ type MonthStat struct {
 }
 
 type Account struct {
-	ID        string  `json:"id"`
-	Title     string  `json:"title"`
-	Type      string  `json:"type"`
-	Currency  string  `json:"currency"`
-	Balance   float64 `json:"balance"`
-	InBalance bool    `json:"in_balance"`
+	ID           string  `json:"id"`
+	Title        string  `json:"title"`
+	Type         string  `json:"type"`
+	Currency     string  `json:"currency"`
+	Balance      float64 `json:"balance"`
+	InBalance    bool    `json:"in_balance"`
+	CompanyID    *int    `json:"company_id"`
+	CompanyTitle *string `json:"company_title"`
 }
 
 type FinanceTransaction struct {
@@ -107,10 +109,10 @@ func (h *FinanceHandler) GetAccounts(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
-		SELECT id, title, COALESCE(type, ''), currency, COALESCE(balance, 0), in_balance
+		SELECT id, title, COALESCE(type, ''), currency, COALESCE(balance, 0), in_balance, company_id, company_title
 		FROM accounts
-		WHERE balance != 0 AND user_id = $1
-		ORDER BY in_balance DESC, currency, balance DESC
+		WHERE user_id = $1
+		ORDER BY in_balance DESC, ABS(COALESCE(balance, 0)) DESC, title ASC
 	`, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query accounts")
@@ -122,7 +124,7 @@ func (h *FinanceHandler) GetAccounts(w http.ResponseWriter, r *http.Request) {
 	accounts := make([]Account, 0)
 	for rows.Next() {
 		var a Account
-		if err := rows.Scan(&a.ID, &a.Title, &a.Type, &a.Currency, &a.Balance, &a.InBalance); err != nil {
+		if err := rows.Scan(&a.ID, &a.Title, &a.Type, &a.Currency, &a.Balance, &a.InBalance, &a.CompanyID, &a.CompanyTitle); err != nil {
 			continue
 		}
 		accounts = append(accounts, a)
