@@ -144,6 +144,8 @@ func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionN
 - Не отвечай, что данных нет, если нужная информация уже была дана пользователем несколькими сообщениями выше.
 - Для арифметики и рекомендаций показывай короткий расчёт.
 - Для упражнений с гантелями, блинами и штангой не путай вес на одну гантель, вес пары и общий вес штанги. Если это неясно, сначала уточни.
+- Календарь — это только план из Google Calendar, а не подтверждение факта. Не пиши "был в зале", "лёг спать" или "встретился", если у тебя есть только календарное событие.
+- Питание — это только залогированные записи. Не пиши "отслежено полностью" или "ужин был", если в данных нет явного подтверждения.
 
 Сейчас особенно релевантны разделы данных: %s.
 
@@ -512,24 +514,7 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 				var startTime, endTime time.Time
 				var allDay bool
 				if calRows.Scan(&title, &startTime, &endTime, &allDay, &location) == nil {
-					if allDay {
-						calEvents = append(calEvents, fmt.Sprintf("  %s: %s (весь день)%s",
-							startTime.Format("02.01"), title, func() string {
-								if location != "" {
-									return " @ " + location
-								}
-								return ""
-							}()))
-					} else {
-						calEvents = append(calEvents, fmt.Sprintf("  %s %s-%s: %s%s",
-							startTime.Format("02.01"), startTime.Format("15:04"), endTime.Format("15:04"),
-							title, func() string {
-								if location != "" {
-									return " @ " + location
-								}
-								return ""
-							}()))
-					}
+					calEvents = append(calEvents, formatAICalendarEvent(startTime, endTime, allDay, title, location))
 				}
 			}
 			calRows.Close()
@@ -537,7 +522,7 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 				if sb.Len() > 0 {
 					sb.WriteString("\n")
 				}
-				sb.WriteString("=== КАЛЕНДАРЬ (30 дней назад — 30 дней вперёд) ===\n")
+				sb.WriteString("=== КАЛЕНДАРЬ (30 дней назад — 30 дней вперёд; это план, не факт) ===\n")
 				for _, e := range calEvents {
 					sb.WriteString(e + "\n")
 				}
@@ -814,4 +799,25 @@ func truncateAIText(value string, maxLen int) string {
 
 func formatAIFloat(value float64) string {
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.1f", value), "0"), ".")
+}
+
+func formatAITimestampLocal(t time.Time, layout string) string {
+	return t.In(time.Local).Format(layout)
+}
+
+func formatAICalendarEvent(startTime, endTime time.Time, allDay bool, title, location string) string {
+	locationPart := ""
+	if location != "" {
+		locationPart = " @ " + location
+	}
+	if allDay {
+		return fmt.Sprintf("  %s: %s (весь день)%s", formatAITimestampLocal(startTime, "02.01"), title, locationPart)
+	}
+	return fmt.Sprintf("  %s %s-%s: %s%s",
+		formatAITimestampLocal(startTime, "02.01"),
+		formatAITimestampLocal(startTime, "15:04"),
+		formatAITimestampLocal(endTime, "15:04"),
+		title,
+		locationPart,
+	)
 }

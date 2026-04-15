@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -201,6 +202,9 @@ func buildAICheckupPrompt(now time.Time, window checkupWindow, dataContext strin
 	sb.WriteString("Ты персональный AI-ассистент приложения Life Dashboard.\n")
 	sb.WriteString("Твоя задача — сделать checkup-отчёт по всем доступным сферам жизни пользователя за указанный период.\n")
 	sb.WriteString("Отвечай только на русском языке. Не выдумывай факты и не додумывай цифры.\n")
+	sb.WriteString("События Google Calendar — это только план/расписание. Они не подтверждают, что пользователь реально был в зале, лёг спать, поехал или что-то сделал.\n")
+	sb.WriteString("Факт тренировки подтверждают только данные из workouts/Hevy. Факт сна, шагов, веса и пульса подтверждают только данные из biometrics/sleep_sessions.\n")
+	sb.WriteString("Питание отражает только залогированные записи из трекера. Не пиши \"отслежено полностью\", если в данных нет явного подтверждения полноты дня.\n")
 	sb.WriteString("Сделай структурированный ответ:\n")
 	sb.WriteString("1. Короткий итог в 2-4 предложениях.\n")
 	sb.WriteString("2. Финансы.\n")
@@ -349,6 +353,7 @@ func (h *AIHandler) appendCheckupHealthContext(ctx context.Context, sb *strings.
 
 func (h *AIHandler) appendCheckupActivityContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
 	sb.WriteString("\n=== АКТИВНОСТЬ ===\n")
+	sb.WriteString("Фактическая активность берётся только из activities (например, Strava). Календарь сюда не относится. Шаги не отсюда, а из раздела здоровья.\n")
 
 	var count int
 	var distanceKm, durationHours, calories float64
@@ -423,6 +428,7 @@ func (h *AIHandler) appendCheckupActivityContext(ctx context.Context, sb *string
 
 func (h *AIHandler) appendCheckupWorkoutContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) error {
 	sb.WriteString("\n=== ТРЕНИРОВКИ ===\n")
+	sb.WriteString("Факт тренировки подтверждается только данными workouts/Hevy. Календарное событие \"зал\" само по себе не доказывает, что тренировка была.\n")
 
 	var workoutCount, activeDays, totalSets, uniqueExercises int
 	h.db.QueryRow(ctx, `
@@ -487,6 +493,7 @@ func (h *AIHandler) appendCheckupWorkoutContext(ctx context.Context, sb *strings
 
 func (h *AIHandler) appendCheckupNutritionContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
 	sb.WriteString("\n=== ПИТАНИЕ ===\n")
+	sb.WriteString("Это только залогированные приёмы пищи из трекера. Отсутствие ужина/перекуса в логах не означает, что их не было.\n")
 
 	var trackedDays int
 	var avgCalories, avgProtein, avgCarbs, avgFat, minCalories, maxCalories float64
@@ -531,6 +538,46 @@ func (h *AIHandler) appendCheckupNutritionContext(ctx context.Context, sb *strin
 			if rows.Scan(&day, &calories, &protein, &carbs, &fat) == nil {
 				sb.WriteString(fmt.Sprintf("  - %s: %.0f ккал | Б %.0f | Ж %.0f | У %.0f\n", day, calories, protein, fat, carbs))
 			}
+		}
+	}
+
+	mealRows, err := h.db.Query(ctx, `
+		SELECT
+			nd.date,
+			COUNT(ni.id),
+			COALESCE(
+				array_agg(DISTINCT NULLIF(ni.meal_type, '')) FILTER (WHERE NULLIF(ni.meal_type, '') IS NOT NULL),
+				'{}'::text[]
+			)
+		FROM nutrition_daily nd
+		LEFT JOIN nutrition_items ni ON ni.daily_id = nd.id
+		WHERE nd.user_id = $1
+			AND nd.date >= $2::date
+			AND nd.date <= $3::date
+		GROUP BY nd.date
+		ORDER BY nd.date DESC
+		LIMIT 7
+	`, userID, window.Start, window.End)
+	if err == nil {
+		defer mealRows.Close()
+		sb.WriteString("Покрытие логов по приёмам пищи:\n")
+		hasRows := false
+		for mealRows.Next() {
+			hasRows = true
+			var day time.Time
+			var itemsCount int
+			var mealTypes []string
+			if mealRows.Scan(&day, &itemsCount, &mealTypes) == nil {
+				meals := formatAIMealTypes(mealTypes)
+				if len(meals) == 0 {
+					sb.WriteString(fmt.Sprintf("  - %s: %d записей, типы приёмов пищи не указаны\n", day.Format("02.01"), itemsCount))
+					continue
+				}
+				sb.WriteString(fmt.Sprintf("  - %s: %d записей, внесено: %s\n", day.Format("02.01"), itemsCount, strings.Join(meals, ", ")))
+			}
+		}
+		if !hasRows {
+			sb.WriteString("  - Нет детализации по приёмам пищи за период\n")
 		}
 	}
 }
@@ -586,6 +633,7 @@ func (h *AIHandler) appendCheckupJournalContext(ctx context.Context, sb *strings
 
 func (h *AIHandler) appendCheckupCalendarContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
 	sb.WriteString("\n=== КАЛЕНДАРЬ ===\n")
+	sb.WriteString("Это только план из Google Calendar, а не факт выполнения. Не интерпретируй эти события как реально совершившиеся действия.\n")
 
 	var eventsCount int
 	h.db.QueryRow(ctx, `
@@ -603,7 +651,7 @@ func (h *AIHandler) appendCheckupCalendarContext(ctx context.Context, sb *string
 	sb.WriteString(fmt.Sprintf("Событий за период: %d\n", eventsCount))
 
 	rows, err := h.db.Query(ctx, `
-		SELECT TO_CHAR(start_time, 'DD.MM HH24:MI'), title, COALESCE(location, '')
+		SELECT start_time, end_time, all_day, title, COALESCE(location, '')
 		FROM calendar_events
 		WHERE user_id = $1
 			AND start_time >= $2
@@ -613,15 +661,13 @@ func (h *AIHandler) appendCheckupCalendarContext(ctx context.Context, sb *string
 	`, userID, window.Start, window.End)
 	if err == nil {
 		defer rows.Close()
-		sb.WriteString("Последние события:\n")
+		sb.WriteString("Последние плановые события:\n")
 		for rows.Next() {
-			var at, title, location string
-			if rows.Scan(&at, &title, &location) == nil {
-				if location != "" {
-					sb.WriteString(fmt.Sprintf("  - %s: %s @ %s\n", at, title, location))
-				} else {
-					sb.WriteString(fmt.Sprintf("  - %s: %s\n", at, title))
-				}
+			var startTime, endTime time.Time
+			var allDay bool
+			var title, location string
+			if rows.Scan(&startTime, &endTime, &allDay, &title, &location) == nil {
+				sb.WriteString(formatAICalendarEvent(startTime, endTime, allDay, title, location) + "\n")
 			}
 		}
 	}
@@ -682,4 +728,47 @@ func (h *AIHandler) storeCheckupReport(ctx context.Context, userID string, windo
 		VALUES ($1, $2, $3, $4, $5)
 	`, userID, window.RequestedPeriod, window.Start, window.End, content)
 	return err
+}
+
+func formatAIMealTypes(mealTypes []string) []string {
+	if len(mealTypes) == 0 {
+		return nil
+	}
+
+	labels := make([]string, 0, len(mealTypes))
+	seen := make(map[string]bool, len(mealTypes))
+	for _, mealType := range mealTypes {
+		label := aiMealTypeLabel(mealType)
+		if label == "" || seen[label] {
+			continue
+		}
+		seen[label] = true
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	return labels
+}
+
+func aiMealTypeLabel(mealType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(mealType))
+	switch normalized {
+	case "breakfast":
+		return "завтрак"
+	case "lunch":
+		return "обед"
+	case "dinner", "supper":
+		return "ужин"
+	case "snack", "snacks":
+		return "перекус"
+	case "morning snack":
+		return "утренний перекус"
+	case "afternoon snack":
+		return "дневной перекус"
+	case "evening snack":
+		return "вечерний перекус"
+	case "other":
+		return "другое"
+	default:
+		return normalized
+	}
 }

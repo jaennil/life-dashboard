@@ -134,6 +134,8 @@ func TestBuildAISystemPromptMentionsDialogCorrections(t *testing.T) {
 		"Если пользователь уточнил или исправил тебя",
 		"Не отвечай, что данных нет, если нужная информация уже была дана пользователем",
 		"Сейчас особенно релевантны разделы данных: тренировки.",
+		"Календарь — это только план из Google Calendar",
+		"Питание — это только залогированные записи",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("expected prompt to contain %q, got:\n%s", expected, prompt)
@@ -197,9 +199,26 @@ func TestBuildAICheckupPromptMentionsStructuredReport(t *testing.T) {
 		"3. Активность и тренировки.",
 		"Три конкретных шага на следующий период.",
 		"Период отчёта: Checkup за неделю",
+		"События Google Calendar — это только план/расписание",
+		"Факт тренировки подтверждают только данные из workouts/Hevy",
+		"Питание отражает только залогированные записи",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("expected prompt to contain %q, got:\n%s", expected, prompt)
+		}
+	}
+}
+
+func TestFormatAIMealTypesTranslatesKnownMeals(t *testing.T) {
+	labels := formatAIMealTypes([]string{"lunch", "breakfast", "snack", "lunch", "evening snack"})
+
+	expected := []string{"вечерний перекус", "завтрак", "обед", "перекус"}
+	if len(labels) != len(expected) {
+		t.Fatalf("expected %d labels, got %d: %#v", len(expected), len(labels), labels)
+	}
+	for i, label := range expected {
+		if labels[i] != label {
+			t.Fatalf("expected label %q at index %d, got %q", label, i, labels[i])
 		}
 	}
 }

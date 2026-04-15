@@ -13,6 +13,7 @@ func (h *AIHandler) appendHealthContextInRange(ctx context.Context, sb *strings.
 	}
 
 	sb.WriteString(title + "\n")
+	sb.WriteString("Фактические показатели здоровья берутся только из biometrics/sleep_sessions (health webhook / Apple Health, если настроено). Календарь сюда не относится.\n")
 
 	var totalSteps, avgSteps float64
 	var stepDaysCount int

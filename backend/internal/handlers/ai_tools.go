@@ -587,6 +587,7 @@ func (h *AIHandler) appendRecentWorkoutsTool(ctx context.Context, sb *strings.Bu
 func (h *AIHandler) appendNutritionOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days int) {
 	since := time.Now().AddDate(0, 0, -days)
 	sb.WriteString(fmt.Sprintf("=== ПИТАНИЕ (%d дней) ===\n", days))
+	sb.WriteString("Только залогированные приёмы пищи. Неполный лог не означает, что других приёмов пищи не было.\n")
 
 	var trackedDays int
 	var avgCalories, avgProtein, avgCarbs, avgFat float64
@@ -675,7 +676,8 @@ func (h *AIHandler) appendJournalOverviewTool(ctx context.Context, sb *strings.B
 func (h *AIHandler) appendCalendarOverviewTool(ctx context.Context, sb *strings.Builder, userID string, pastDays, futureDays, limit int) {
 	since := time.Now().AddDate(0, 0, -pastDays)
 	until := time.Now().AddDate(0, 0, futureDays)
-	sb.WriteString(fmt.Sprintf("=== КАЛЕНДАРЬ (-%d / +%d дней) ===\n", pastDays, futureDays))
+	sb.WriteString(fmt.Sprintf("=== КАЛЕНДАРЬ (-%d / +%d дней; это план, не факт) ===\n", pastDays, futureDays))
+	sb.WriteString("События календаря отражают расписание из Google Calendar и сами по себе не подтверждают, что действие реально произошло.\n")
 
 	rows, err := h.db.Query(ctx, `
 		SELECT title, start_time, end_time, all_day, COALESCE(location, '')
@@ -699,11 +701,7 @@ func (h *AIHandler) appendCalendarOverviewTool(ctx context.Context, sb *strings.
 		var startTime, endTime time.Time
 		var allDay bool
 		if rows.Scan(&title, &startTime, &endTime, &allDay, &location) == nil {
-			if allDay {
-				sb.WriteString(fmt.Sprintf("  %s: %s%s\n", startTime.Format("02.01"), title, formatAILocation(location)))
-				continue
-			}
-			sb.WriteString(fmt.Sprintf("  %s %s-%s: %s%s\n", startTime.Format("02.01"), startTime.Format("15:04"), endTime.Format("15:04"), title, formatAILocation(location)))
+			sb.WriteString(formatAICalendarEvent(startTime, endTime, allDay, title, location) + "\n")
 		}
 	}
 	if !hasRows {
