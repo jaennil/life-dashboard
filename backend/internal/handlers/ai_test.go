@@ -99,3 +99,66 @@ func TestBuildAISystemPromptMentionsDialogCorrections(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveCheckupWindowFallsBackToWeekWhenNoPreviousReport(t *testing.T) {
+	now := time.Date(2026, 4, 15, 18, 30, 0, 0, time.UTC)
+
+	window, err := resolveCheckupWindow(now, checkupPeriodSinceLast, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if window.RequestedPeriod != checkupPeriodSinceLast {
+		t.Fatalf("expected requested period %q, got %q", checkupPeriodSinceLast, window.RequestedPeriod)
+	}
+	if window.EffectivePeriod != checkupPeriodWeek {
+		t.Fatalf("expected effective period %q, got %q", checkupPeriodWeek, window.EffectivePeriod)
+	}
+	if !strings.Contains(window.Note, "последние 7 дней") {
+		t.Fatalf("expected fallback note to mention 7 days, got %q", window.Note)
+	}
+}
+
+func TestResolveCheckupWindowUsesLastReportTimestamp(t *testing.T) {
+	now := time.Date(2026, 4, 15, 18, 30, 0, 0, time.UTC)
+	lastReport := time.Date(2026, 4, 12, 9, 15, 0, 0, time.UTC)
+
+	window, err := resolveCheckupWindow(now, checkupPeriodSinceLast, &lastReport)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !window.Start.Equal(lastReport) {
+		t.Fatalf("expected start %v, got %v", lastReport, window.Start)
+	}
+	if !window.End.Equal(now) {
+		t.Fatalf("expected end %v, got %v", now, window.End)
+	}
+	if window.Note != "" {
+		t.Fatalf("expected empty note, got %q", window.Note)
+	}
+}
+
+func TestBuildAICheckupPromptMentionsStructuredReport(t *testing.T) {
+	now := time.Date(2026, 4, 15, 18, 30, 0, 0, time.UTC)
+	window := checkupWindow{
+		RequestedPeriod: checkupPeriodWeek,
+		EffectivePeriod: checkupPeriodWeek,
+		Title:           "Checkup за неделю",
+		UserLabel:       "за последние 7 дней",
+		Start:           time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC),
+		End:             now,
+	}
+
+	prompt := buildAICheckupPrompt(now, window, "=== ФИНАНСЫ ===")
+	for _, expected := range []string{
+		"1. Короткий итог",
+		"3. Активность и тренировки.",
+		"Три конкретных шага на следующий период.",
+		"Период отчёта: Checkup за неделю",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("expected prompt to contain %q, got:\n%s", expected, prompt)
+		}
+	}
+}

@@ -21,12 +21,27 @@ interface SendResult {
   isError?: boolean
 }
 
+type CheckupPeriod = 'today' | 'week' | 'month' | 'since_last'
+
+interface CheckupAction {
+  period: CheckupPeriod
+  label: string
+  userMessage: string
+}
+
 const SUGGESTIONS = [
   'Сколько я потратил в этом месяце?',
   'На что больше всего трачу деньги?',
   'Когда последний раз тренировался?',
   'Сколько километров пробежал на этой неделе?',
   'Проанализируй мои финансы за месяц',
+]
+
+const CHECKUP_ACTIONS: CheckupAction[] = [
+  { period: 'today', label: 'Сегодня', userMessage: 'Сделай checkup за сегодня' },
+  { period: 'week', label: '7 дней', userMessage: 'Сделай checkup за неделю' },
+  { period: 'month', label: '30 дней', userMessage: 'Сделай checkup за месяц' },
+  { period: 'since_last', label: 'С прошлого', userMessage: 'Сделай checkup с момента последнего отчёта' },
 ]
 
 function looksLikeHTML(value: string) {
@@ -66,9 +81,17 @@ async function requestChat(message: string, history: Message[]): Promise<SendRes
       .map(m => ({ role: m.role, content: m.content })),
   })
 
+  return requestAI('/api/v1/ai/chat', payload)
+}
+
+async function requestCheckup(period: CheckupPeriod): Promise<SendResult> {
+  return requestAI('/api/v1/ai/checkup', JSON.stringify({ period }))
+}
+
+async function requestAI(url: string, payload: string): Promise<SendResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch('/api/v1/ai/chat', {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload,
@@ -182,6 +205,25 @@ export function AiChat() {
     }
   }
 
+  async function sendCheckup(action: CheckupAction) {
+    if (loading || historyLoading) return
+    setLoading(true)
+
+    const userMsg: Message = { role: 'user', content: action.userMessage }
+    const assistantMsg: Message = { role: 'assistant', content: '', loading: true }
+    setMessages(prev => [...prev, userMsg, assistantMsg])
+
+    try {
+      const result = await requestCheckup(action.period)
+      setMessages(prev => [
+        ...prev.slice(0, -1),
+        { role: 'assistant', content: result.content, loading: false },
+      ])
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function clearHistory() {
     if (loading || historyLoading) return
 
@@ -226,6 +268,25 @@ export function AiChat() {
           {historyError}
         </div>
       ) : null}
+
+      <div className="mb-3 rounded-xl border bg-card/70 p-3">
+        <div className="mb-2">
+          <p className="text-sm font-medium text-foreground">Checkup</p>
+          <p className="text-xs text-muted-foreground">Быстрый AI-отчёт по всем сферам за нужный период</p>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {CHECKUP_ACTIONS.map(action => (
+            <button
+              key={action.period}
+              onClick={() => sendCheckup(action)}
+              disabled={loading || historyLoading}
+              className="shrink-0 rounded-lg border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto rounded-xl border bg-card p-4 flex flex-col gap-4 min-h-0">

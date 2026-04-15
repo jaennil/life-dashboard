@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -67,6 +68,12 @@ const (
 	aiUpstreamResponseLogSize = 512
 )
 
+var (
+	errAIUnavailable = errors.New("ai unavailable")
+	errAIUpstream    = errors.New("ai upstream error")
+	errAIBadResponse = errors.New("ai bad response")
+)
+
 func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	if h.unleash != nil && !h.unleash.IsEnabled("ai-chat") {
 		http.Error(w, "AI чат временно отключён", http.StatusForbidden)
@@ -100,90 +107,9 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	messages = append(messages, req.History...)
 	messages = append(messages, ChatMessage{Role: "user", Content: req.Message})
 
-	body, err := json.Marshal(map[string]any{
-		"model":    h.model,
-		"messages": messages,
-		"stream":   false,
-	})
+	content, err := h.complete(ctx, messages)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("marshal ai request")
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	upstreamCtx, cancel := context.WithTimeout(ctx, aiUpstreamRequestTimeout)
-	defer cancel()
-
-	apiReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost,
-		h.baseURL+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	apiReq.Header.Set("Content-Type", "application/json")
-	if h.apiKey != "" {
-		apiReq.Header.Set("Authorization", "Bearer "+h.apiKey)
-	}
-
-	client := &http.Client{
-		Timeout: aiUpstreamRequestTimeout,
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   aiUpstreamDialTimeout,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			TLSHandshakeTimeout:   aiUpstreamDialTimeout,
-			ResponseHeaderTimeout: aiUpstreamHeaderTimeout,
-		},
-	}
-	resp, err := client.Do(apiReq)
-	if err != nil {
-		h.logger.Error().Err(err).Msg("ai api request")
-		http.Error(w, "AI сервис временно недоступен. Попробуй позже.", http.StatusServiceUnavailable)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, aiUpstreamResponseLogSize))
-		h.logger.Error().
-			Int("status", resp.StatusCode).
-			Str("body", strings.TrimSpace(string(body))).
-			Msg("ai api error")
-		http.Error(w, "AI сервис вернул ошибку. Попробуй позже.", http.StatusBadGateway)
-		return
-	}
-
-	rawResp, err := io.ReadAll(resp.Body)
-	if err != nil {
-		h.logger.Error().Err(err).Msg("read ai response")
-		http.Error(w, "AI сервис временно недоступен. Попробуй позже.", http.StatusServiceUnavailable)
-		return
-	}
-
-	var completion struct {
-		Choices []struct {
-			Message struct {
-				Content any `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(rawResp, &completion); err != nil {
-		h.logger.Error().Err(err).Str("body", truncateAIText(string(rawResp), aiUpstreamResponseLogSize)).Msg("decode ai response")
-		http.Error(w, "AI сервис вернул некорректный ответ. Попробуй позже.", http.StatusBadGateway)
-		return
-	}
-	if len(completion.Choices) == 0 {
-		h.logger.Error().Msg("ai response has no choices")
-		http.Error(w, "AI сервис не вернул ответ. Попробуй позже.", http.StatusBadGateway)
-		return
-	}
-
-	content := normalizeAIContent(completion.Choices[0].Message.Content)
-	if strings.TrimSpace(content) == "" {
-		h.logger.Error().Msg("ai response content is empty")
-		http.Error(w, "AI сервис не вернул ответ. Попробуй позже.", http.StatusBadGateway)
+		writeAICompletionError(w, err)
 		return
 	}
 
@@ -220,6 +146,103 @@ func buildAISystemPrompt(now time.Time, dataContext string, scope aiContextScope
 
 Текущие данные пользователя (обновлено %s):
 %s`, strings.Join(scope.sectionNames(), ", "), now.Format("02.01.2006 15:04"), dataContext)
+}
+
+func (h *AIHandler) complete(ctx context.Context, messages []ChatMessage) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"model":    h.model,
+		"messages": messages,
+		"stream":   false,
+	})
+	if err != nil {
+		h.logger.Error().Err(err).Msg("marshal ai request")
+		return "", err
+	}
+
+	upstreamCtx, cancel := context.WithTimeout(ctx, aiUpstreamRequestTimeout)
+	defer cancel()
+
+	apiReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost,
+		h.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	apiReq.Header.Set("Content-Type", "application/json")
+	if h.apiKey != "" {
+		apiReq.Header.Set("Authorization", "Bearer "+h.apiKey)
+	}
+
+	client := &http.Client{
+		Timeout: aiUpstreamRequestTimeout,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   aiUpstreamDialTimeout,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   aiUpstreamDialTimeout,
+			ResponseHeaderTimeout: aiUpstreamHeaderTimeout,
+		},
+	}
+
+	resp, err := client.Do(apiReq)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("ai api request")
+		return "", errAIUnavailable
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, aiUpstreamResponseLogSize))
+		h.logger.Error().
+			Int("status", resp.StatusCode).
+			Str("body", strings.TrimSpace(string(body))).
+			Msg("ai api error")
+		return "", errAIUpstream
+	}
+
+	rawResp, err := io.ReadAll(resp.Body)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("read ai response")
+		return "", errAIUnavailable
+	}
+
+	var completion struct {
+		Choices []struct {
+			Message struct {
+				Content any `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(rawResp, &completion); err != nil {
+		h.logger.Error().Err(err).Str("body", truncateAIText(string(rawResp), aiUpstreamResponseLogSize)).Msg("decode ai response")
+		return "", errAIBadResponse
+	}
+	if len(completion.Choices) == 0 {
+		h.logger.Error().Msg("ai response has no choices")
+		return "", errAIBadResponse
+	}
+
+	content := normalizeAIContent(completion.Choices[0].Message.Content)
+	if strings.TrimSpace(content) == "" {
+		h.logger.Error().Msg("ai response content is empty")
+		return "", errAIBadResponse
+	}
+
+	return content, nil
+}
+
+func writeAICompletionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errAIUnavailable):
+		http.Error(w, "AI сервис временно недоступен. Попробуй позже.", http.StatusServiceUnavailable)
+	case errors.Is(err, errAIUpstream):
+		http.Error(w, "AI сервис вернул ошибку. Попробуй позже.", http.StatusBadGateway)
+	case errors.Is(err, errAIBadResponse):
+		http.Error(w, "AI сервис не вернул корректный ответ. Попробуй позже.", http.StatusBadGateway)
+	default:
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
 }
 
 func normalizeAIContent(content any) string {
