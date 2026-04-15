@@ -64,13 +64,40 @@ type hevyRoutine struct {
 	Exercises []hevyRoutineEntry `json:"exercises"`
 }
 
+type hevyFlexibleString string
+
+func (s *hevyFlexibleString) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*s = ""
+		return nil
+	}
+
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*s = hevyFlexibleString(str)
+		return nil
+	}
+
+	var num json.Number
+	if err := json.Unmarshal(data, &num); err == nil {
+		*s = hevyFlexibleString(num.String())
+		return nil
+	}
+
+	return fmt.Errorf("unsupported flexible string payload: %s", string(data))
+}
+
+func (s hevyFlexibleString) String() string {
+	return string(s)
+}
+
 type hevyExercise struct {
-	Index              int       `json:"index"`
-	Title              string    `json:"title"`
-	Notes              string    `json:"notes"`
-	ExerciseTemplateID string    `json:"exercise_template_id"`
-	SupersetID         *string   `json:"superset_id"`
-	Sets               []hevySet `json:"sets"`
+	Index              int                `json:"index"`
+	Title              string             `json:"title"`
+	Notes              string             `json:"notes"`
+	ExerciseTemplateID string             `json:"exercise_template_id"`
+	SupersetID         hevyFlexibleString `json:"superset_id"`
+	Sets               []hevySet          `json:"sets"`
 }
 
 type hevySet struct {
@@ -85,13 +112,13 @@ type hevySet struct {
 }
 
 type hevyRoutineEntry struct {
-	Index              int              `json:"index"`
-	Title              string           `json:"title"`
-	Notes              *string          `json:"notes"`
-	ExerciseTemplateID string           `json:"exercise_template_id"`
-	SupersetID         *string          `json:"superset_id"`
-	RestSeconds        *int             `json:"rest_seconds"`
-	Sets               []hevyRoutineSet `json:"sets"`
+	Index              int                `json:"index"`
+	Title              string             `json:"title"`
+	Notes              *string            `json:"notes"`
+	ExerciseTemplateID string             `json:"exercise_template_id"`
+	SupersetID         hevyFlexibleString `json:"superset_id"`
+	RestSeconds        *int               `json:"rest_seconds"`
+	Sets               []hevyRoutineSet   `json:"sets"`
 }
 
 type hevyRoutineSet struct {
@@ -423,7 +450,7 @@ func (h *HevyConnector) upsertRoutine(ctx context.Context, userID string, routin
 			INSERT INTO routine_exercises (routine_id, exercise_index, exercise_name, notes, template_id, superset_id, rest_seconds)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			RETURNING id
-		`, routineID, exercise.Index, exercise.Title, stringValue(exercise.Notes), nullIfEmpty(exercise.ExerciseTemplateID), exercise.SupersetID, exercise.RestSeconds).Scan(&routineExerciseID)
+		`, routineID, exercise.Index, exercise.Title, stringValue(exercise.Notes), nullIfEmpty(exercise.ExerciseTemplateID), nullIfEmpty(exercise.SupersetID.String()), exercise.RestSeconds).Scan(&routineExerciseID)
 		if err != nil {
 			return fmt.Errorf("insert routine exercise: %w", err)
 		}
