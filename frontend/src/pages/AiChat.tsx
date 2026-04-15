@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type ComponentProps } from 'react'
 import { Send, Bot, User, Loader2, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api, type AIHistoryMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -43,6 +44,23 @@ const CHECKUP_ACTIONS: CheckupAction[] = [
   { period: 'month', label: '30 дней', userMessage: 'Сделай checkup за месяц' },
   { period: 'since_last', label: 'С прошлого', userMessage: 'Сделай checkup с момента последнего отчёта' },
 ]
+
+const MARKDOWN_COMPONENTS = {
+  table: ({ children }: ComponentProps<'table'>) => (
+    <div className="my-3 overflow-x-auto">
+      <table className="min-w-full border-collapse text-xs sm:text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }: ComponentProps<'thead'>) => (
+    <thead className="border-b border-border">{children}</thead>
+  ),
+  th: ({ children }: ComponentProps<'th'>) => (
+    <th className="px-3 py-2 text-left font-medium text-foreground">{children}</th>
+  ),
+  td: ({ children }: ComponentProps<'td'>) => (
+    <td className="border-b border-border/60 px-3 py-2 align-top text-foreground">{children}</td>
+  ),
+} as const
 
 function looksLikeHTML(value: string) {
   const text = value.trim().toLowerCase()
@@ -336,7 +354,13 @@ export function AiChat() {
                 {msg.loading
                   ? <Loader2 className="w-4 h-4 animate-spin" />
                   : msg.role === 'assistant'
-                    ? <div className="prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown>{msg.content}</ReactMarkdown></div>
+                    ? (
+                        <div className="prose prose-sm dark:prose-invert max-w-none">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      )
                     : <span className="whitespace-pre-wrap">{msg.content}</span>}
               </div>
             </div>
