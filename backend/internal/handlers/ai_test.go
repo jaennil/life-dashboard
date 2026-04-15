@@ -77,23 +77,53 @@ func TestSelectAIContextScopeUsesHistoryForFollowUpQuestions(t *testing.T) {
 	}
 }
 
-func TestSelectAIContextScopeEnablesHealthForRecoveryQuestions(t *testing.T) {
-	scope := selectAIContextScope("Как у меня со сном, весом и восстановлением за последние дни?", nil)
-
-	if !scope.health {
-		t.Fatalf("expected health scope to be enabled, got %+v", scope)
-	}
-	if scope.finance || scope.calendar || scope.weather {
-		t.Fatalf("expected unrelated scopes to stay disabled, got %+v", scope)
-	}
-}
-
 func TestSelectAIContextScopeDefaultsToAllForGenericSummary(t *testing.T) {
 	scope := selectAIContextScope("что меня удивило в последнее время?", nil)
 
 	expected := defaultAIContextScope()
 	if scope != expected {
 		t.Fatalf("expected default all scope, got %+v", scope)
+	}
+}
+
+func TestSanitizeAIToolPlanCapsAndDeduplicates(t *testing.T) {
+	plan := aiToolPlan{
+		Tools: []aiToolCall{
+			{Name: aiToolFinanceOverview, Days: 500},
+			{Name: aiToolFinanceOverview, Days: 30},
+			{Name: aiToolRecentTransactions, Days: 0, Limit: 99},
+			{Name: aiToolWorkoutOverview, Days: 14},
+			{Name: aiToolRecentWorkouts, Limit: 0},
+			{Name: aiToolNutritionOverview, Days: 7},
+		},
+	}
+
+	calls := sanitizeAIToolPlan(plan)
+	if len(calls) != aiPlannerMaxTools {
+		t.Fatalf("expected %d calls after cap, got %d", aiPlannerMaxTools, len(calls))
+	}
+	if calls[0].Days != 365 {
+		t.Fatalf("expected finance days to be capped at 365, got %d", calls[0].Days)
+	}
+	if calls[1].Limit != 20 {
+		t.Fatalf("expected recent transactions limit to be capped at 20, got %d", calls[1].Limit)
+	}
+	if calls[3].Limit != 4 {
+		t.Fatalf("expected recent workouts default limit 4, got %d", calls[3].Limit)
+	}
+}
+
+func TestFallbackToolPlanForWorkoutQuestion(t *testing.T) {
+	calls := fallbackToolPlan("норм тренировка? что улучшить по последней pull тренировке", nil)
+
+	if len(calls) < 2 {
+		t.Fatalf("expected at least 2 tool calls, got %d", len(calls))
+	}
+	if calls[0].Name != aiToolWorkoutOverview {
+		t.Fatalf("expected workout overview first, got %s", calls[0].Name)
+	}
+	if calls[1].Name != aiToolRecentWorkouts {
+		t.Fatalf("expected recent workouts second, got %s", calls[1].Name)
 	}
 }
 

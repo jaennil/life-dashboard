@@ -35,7 +35,6 @@ const SUGGESTIONS = [
   'Сколько активности у меня было на этой неделе?',
   'Как прошла последняя тренировка и что улучшить?',
   'Что по питанию проседает за 7 дней?',
-  'Как у меня со сном, весом и восстановлением?',
 ]
 
 const CHECKUP_ACTIONS: CheckupAction[] = [
@@ -303,7 +302,7 @@ export function AiChat() {
             </div>
             <div>
               <p className="font-medium text-foreground">Чем могу помочь?</p>
-              <p className="text-sm text-muted-foreground mt-1">У меня есть доступ к финансам, здоровью, активности, тренировкам и питанию</p>
+              <p className="text-sm text-muted-foreground mt-1">У меня есть доступ к финансам, активности, тренировкам и питанию</p>
             </div>
             <div className="flex flex-wrap gap-2 justify-center max-w-lg">
               {SUGGESTIONS.map(s => (

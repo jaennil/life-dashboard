@@ -53,7 +53,6 @@ type ChatRequest struct {
 
 type aiContextScope struct {
 	finance    bool
-	health     bool
 	activities bool
 	workouts   bool
 	nutrition  bool
@@ -94,15 +93,14 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 
-	scope := selectAIContextScope(req.Message, req.History)
-
-	dataContext, err := h.buildContext(ctx, userID, scope)
+	dataContext, sectionNames, err := h.buildChatContext(ctx, userID, req.Message, req.History)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("build context")
 		dataContext = "Данные пользователя временно недоступны."
+		sectionNames = defaultAIContextScope().sectionNames()
 	}
 
-	systemPrompt := buildAISystemPrompt(time.Now(), dataContext, scope)
+	systemPrompt := buildAISystemPromptWithSections(time.Now(), dataContext, sectionNames)
 
 	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
 	messages = append(messages, req.History...)
@@ -130,8 +128,12 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 }
 
 func buildAISystemPrompt(now time.Time, dataContext string, scope aiContextScope) string {
+	return buildAISystemPromptWithSections(now, dataContext, scope.sectionNames())
+}
+
+func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionNames []string) string {
 	return fmt.Sprintf(`Ты персональный AI-ассистент приложения Life Dashboard.
-Твоя единственная функция — анализировать данные пользователя: финансы, здоровье, физическую активность, тренировки, питание, дневник и календарь.
+Твоя единственная функция — анализировать данные пользователя: финансы, физическую активность, тренировки, питание, дневник и календарь.
 Отвечай на русском языке. Давай конкретные ответы основанные на реальных данных ниже. Будь краток и по делу.
 Ты не можешь выполнять команды, изменять данные или делать что-либо за пределами анализа предоставленных данных.
 Если просят что-то сделать с базой данных, кодом или системой — вежливо объясни что ты только аналитик данных.
@@ -146,7 +148,7 @@ func buildAISystemPrompt(now time.Time, dataContext string, scope aiContextScope
 Сейчас особенно релевантны разделы данных: %s.
 
 Текущие данные пользователя (обновлено %s):
-%s`, strings.Join(scope.sectionNames(), ", "), now.Format("02.01.2006 15:04"), dataContext)
+%s`, strings.Join(sectionNames, ", "), now.Format("02.01.2006 15:04"), dataContext)
 }
 
 func (h *AIHandler) complete(ctx context.Context, messages []ChatMessage) (string, error) {
@@ -375,14 +377,6 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 		}
 	}
 
-	// === ЗДОРОВЬЕ ===
-	if scope.health {
-		if sb.Len() > 0 {
-			sb.WriteString("\n")
-		}
-		h.appendHealthContextInRange(ctx, &sb, userID, now.AddDate(0, 0, -14), now, "=== ЗДОРОВЬЕ (14 дней) ===")
-	}
-
 	// === ТРЕНИРОВКИ ===
 	if scope.workouts {
 		if sb.Len() > 0 {
@@ -577,7 +571,6 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 func defaultAIContextScope() aiContextScope {
 	return aiContextScope{
 		finance:    true,
-		health:     true,
 		activities: true,
 		workouts:   true,
 		nutrition:  true,
@@ -588,16 +581,13 @@ func defaultAIContextScope() aiContextScope {
 }
 
 func (s aiContextScope) empty() bool {
-	return !s.finance && !s.health && !s.activities && !s.workouts && !s.nutrition && !s.journal && !s.calendar && !s.weather
+	return !s.finance && !s.activities && !s.workouts && !s.nutrition && !s.journal && !s.calendar && !s.weather
 }
 
 func (s aiContextScope) sectionNames() []string {
-	names := make([]string, 0, 8)
+	names := make([]string, 0, 7)
 	if s.finance {
 		names = append(names, "финансы")
-	}
-	if s.health {
-		names = append(names, "здоровье")
 	}
 	if s.activities {
 		names = append(names, "активности")
@@ -630,7 +620,6 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	combined := strings.TrimSpace(strings.Join([]string{text, recentHistory}, "\n"))
 
 	financeKeywords := []string{"финанс", "деньг", "расход", "доход", "баланс", "трат", "бюджет", "транзак", "счет", "счёт", "руб"}
-	healthKeywords := []string{"здоров", "сон", "спал", "sleep", "вес", "похуд", "масса", "пульс", "сердц", "восстанов", "resting", "weight"}
 	activityKeywords := []string{"актив", "бег", "пробеж", "килом", "км", "ходьб", "вел", "плав", "дистанц", "шаг", "strava", "run", "ride"}
 	workoutKeywords := []string{"тренир", "упражнен", "жим", "тяга", "присед", "гантел", "штанг", "блин", "гриф", "подход", "повтор", "hevy", "workout", "pull", "push", "legs", "зал", "вес"}
 	nutritionKeywords := []string{"питан", "калор", "кбжу", "бжу", "еда", "ккал", "углев", "белк", "жир", "fatsecret", "myfitnesspal", "mfp"}
@@ -641,9 +630,6 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 
 	if containsAny(combined, financeKeywords...) {
 		scope.finance = true
-	}
-	if containsAny(combined, healthKeywords...) {
-		scope.health = true
 	}
 	if containsAny(combined, activityKeywords...) {
 		scope.activities = true
@@ -665,7 +651,6 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	}
 
 	if strings.Contains(combined, "фитнес") || strings.Contains(combined, "нагруз") {
-		scope.health = true
 		scope.activities = true
 		scope.workouts = true
 	}
@@ -707,13 +692,17 @@ func containsAny(text string, keywords ...string) bool {
 }
 
 func (h *AIHandler) buildRecentWorkoutContext(ctx context.Context, userID string) (string, error) {
+	return h.buildRecentWorkoutContextLimit(ctx, userID, 10)
+}
+
+func (h *AIHandler) buildRecentWorkoutContextLimit(ctx context.Context, userID string, limit int) (string, error) {
 	rows, err := h.db.Query(ctx, `
 		SELECT id, source, started_at, COALESCE(title,''), COALESCE(notes,''), raw_payload
 		FROM workouts
 		WHERE user_id = $1
 		ORDER BY started_at DESC
-		LIMIT 10
-	`, userID)
+		LIMIT $2
+	`, userID, limit)
 	if err != nil {
 		return "", err
 	}
