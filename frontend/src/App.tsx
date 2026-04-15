@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { InstallPrompt } from '@/components/InstallPrompt'
 import { Sidebar } from '@/components/Sidebar'
 import { Dashboard } from '@/pages/Dashboard'
 import { Finance } from '@/pages/Finance'
@@ -14,7 +15,8 @@ function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 ml-16 lg:ml-56 p-6">
+      <InstallPrompt />
+      <main className="app-shell-main flex-1 lg:ml-56">
         {children}
       </main>
     </div>

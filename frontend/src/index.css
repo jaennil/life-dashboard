@@ -51,10 +51,28 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
   font-family: ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
+}
+
+.app-shell-main {
+  padding: calc(5rem + env(safe-area-inset-top)) 1rem calc(6.75rem + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 1024px) {
+  .app-shell-main {
+    padding: 1.5rem;
+  }
 }
