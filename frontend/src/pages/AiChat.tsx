@@ -169,7 +169,7 @@ export function AiChat() {
     api.getAIHistory()
       .then(history => {
         if (!active) return
-        setMessages(history.map(mapHistoryMessage))
+        setMessages(sortHistoryMessages(history.map(mapHistoryMessage)))
       })
       .catch(() => {
         if (!active) return
@@ -377,4 +377,15 @@ function mapHistoryMessage(message: AIHistoryMessage): Message {
     content: message.content,
     created_at: message.created_at,
   }
+}
+
+function sortHistoryMessages(messages: Message[]): Message[] {
+  return [...messages].sort((a, b) => {
+    const left = a.created_at ? Date.parse(a.created_at) : 0
+    const right = b.created_at ? Date.parse(b.created_at) : 0
+
+    if (left !== right) return left - right
+    if (a.role !== b.role) return a.role === 'user' ? -1 : 1
+    return (a.id ?? '').localeCompare(b.id ?? '')
+  })
 }
