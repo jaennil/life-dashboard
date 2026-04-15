@@ -844,6 +844,13 @@ func formatAICalendarEvent(startTime, endTime time.Time, allDay bool, title, loc
 }
 
 func (h *AIHandler) buildRoutineContext(ctx context.Context, userID string, limit int) (string, error) {
+	var totalCount int
+	if err := h.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM workout_routines WHERE user_id = $1
+	`, userID).Scan(&totalCount); err != nil {
+		return "", err
+	}
+
 	rows, err := h.db.Query(ctx, `
 		SELECT
 			r.id,
@@ -871,6 +878,9 @@ func (h *AIHandler) buildRoutineContext(ctx context.Context, userID string, limi
 	defer rows.Close()
 
 	var sb strings.Builder
+	if totalCount > 0 {
+		sb.WriteString(fmt.Sprintf("Всего routines в Hevy: %d\n", totalCount))
+	}
 	for rows.Next() {
 		var routineID, externalID, title string
 		var folderID *int64
