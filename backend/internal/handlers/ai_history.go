@@ -32,13 +32,7 @@ func (h *AIHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 			ORDER BY created_at DESC
 			LIMIT $2
 		) history
-		ORDER BY
-			created_at ASC,
-			CASE role
-				WHEN 'user' THEN 0
-				ELSE 1
-			END ASC,
-			id ASC
+		ORDER BY created_at ASC
 	`, userID, aiHistoryLimit)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query ai history")
@@ -89,20 +83,17 @@ func (h *AIHandler) storeChatExchange(ctx context.Context, userID, userMessage, 
 	}
 	defer tx.Rollback(ctx)
 
-	createdAt := time.Now().UTC()
-
 	for _, msg := range []struct {
 		role    string
 		content string
-		ts      time.Time
 	}{
-		{role: "user", content: userMessage, ts: createdAt},
-		{role: "assistant", content: assistantMessage, ts: createdAt.Add(time.Millisecond)},
+		{role: "user", content: userMessage},
+		{role: "assistant", content: assistantMessage},
 	} {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO ai_chat_messages (user_id, role, content, created_at)
-			VALUES ($1, $2, $3, $4)
-		`, userID, msg.role, msg.content, msg.ts); err != nil {
+			INSERT INTO ai_chat_messages (user_id, role, content)
+			VALUES ($1, $2, $3)
+		`, userID, msg.role, msg.content); err != nil {
 			h.logger.Warn().Err(err).Str("role", msg.role).Msg("store ai history message")
 			return
 		}

@@ -77,6 +77,17 @@ func TestSelectAIContextScopeUsesHistoryForFollowUpQuestions(t *testing.T) {
 	}
 }
 
+func TestSelectAIContextScopeEnablesHealthForRecoveryQuestions(t *testing.T) {
+	scope := selectAIContextScope("Как у меня со сном, весом и восстановлением за последние дни?", nil)
+
+	if !scope.health {
+		t.Fatalf("expected health scope to be enabled, got %+v", scope)
+	}
+	if scope.finance || scope.calendar || scope.weather {
+		t.Fatalf("expected unrelated scopes to stay disabled, got %+v", scope)
+	}
+}
+
 func TestSelectAIContextScopeDefaultsToAllForGenericSummary(t *testing.T) {
 	scope := selectAIContextScope("что меня удивило в последнее время?", nil)
 

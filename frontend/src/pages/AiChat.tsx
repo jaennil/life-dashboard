@@ -31,10 +31,11 @@ interface CheckupAction {
 
 const SUGGESTIONS = [
   'Сколько я потратил в этом месяце?',
-  'На что больше всего трачу деньги?',
-  'Когда последний раз тренировался?',
-  'Сколько километров пробежал на этой неделе?',
-  'Проанализируй мои финансы за месяц',
+  'На что у меня самые большие траты за 30 дней?',
+  'Сколько активности у меня было на этой неделе?',
+  'Как прошла последняя тренировка и что улучшить?',
+  'Что по питанию проседает за 7 дней?',
+  'Как у меня со сном, весом и восстановлением?',
 ]
 
 const CHECKUP_ACTIONS: CheckupAction[] = [
@@ -169,7 +170,7 @@ export function AiChat() {
     api.getAIHistory()
       .then(history => {
         if (!active) return
-        setMessages(sortHistoryMessages(history.map(mapHistoryMessage)))
+        setMessages(history.map(mapHistoryMessage))
       })
       .catch(() => {
         if (!active) return
@@ -302,7 +303,7 @@ export function AiChat() {
             </div>
             <div>
               <p className="font-medium text-foreground">Чем могу помочь?</p>
-              <p className="text-sm text-muted-foreground mt-1">У меня есть доступ к твоим финансам, активностям и тренировкам</p>
+              <p className="text-sm text-muted-foreground mt-1">У меня есть доступ к финансам, здоровью, активности, тренировкам и питанию</p>
             </div>
             <div className="flex flex-wrap gap-2 justify-center max-w-lg">
               {SUGGESTIONS.map(s => (
@@ -377,15 +378,4 @@ function mapHistoryMessage(message: AIHistoryMessage): Message {
     content: message.content,
     created_at: message.created_at,
   }
-}
-
-function sortHistoryMessages(messages: Message[]): Message[] {
-  return [...messages].sort((a, b) => {
-    const left = a.created_at ? Date.parse(a.created_at) : 0
-    const right = b.created_at ? Date.parse(b.created_at) : 0
-
-    if (left !== right) return left - right
-    if (a.role !== b.role) return a.role === 'user' ? -1 : 1
-    return (a.id ?? '').localeCompare(b.id ?? '')
-  })
 }
