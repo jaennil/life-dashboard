@@ -41,7 +41,7 @@ services:
       FATSECRET_CLIENT_SECRET: ${FATSECRET_CLIENT_SECRET:-}
       FATSECRET_REDIRECT_URI: ${FATSECRET_REDIRECT_URI:-http://localhost:8080/api/v1/auth/fatsecret/callback}
       AI_BASE_URL: ${AI_BASE_URL:-http://host.docker.internal:8000}
-      AI_MODEL: ${AI_MODEL:-claude-sonnet-4-5-20250929}
+      AI_MODEL: ${AI_MODEL:-claude-opus-4-5-20251101}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please}
     extra_hosts:
       - "host.docker.internal:host-gateway"
