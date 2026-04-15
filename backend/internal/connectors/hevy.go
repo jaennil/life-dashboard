@@ -19,15 +19,21 @@ const (
 // ---- API response types ----
 
 type hevyWorkoutsResponse struct {
-	Page      int            `json:"page"`
-	PageCount int            `json:"page_count"`
-	Workouts  []hevyWorkout  `json:"workouts"`
+	Page      int           `json:"page"`
+	PageCount int           `json:"page_count"`
+	Workouts  []hevyWorkout `json:"workouts"`
+}
+
+type hevyRoutinesResponse struct {
+	Page      int           `json:"page"`
+	PageCount int           `json:"page_count"`
+	Routines  []hevyRoutine `json:"routines"`
 }
 
 type hevyEventsResponse struct {
-	Page      int           `json:"page"`
-	PageCount int           `json:"page_count"`
-	Events    []hevyEvent   `json:"events"`
+	Page      int         `json:"page"`
+	PageCount int         `json:"page_count"`
+	Events    []hevyEvent `json:"events"`
 }
 
 type hevyEvent struct {
@@ -38,14 +44,24 @@ type hevyEvent struct {
 }
 
 type hevyWorkout struct {
-	ID          string          `json:"id"`
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	StartTime   time.Time       `json:"start_time"`
-	EndTime     *time.Time      `json:"end_time"`
-	UpdatedAt   time.Time       `json:"updated_at"`
-	CreatedAt   time.Time       `json:"created_at"`
-	Exercises   []hevyExercise  `json:"exercises"`
+	ID          string         `json:"id"`
+	Title       string         `json:"title"`
+	RoutineID   string         `json:"routine_id"`
+	Description string         `json:"description"`
+	StartTime   time.Time      `json:"start_time"`
+	EndTime     *time.Time     `json:"end_time"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	CreatedAt   time.Time      `json:"created_at"`
+	Exercises   []hevyExercise `json:"exercises"`
+}
+
+type hevyRoutine struct {
+	ID        string             `json:"id"`
+	Title     string             `json:"title"`
+	FolderID  *int64             `json:"folder_id"`
+	UpdatedAt time.Time          `json:"updated_at"`
+	CreatedAt time.Time          `json:"created_at"`
+	Exercises []hevyRoutineEntry `json:"exercises"`
 }
 
 type hevyExercise struct {
@@ -53,6 +69,7 @@ type hevyExercise struct {
 	Title              string    `json:"title"`
 	Notes              string    `json:"notes"`
 	ExerciseTemplateID string    `json:"exercise_template_id"`
+	SupersetID         *string   `json:"superset_id"`
 	Sets               []hevySet `json:"sets"`
 }
 
@@ -64,6 +81,27 @@ type hevySet struct {
 	DistanceMeters  *float64 `json:"distance_meters"`
 	DurationSeconds *int     `json:"duration_seconds"`
 	RPE             *float64 `json:"rpe"`
+	CustomMetric    any      `json:"custom_metric"`
+}
+
+type hevyRoutineEntry struct {
+	Index              int              `json:"index"`
+	Title              string           `json:"title"`
+	Notes              *string          `json:"notes"`
+	ExerciseTemplateID string           `json:"exercise_template_id"`
+	SupersetID         *string          `json:"superset_id"`
+	RestSeconds        *int             `json:"rest_seconds"`
+	Sets               []hevyRoutineSet `json:"sets"`
+}
+
+type hevyRoutineSet struct {
+	Index           int      `json:"index"`
+	Type            string   `json:"type"`
+	WeightKg        *float64 `json:"weight_kg"`
+	Reps            *int     `json:"reps"`
+	DistanceMeters  *float64 `json:"distance_meters"`
+	DurationSeconds *int     `json:"duration_seconds"`
+	CustomMetric    any      `json:"custom_metric"`
 }
 
 // ---- Connector ----
@@ -114,6 +152,10 @@ func (h *HevyConnector) Sync(ctx context.Context, userID string) error {
 		if err := h.syncIncremental(ctx, userID, lastSync, apiKey); err != nil {
 			return err
 		}
+	}
+
+	if err := h.syncRoutines(ctx, userID, apiKey); err != nil {
+		return fmt.Errorf("sync routines: %w", err)
 	}
 
 	return h.updateLastSync(ctx, userID)
@@ -207,6 +249,11 @@ func (h *HevyConnector) fetchEventsPage(ctx context.Context, apiKey string, sinc
 	return doRequest[hevyEventsResponse](ctx, h.client, apiKey, url)
 }
 
+func (h *HevyConnector) fetchRoutinesPage(ctx context.Context, apiKey string, page int) (*hevyRoutinesResponse, error) {
+	url := fmt.Sprintf("%s/routines?page=%d&pageSize=%d", hevyBaseURL, page, hevyPageSize)
+	return doRequest[hevyRoutinesResponse](ctx, h.client, apiKey, url)
+}
+
 func doRequest[T any](ctx context.Context, client *http.Client, apiKey, url string) (*T, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -250,15 +297,16 @@ func (h *HevyConnector) upsertWorkout(ctx context.Context, userID string, w *hev
 
 	// Upsert workout
 	_, err = h.db.Exec(ctx, `
-		INSERT INTO workouts (source, external_id, started_at, ended_at, title, notes, raw_payload, user_id)
-		VALUES ('hevy', $1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO workouts (source, external_id, routine_external_id, started_at, ended_at, title, notes, raw_payload, user_id)
+		VALUES ('hevy', $1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (user_id, external_id) DO UPDATE SET
+			routine_external_id = EXCLUDED.routine_external_id,
 			started_at  = EXCLUDED.started_at,
 			ended_at    = EXCLUDED.ended_at,
 			title       = EXCLUDED.title,
 			notes       = EXCLUDED.notes,
 			raw_payload = EXCLUDED.raw_payload
-	`, w.ID, w.StartTime, w.EndTime, w.Title, w.Description, raw, userID)
+	`, w.ID, nullIfEmpty(w.RoutineID), w.StartTime, w.EndTime, w.Title, w.Description, raw, userID)
 	if err != nil {
 		return fmt.Errorf("upsert workout: %w", err)
 	}
@@ -294,6 +342,125 @@ func (h *HevyConnector) upsertWorkout(ctx context.Context, userID string, w *hev
 	return nil
 }
 
+func (h *HevyConnector) syncRoutines(ctx context.Context, userID string, apiKey string) error {
+	page := 1
+	total := 0
+	seen := make([]string, 0, 32)
+
+	for {
+		resp, err := h.fetchRoutinesPage(ctx, apiKey, page)
+		if err != nil {
+			return fmt.Errorf("fetch routines page %d: %w", page, err)
+		}
+
+		for i := range resp.Routines {
+			if err := h.upsertRoutine(ctx, userID, &resp.Routines[i]); err != nil {
+				return fmt.Errorf("upsert routine %s: %w", resp.Routines[i].ID, err)
+			}
+			seen = append(seen, resp.Routines[i].ID)
+		}
+
+		total += len(resp.Routines)
+		h.logger.Debug().Int("page", page).Int("page_count", resp.PageCount).Int("synced", total).Msg("routine page synced")
+
+		if page >= resp.PageCount {
+			break
+		}
+		page++
+	}
+
+	if err := h.pruneMissingRoutines(ctx, userID, seen); err != nil {
+		return fmt.Errorf("prune routines: %w", err)
+	}
+
+	h.logger.Info().Int("total", total).Msg("routines sync complete")
+	return nil
+}
+
+func (h *HevyConnector) upsertRoutine(ctx context.Context, userID string, routine *hevyRoutine) error {
+	raw, err := json.Marshal(routine)
+	if err != nil {
+		return err
+	}
+
+	_, err = h.db.Exec(ctx, `
+		INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
+		VALUES ('hevy', 'routine', $1, $2, $3)
+	`, routine.ID, raw, userID)
+	if err != nil {
+		return fmt.Errorf("insert raw routine event: %w", err)
+	}
+
+	_, err = h.db.Exec(ctx, `
+		INSERT INTO workout_routines (user_id, source, external_id, title, folder_id, raw_payload, source_created_at, source_updated_at)
+		VALUES ($1, 'hevy', $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (user_id, external_id) DO UPDATE SET
+			title = EXCLUDED.title,
+			folder_id = EXCLUDED.folder_id,
+			raw_payload = EXCLUDED.raw_payload,
+			source_created_at = EXCLUDED.source_created_at,
+			source_updated_at = EXCLUDED.source_updated_at
+	`, userID, routine.ID, routine.Title, routine.FolderID, raw, routine.CreatedAt, routine.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("upsert routine: %w", err)
+	}
+
+	var routineID string
+	err = h.db.QueryRow(ctx, `
+		SELECT id FROM workout_routines WHERE user_id = $1 AND external_id = $2
+	`, userID, routine.ID).Scan(&routineID)
+	if err != nil {
+		return fmt.Errorf("get routine id: %w", err)
+	}
+
+	if _, err := h.db.Exec(ctx, `DELETE FROM routine_exercises WHERE routine_id = $1`, routineID); err != nil {
+		return fmt.Errorf("delete old routine exercises: %w", err)
+	}
+
+	for _, exercise := range routine.Exercises {
+		var routineExerciseID string
+		err := h.db.QueryRow(ctx, `
+			INSERT INTO routine_exercises (routine_id, exercise_index, exercise_name, notes, template_id, superset_id, rest_seconds)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			RETURNING id
+		`, routineID, exercise.Index, exercise.Title, stringValue(exercise.Notes), nullIfEmpty(exercise.ExerciseTemplateID), exercise.SupersetID, exercise.RestSeconds).Scan(&routineExerciseID)
+		if err != nil {
+			return fmt.Errorf("insert routine exercise: %w", err)
+		}
+
+		for _, set := range exercise.Sets {
+			customMetric, err := json.Marshal(set.CustomMetric)
+			if err != nil {
+				return fmt.Errorf("marshal routine custom metric: %w", err)
+			}
+			if _, err := h.db.Exec(ctx, `
+				INSERT INTO routine_sets (routine_exercise_id, set_index, set_type, weight_kg, reps, distance_meters, duration_seconds, custom_metric)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			`, routineExerciseID, set.Index, coalesceHevySetType(set.Type), set.WeightKg, set.Reps, set.DistanceMeters, set.DurationSeconds, nullJSON(customMetric)); err != nil {
+				return fmt.Errorf("insert routine set: %w", err)
+			}
+		}
+	}
+
+	h.logger.Debug().Str("routine_id", routine.ID).Str("title", routine.Title).Msg("routine upserted")
+	return nil
+}
+
+func (h *HevyConnector) pruneMissingRoutines(ctx context.Context, userID string, seen []string) error {
+	if len(seen) == 0 {
+		_, err := h.db.Exec(ctx, `DELETE FROM workout_routines WHERE user_id = $1 AND source = 'hevy'`, userID)
+		return err
+	}
+
+	_, err := h.db.Exec(ctx, `
+		DELETE FROM workout_routines
+		WHERE user_id = $1
+			AND source = 'hevy'
+			AND NOT (external_id = ANY($2))
+	`, userID, seen)
+	return err
+}
+
 func (h *HevyConnector) deleteWorkout(ctx context.Context, userID string, externalID string) error {
 	_, err := h.db.Exec(ctx, `DELETE FROM workouts WHERE external_id = $1 AND user_id = $2`, externalID, userID)
 	if err != nil {
@@ -324,4 +491,32 @@ func (h *HevyConnector) updateLastSync(ctx context.Context, userID string) error
 			updated_at     = EXCLUDED.updated_at
 	`, userID)
 	return err
+}
+
+func nullIfEmpty(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func coalesceHevySetType(value string) string {
+	if value == "" {
+		return "normal"
+	}
+	return value
+}
+
+func nullJSON(value []byte) any {
+	if string(value) == "null" {
+		return nil
+	}
+	return value
 }

@@ -77,6 +77,14 @@ func TestSelectAIContextScopeUsesHistoryForFollowUpQuestions(t *testing.T) {
 	}
 }
 
+func TestSelectAIContextScopeEnablesRoutinesForTemplateQuestions(t *testing.T) {
+	scope := selectAIContextScope("покажи мою hevy routine на pull и плановые веса", nil)
+
+	if !scope.routines {
+		t.Fatalf("expected routines scope to be enabled")
+	}
+}
+
 func TestSelectAIContextScopeDefaultsToAllForGenericSummary(t *testing.T) {
 	scope := selectAIContextScope("что меня удивило в последнее время?", nil)
 
@@ -124,6 +132,21 @@ func TestFallbackToolPlanForWorkoutQuestion(t *testing.T) {
 	}
 	if calls[1].Name != aiToolRecentWorkouts {
 		t.Fatalf("expected recent workouts second, got %s", calls[1].Name)
+	}
+}
+
+func TestFallbackToolPlanForRoutineQuestion(t *testing.T) {
+	calls := fallbackToolPlan("что у меня в hevy routine push?", nil)
+
+	found := false
+	for _, call := range calls {
+		if call.Name == aiToolRoutineOverview {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected routine overview tool in fallback plan, got %#v", calls)
 	}
 }
 

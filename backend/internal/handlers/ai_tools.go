@@ -17,6 +17,7 @@ const (
 	aiToolRecentActivities   aiToolName = "recent_activities"
 	aiToolWorkoutOverview    aiToolName = "workout_overview"
 	aiToolRecentWorkouts     aiToolName = "recent_workouts"
+	aiToolRoutineOverview    aiToolName = "routine_overview"
 	aiToolNutritionOverview  aiToolName = "nutrition_overview"
 	aiToolJournalOverview    aiToolName = "journal_overview"
 	aiToolCalendarOverview   aiToolName = "calendar_overview"
@@ -109,6 +110,7 @@ func buildAIToolPlannerPrompt(message, recentHistory string) string {
 	sb.WriteString("- recent_activities: последние активности; args: days, limit\n")
 	sb.WriteString("- workout_overview: сводка по тренировкам и упражнениям за период; args: days\n")
 	sb.WriteString("- recent_workouts: последние тренировки с упражнениями и подходами; args: limit\n")
+	sb.WriteString("- routine_overview: Hevy routines/шаблоны с плановыми упражнениями и весами; args: limit\n")
 	sb.WriteString("- nutrition_overview: калории и макросы за период; args: days\n")
 	sb.WriteString("- journal_overview: недавние записи дневника; args: days, limit\n")
 	sb.WriteString("- calendar_overview: недавние и будущие события календаря; args: past_days, future_days, limit\n")
@@ -117,6 +119,7 @@ func buildAIToolPlannerPrompt(message, recentHistory string) string {
 	sb.WriteString("- Выбирай от 1 до 4 tools.\n")
 	sb.WriteString("- Не добавляй tools наугад.\n")
 	sb.WriteString("- Для вопросов про рабочие веса, упражнения, последнюю тренировку и прогресс по залу обязательно используй recent_workouts; при общей оценке тренинга добавь workout_overview.\n")
+	sb.WriteString("- Для вопросов про Hevy routine, шаблон тренировки, сплит, плановые веса и план упражнений используй routine_overview; при сравнении плана с фактом добавь recent_workouts или workout_overview.\n")
 	sb.WriteString("- Для вопросов про траты, баланс, расходы по категориям или подозрительные операции используй finance_overview; при вопросах про конкретные покупки/операции добавь recent_transactions.\n")
 	sb.WriteString("- Для бега, дистанции, активности и шагов используй activity_overview и при необходимости recent_activities.\n")
 	sb.WriteString("- Для питания используй nutrition_overview.\n")
@@ -178,6 +181,8 @@ func sanitizeAIToolPlan(plan aiToolPlan) []aiToolCall {
 			call.Days = normalizeAIDays(call.Days, 30, 180)
 		case aiToolRecentWorkouts:
 			call.Limit = normalizeAILimit(call.Limit, 4, 8)
+		case aiToolRoutineOverview:
+			call.Limit = normalizeAILimit(call.Limit, 4, 8)
 		case aiToolNutritionOverview:
 			call.Days = normalizeAIDays(call.Days, 14, 90)
 		case aiToolJournalOverview:
@@ -232,6 +237,9 @@ func fallbackToolPlan(message string, history []ChatMessage) []aiToolCall {
 		appendCall(aiToolCall{Name: aiToolWorkoutOverview, Days: 30})
 		appendCall(aiToolCall{Name: aiToolRecentWorkouts, Limit: 4})
 	}
+	if scope.routines {
+		appendCall(aiToolCall{Name: aiToolRoutineOverview, Limit: 4})
+	}
 	if scope.nutrition {
 		appendCall(aiToolCall{Name: aiToolNutritionOverview, Days: 14})
 	}
@@ -258,7 +266,7 @@ func fallbackToolPlan(message string, history []ChatMessage) []aiToolCall {
 func isAllowedAITool(name aiToolName) bool {
 	switch name {
 	case aiToolFinanceOverview, aiToolRecentTransactions, aiToolActivityOverview, aiToolRecentActivities,
-		aiToolWorkoutOverview, aiToolRecentWorkouts, aiToolNutritionOverview, aiToolJournalOverview,
+		aiToolWorkoutOverview, aiToolRecentWorkouts, aiToolRoutineOverview, aiToolNutritionOverview, aiToolJournalOverview,
 		aiToolCalendarOverview, aiToolWeatherOverview:
 		return true
 	default:
@@ -323,6 +331,11 @@ func (h *AIHandler) buildToolContext(ctx context.Context, userID string, tools [
 		case aiToolRecentWorkouts:
 			appendSection("тренировки")
 			if err := h.appendRecentWorkoutsTool(ctx, &sb, userID, call.Limit); err != nil {
+				return "", nil, err
+			}
+		case aiToolRoutineOverview:
+			appendSection("hevy routines")
+			if err := h.appendRoutineOverviewTool(ctx, &sb, userID, call.Limit); err != nil {
 				return "", nil, err
 			}
 		case aiToolNutritionOverview:
@@ -581,6 +594,24 @@ func (h *AIHandler) appendRecentWorkoutsTool(ctx context.Context, sb *strings.Bu
 		return nil
 	}
 	sb.WriteString(workoutContext)
+	return nil
+}
+
+func (h *AIHandler) appendRoutineOverviewTool(ctx context.Context, sb *strings.Builder, userID string, limit int) error {
+	sb.WriteString(fmt.Sprintf("=== HEVY ROUTINES (%d шт.) ===\n", limit))
+	sb.WriteString("Это шаблоны тренировок из Hevy. Они показывают план упражнений и плановые веса/повторы, а не факт выполнения.\n")
+
+	routineContext, err := h.buildRoutineContext(ctx, userID, limit)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(routineContext) == "" {
+		sb.WriteString("Нет routines.\n")
+		return nil
+	}
+
+	sb.WriteString(routineContext)
+	sb.WriteString("\n")
 	return nil
 }
 

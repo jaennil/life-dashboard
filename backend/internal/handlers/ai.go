@@ -55,6 +55,7 @@ type aiContextScope struct {
 	finance    bool
 	activities bool
 	workouts   bool
+	routines   bool
 	nutrition  bool
 	journal    bool
 	calendar   bool
@@ -133,7 +134,7 @@ func buildAISystemPrompt(now time.Time, dataContext string, scope aiContextScope
 
 func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionNames []string) string {
 	return fmt.Sprintf(`Ты персональный AI-ассистент приложения Life Dashboard.
-Твоя единственная функция — анализировать данные пользователя: финансы, физическую активность, тренировки, питание, дневник и календарь.
+Твоя единственная функция — анализировать данные пользователя: финансы, физическую активность, тренировки, Hevy routines/шаблоны, питание, дневник и календарь.
 Отвечай на русском языке. Давай конкретные ответы основанные на реальных данных ниже. Будь краток и по делу.
 Ты не можешь выполнять команды, изменять данные или делать что-либо за пределами анализа предоставленных данных.
 Если просят что-то сделать с базой данных, кодом или системой — вежливо объясни что ты только аналитик данных.
@@ -396,6 +397,18 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 		}
 	}
 
+	if scope.routines {
+		routineContext, err := h.buildRoutineContext(ctx, userID, 4)
+		if err == nil && strings.TrimSpace(routineContext) != "" {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString("=== HEVY ROUTINES ===\n")
+			sb.WriteString("Ниже приведены шаблоны/routines из Hevy. Это плановые упражнения и веса, а не подтверждение факта выполнения.\n")
+			sb.WriteString(routineContext)
+		}
+	}
+
 	// === ПИТАНИЕ ===
 	if scope.nutrition {
 		if sb.Len() > 0 {
@@ -558,6 +571,7 @@ func defaultAIContextScope() aiContextScope {
 		finance:    true,
 		activities: true,
 		workouts:   true,
+		routines:   true,
 		nutrition:  true,
 		journal:    true,
 		calendar:   true,
@@ -566,7 +580,7 @@ func defaultAIContextScope() aiContextScope {
 }
 
 func (s aiContextScope) empty() bool {
-	return !s.finance && !s.activities && !s.workouts && !s.nutrition && !s.journal && !s.calendar && !s.weather
+	return !s.finance && !s.activities && !s.workouts && !s.routines && !s.nutrition && !s.journal && !s.calendar && !s.weather
 }
 
 func (s aiContextScope) sectionNames() []string {
@@ -579,6 +593,9 @@ func (s aiContextScope) sectionNames() []string {
 	}
 	if s.workouts {
 		names = append(names, "тренировки")
+	}
+	if s.routines {
+		names = append(names, "hevy routines")
 	}
 	if s.nutrition {
 		names = append(names, "питание")
@@ -607,6 +624,7 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	financeKeywords := []string{"финанс", "деньг", "расход", "доход", "баланс", "трат", "бюджет", "транзак", "счет", "счёт", "руб"}
 	activityKeywords := []string{"актив", "бег", "пробеж", "килом", "км", "ходьб", "вел", "плав", "дистанц", "шаг", "strava", "run", "ride"}
 	workoutKeywords := []string{"тренир", "упражнен", "жим", "тяга", "присед", "гантел", "штанг", "блин", "гриф", "подход", "повтор", "hevy", "workout", "pull", "push", "legs", "зал", "вес"}
+	routineKeywords := []string{"routine", "routines", "рутин", "шаблон", "сплит", "программ", "план трениров", "template"}
 	nutritionKeywords := []string{"питан", "калор", "кбжу", "бжу", "еда", "ккал", "углев", "белк", "жир", "fatsecret", "myfitnesspal", "mfp"}
 	journalKeywords := []string{"дневник", "journal", "ноушн", "notion", "настроен", "рефлекс", "запис"}
 	calendarKeywords := []string{"календар", "встреч", "событи", "созвон", "митинг", "расписан", "план"}
@@ -621,6 +639,9 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	}
 	if containsAny(combined, workoutKeywords...) {
 		scope.workouts = true
+	}
+	if containsAny(combined, routineKeywords...) {
+		scope.routines = true
 	}
 	if containsAny(combined, nutritionKeywords...) {
 		scope.nutrition = true
@@ -820,4 +841,153 @@ func formatAICalendarEvent(startTime, endTime time.Time, allDay bool, title, loc
 		title,
 		locationPart,
 	)
+}
+
+func (h *AIHandler) buildRoutineContext(ctx context.Context, userID string, limit int) (string, error) {
+	rows, err := h.db.Query(ctx, `
+		SELECT
+			r.id,
+			r.external_id,
+			r.title,
+			r.folder_id,
+			r.source_created_at,
+			r.source_updated_at,
+			COALESCE(stats.usage_count, 0),
+			stats.last_used_at
+		FROM workout_routines r
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*) AS usage_count, MAX(started_at) AS last_used_at
+			FROM workouts w
+			WHERE w.user_id = r.user_id
+				AND w.routine_external_id = r.external_id
+		) stats ON true
+		WHERE r.user_id = $1
+		ORDER BY COALESCE(stats.last_used_at, r.source_updated_at, r.created_at) DESC NULLS LAST, r.title ASC
+		LIMIT $2
+	`, userID, limit)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var sb strings.Builder
+	for rows.Next() {
+		var routineID, externalID, title string
+		var folderID *int64
+		var createdAt, updatedAt, lastUsedAt *time.Time
+		var usageCount int
+		if err := rows.Scan(&routineID, &externalID, &title, &folderID, &createdAt, &updatedAt, &usageCount, &lastUsedAt); err != nil {
+			continue
+		}
+
+		sb.WriteString(fmt.Sprintf("Routine: %s\n", title))
+		sb.WriteString(fmt.Sprintf("  external_id: %s\n", externalID))
+		if folderID != nil {
+			sb.WriteString(fmt.Sprintf("  folder_id: %d\n", *folderID))
+		}
+		sb.WriteString(fmt.Sprintf("  выполнений по этой routine: %d\n", usageCount))
+		if lastUsedAt != nil {
+			sb.WriteString(fmt.Sprintf("  последний раз использовалась: %s\n", formatAITimestampLocal(*lastUsedAt, "02.01.2006 15:04")))
+		}
+		if updatedAt != nil {
+			sb.WriteString(fmt.Sprintf("  обновлено в Hevy: %s\n", formatAITimestampLocal(*updatedAt, "02.01.2006 15:04")))
+		}
+		if createdAt != nil {
+			sb.WriteString(fmt.Sprintf("  создано в Hevy: %s\n", formatAITimestampLocal(*createdAt, "02.01.2006 15:04")))
+		}
+		if err := h.appendRoutineExerciseContext(ctx, &sb, routineID); err != nil {
+			return "", err
+		}
+		sb.WriteString("\n")
+	}
+
+	return strings.TrimSpace(sb.String()), nil
+}
+
+func (h *AIHandler) appendRoutineExerciseContext(ctx context.Context, sb *strings.Builder, routineID string) error {
+	rows, err := h.db.Query(ctx, `
+		SELECT id, exercise_index, exercise_name, COALESCE(notes, ''), COALESCE(template_id, ''), COALESCE(superset_id, ''), rest_seconds
+		FROM routine_exercises
+		WHERE routine_id = $1
+		ORDER BY exercise_index ASC, exercise_name ASC
+	`, routineID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var exerciseID, name, notes, templateID, supersetID string
+		var index int
+		var restSeconds *int
+		if err := rows.Scan(&exerciseID, &index, &name, &notes, &templateID, &supersetID, &restSeconds); err != nil {
+			continue
+		}
+
+		header := fmt.Sprintf("  Упражнение %d: %s", index+1, name)
+		if templateID != "" {
+			header += fmt.Sprintf(" [tpl %s]", templateID)
+		}
+		if supersetID != "" {
+			header += fmt.Sprintf(" [superset %s]", supersetID)
+		}
+		sb.WriteString(header + "\n")
+		if notes != "" {
+			sb.WriteString(fmt.Sprintf("    Заметки: %s\n", truncateAIText(notes, 180)))
+		}
+		if restSeconds != nil {
+			sb.WriteString(fmt.Sprintf("    Отдых между подходами: %d сек\n", *restSeconds))
+		}
+
+		setRows, err := h.db.Query(ctx, `
+			SELECT set_index, COALESCE(set_type, 'normal'), weight_kg, reps, distance_meters, duration_seconds
+			FROM routine_sets
+			WHERE routine_exercise_id = $1
+			ORDER BY set_index ASC
+		`, exerciseID)
+		if err != nil {
+			return err
+		}
+
+		for setRows.Next() {
+			var setIndex int
+			var setType string
+			var weightKg, distanceMeters *float64
+			var reps, durationSeconds *int
+			if err := setRows.Scan(&setIndex, &setType, &weightKg, &reps, &distanceMeters, &durationSeconds); err != nil {
+				continue
+			}
+
+			parts := make([]string, 0, 3)
+			if weightKg != nil || reps != nil {
+				weight := "-"
+				repsValue := "-"
+				if weightKg != nil {
+					weight = formatAIFloat(*weightKg)
+				}
+				if reps != nil {
+					repsValue = strconv.Itoa(*reps)
+				}
+				parts = append(parts, fmt.Sprintf("%s кг x %s", weight, repsValue))
+			}
+			if distanceMeters != nil {
+				parts = append(parts, fmt.Sprintf("%s м", formatAIFloat(*distanceMeters)))
+			}
+			if durationSeconds != nil {
+				parts = append(parts, fmt.Sprintf("%d сек", *durationSeconds))
+			}
+			if len(parts) == 0 {
+				parts = append(parts, "без числовых метрик")
+			}
+
+			sb.WriteString(fmt.Sprintf("    Плановый подход %d: %s", setIndex, strings.Join(parts, ", ")))
+			if setType != "" && setType != "normal" {
+				sb.WriteString(fmt.Sprintf(" [%s]", setType))
+			}
+			sb.WriteString("\n")
+		}
+		setRows.Close()
+	}
+
+	return nil
 }
