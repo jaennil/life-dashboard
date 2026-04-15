@@ -226,6 +226,13 @@ export interface AIHistoryMessage {
   created_at: string
 }
 
+export interface AILatestCheckup {
+  has_report: boolean
+  period?: string
+  period_label?: string
+  generated_at?: string
+}
+
 export const api = {
   getDashboardSummary: () => get<DashboardSummary>('/dashboard/summary'),
   getRecentTransactions: () => get<Transaction[]>('/dashboard/transactions'),
@@ -273,6 +280,7 @@ export const api = {
     fetch(BASE + `/sync/${name}`, { method: 'POST' })
       .then(r => { if (!r.ok) throw new Error(r.statusText) }),
   getAIHistory: () => get<AIHistoryMessage[]>('/ai/history'),
+  getLatestAICheckup: () => get<AILatestCheckup>('/ai/checkup/latest'),
   clearAIHistory: () =>
     fetch(BASE + '/ai/history', { method: 'DELETE' }).then(async r => {
       if (!r.ok) throw new Error(await r.text())

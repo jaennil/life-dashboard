@@ -24,6 +24,13 @@ type CheckupResponse struct {
 	GeneratedAt time.Time `json:"generated_at"`
 }
 
+type LatestCheckupResponse struct {
+	HasReport   bool       `json:"has_report"`
+	Period      string     `json:"period,omitempty"`
+	PeriodLabel string     `json:"period_label,omitempty"`
+	GeneratedAt *time.Time `json:"generated_at,omitempty"`
+}
+
 type checkupWindow struct {
 	RequestedPeriod string
 	EffectivePeriod string
@@ -110,6 +117,36 @@ func (h *AIHandler) Checkup(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *AIHandler) GetLatestCheckup(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(authmw.UserIDKey).(string)
+
+	var requestedPeriod string
+	var createdAt time.Time
+	err := h.db.QueryRow(r.Context(), `
+		SELECT requested_period, created_at
+		FROM ai_checkup_reports
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, userID).Scan(&requestedPeriod, &createdAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeJSON(w, LatestCheckupResponse{HasReport: false})
+			return
+		}
+		h.logger.Error().Err(err).Msg("load latest ai checkup")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, LatestCheckupResponse{
+		HasReport:   true,
+		Period:      requestedPeriod,
+		PeriodLabel: checkupPeriodLabel(requestedPeriod),
+		GeneratedAt: &createdAt,
+	})
+}
+
 func (h *AIHandler) getLastCheckupAt(ctx context.Context, userID string) (*time.Time, error) {
 	var ts time.Time
 	err := h.db.QueryRow(ctx, `
@@ -190,6 +227,21 @@ func resolveCheckupWindow(now time.Time, requested string, lastReportAt *time.Ti
 		}, nil
 	default:
 		return checkupWindow{}, fmt.Errorf("unknown period")
+	}
+}
+
+func checkupPeriodLabel(period string) string {
+	switch strings.TrimSpace(strings.ToLower(period)) {
+	case checkupPeriodToday:
+		return "за сегодня"
+	case checkupPeriodWeek:
+		return "за 7 дней"
+	case checkupPeriodMonth:
+		return "за 30 дней"
+	case checkupPeriodSinceLast:
+		return "с прошлого отчёта"
+	default:
+		return ""
 	}
 }
 
@@ -728,6 +780,11 @@ func (h *AIHandler) storeCheckupReport(ctx context.Context, userID string, windo
 		VALUES ($1, $2, $3, $4, $5)
 	`, userID, window.RequestedPeriod, window.Start, window.End, content)
 	return err
+}
+
+func writeJSON(w http.ResponseWriter, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(value)
 }
 
 func formatAIMealTypes(mealTypes []string) []string {

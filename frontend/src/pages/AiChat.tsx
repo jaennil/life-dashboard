@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, type ComponentProps } from 'react'
 import { Send, Bot, User, Loader2, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, type AIHistoryMessage } from '@/lib/api'
+import { api, type AIHistoryMessage, type AILatestCheckup } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 interface Message {
@@ -17,9 +17,20 @@ interface ChatResponse {
   content: string
 }
 
+interface CheckupResponse extends ChatResponse {
+  period: CheckupPeriod
+  period_label: string
+  generated_at: string
+}
+
 interface SendResult {
   content: string
   isError?: boolean
+}
+
+interface CheckupSendResult extends SendResult {
+  generatedAt?: string
+  periodLabel?: string
 }
 
 type CheckupPeriod = 'today' | 'week' | 'month' | 'since_last'
@@ -102,8 +113,65 @@ async function requestChat(message: string, history: Message[]): Promise<SendRes
   return requestAI('/api/v1/ai/chat', payload)
 }
 
-async function requestCheckup(period: CheckupPeriod): Promise<SendResult> {
-  return requestAI('/api/v1/ai/checkup', JSON.stringify({ period }))
+async function requestCheckup(period: CheckupPeriod): Promise<CheckupSendResult> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch('/api/v1/ai/checkup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ period }),
+      })
+      const raw = await res.text()
+
+      if (!res.ok) {
+        if (attempt === 0 && RETRYABLE_CHAT_STATUSES.has(res.status)) {
+          await sleep(CHAT_RETRY_DELAY_MS)
+          continue
+        }
+
+        return {
+          content: formatChatError(res.status, raw),
+          isError: true,
+        }
+      }
+
+      let parsed: CheckupResponse | null = null
+      try {
+        parsed = JSON.parse(raw) as CheckupResponse
+      } catch {
+        // keep fallback below
+      }
+
+      const content = typeof parsed?.content === 'string' ? parsed.content : raw
+      if (!content.trim() || looksLikeHTML(content)) {
+        if (attempt === 0) {
+          await sleep(CHAT_RETRY_DELAY_MS)
+          continue
+        }
+
+        return {
+          content: 'AI сервис не вернул ответ. Попробуй ещё раз.',
+          isError: true,
+        }
+      }
+
+      return {
+        content,
+        generatedAt: parsed?.generated_at,
+        periodLabel: parsed?.period_label,
+      }
+    } catch {
+      if (attempt === 0) {
+        await sleep(CHAT_RETRY_DELAY_MS)
+        continue
+      }
+    }
+  }
+
+  return {
+    content: 'Не удалось подключиться к AI.',
+    isError: true,
+  }
 }
 
 async function requestAI(url: string, payload: string): Promise<SendResult> {
@@ -171,6 +239,7 @@ export function AiChat() {
   const [loading, setLoading] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyError, setHistoryError] = useState('')
+  const [latestCheckup, setLatestCheckup] = useState<AILatestCheckup | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -184,14 +253,19 @@ export function AiChat() {
     setHistoryLoading(true)
     setHistoryError('')
 
-    api.getAIHistory()
-      .then(history => {
+    Promise.allSettled([api.getAIHistory(), api.getLatestAICheckup()])
+      .then(([historyResult, latestCheckupResult]) => {
         if (!active) return
-        setMessages(history.map(mapHistoryMessage))
-      })
-      .catch(() => {
-        if (!active) return
-        setHistoryError('Не удалось загрузить историю чата.')
+
+        if (historyResult.status === 'fulfilled') {
+          setMessages(historyResult.value.map(mapHistoryMessage))
+        } else {
+          setHistoryError('Не удалось загрузить историю чата.')
+        }
+
+        if (latestCheckupResult.status === 'fulfilled') {
+          setLatestCheckup(latestCheckupResult.value)
+        }
       })
       .finally(() => {
         if (!active) return
@@ -237,6 +311,14 @@ export function AiChat() {
         ...prev.slice(0, -1),
         { role: 'assistant', content: result.content, loading: false },
       ])
+      if (!result.isError) {
+        setLatestCheckup({
+          has_report: true,
+          period: action.period,
+          period_label: result.periodLabel ?? findCheckupLabel(action.period),
+          generated_at: result.generatedAt ?? new Date().toISOString(),
+        })
+      }
     } finally {
       setLoading(false)
     }
@@ -291,6 +373,9 @@ export function AiChat() {
         <div className="mb-2">
           <p className="text-sm font-medium text-foreground">Checkup</p>
           <p className="text-xs text-muted-foreground">Быстрый AI-отчёт по всем сферам за нужный период</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {formatLatestCheckup(latestCheckup)}
+          </p>
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
           {CHECKUP_ACTIONS.map(action => (
@@ -401,4 +486,31 @@ function mapHistoryMessage(message: AIHistoryMessage): Message {
     content: message.content,
     created_at: message.created_at,
   }
+}
+
+function findCheckupLabel(period: CheckupPeriod) {
+  return CHECKUP_ACTIONS.find(action => action.period === period)?.label.toLowerCase() ?? period
+}
+
+function formatLatestCheckup(latestCheckup: AILatestCheckup | null) {
+  if (!latestCheckup?.has_report || !latestCheckup.generated_at) {
+    return 'Последний checkup: ещё не запускался'
+  }
+
+  const generatedAt = new Date(latestCheckup.generated_at)
+  const timestamp = Number.isNaN(generatedAt.getTime())
+    ? latestCheckup.generated_at
+    : new Intl.DateTimeFormat('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(generatedAt)
+
+  const periodLabel = latestCheckup.period_label?.trim()
+  if (periodLabel) {
+    return `Последний checkup: ${timestamp} (${periodLabel})`
+  }
+  return `Последний checkup: ${timestamp}`
 }

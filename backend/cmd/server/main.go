@@ -286,6 +286,7 @@ func main() {
 		r.Delete("/api/v1/ai/history", aiHandler.ClearHistory)
 		r.Post("/api/v1/ai/chat", aiHandler.Chat)
 		r.Post("/api/v1/ai/checkup", aiHandler.Checkup)
+		r.Get("/api/v1/ai/checkup/latest", aiHandler.GetLatestCheckup)
 
 		if stravaConn != nil {
 			r.Get("/api/v1/auth/strava", authHandler.StravaAuthorize)
