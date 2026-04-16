@@ -85,6 +85,17 @@ func TestSelectAIContextScopeEnablesRoutinesForTemplateQuestions(t *testing.T) {
 	}
 }
 
+func TestSelectAIContextScopeEnablesHabitsForRoutineQuestions(t *testing.T) {
+	scope := selectAIContextScope("как у меня с привычками habitify? чищу ли я зубы регулярно?", nil)
+
+	if !scope.habits {
+		t.Fatalf("expected habits scope to be enabled")
+	}
+	if scope.finance || scope.weather {
+		t.Fatalf("expected unrelated scopes to stay disabled, got %+v", scope)
+	}
+}
+
 func TestSelectAIContextScopeDefaultsToAllForGenericSummary(t *testing.T) {
 	scope := selectAIContextScope("что меня удивило в последнее время?", nil)
 
@@ -220,7 +231,8 @@ func TestBuildAICheckupPromptMentionsStructuredReport(t *testing.T) {
 	for _, expected := range []string{
 		"1. Короткий итог",
 		"3. Активность и тренировки.",
-		"Три конкретных шага на следующий период.",
+		"5. Привычки.",
+		"9. Три конкретных шага на следующий период.",
 		"Период отчёта: Checkup за неделю",
 		"События Google Calendar — это только план/расписание",
 		"Факт тренировки подтверждают только данные из workouts/Hevy",

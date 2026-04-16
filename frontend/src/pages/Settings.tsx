@@ -23,6 +23,10 @@ const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.Reac
     placeholder: 'API ключ от Hevy',
     help: <>Откройте Hevy → Settings → API, скопируйте API Key.</>,
   },
+  habitify: {
+    placeholder: 'API ключ от Habitify',
+    help: <>Откройте Habitify → Settings → API Key и скопируйте ключ. Подробности есть в <a href="https://docs.habitify.me/authentication" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">официальной документации API</a>.</>,
+  },
   notion: {
     placeholder: 'Notion Integration Token (ntn_...)',
     help: <>1. Создайте <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Internal Integration</a> в Notion. 2. Скопируйте токен. 3. Откройте базу данных дневника в Notion → «...» → Connections → добавьте интеграцию. 4. Скопируйте ID базы данных из URL (32 символа после последнего /).</>,
@@ -33,6 +37,7 @@ const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.Reac
 const ICONS: Record<string, string> = {
   strava: '🚴',
   hevy: '🏋️',
+  habitify: '✅',
   zenmoney: '💰',
   myfitnesspal: '🥗',
   google_calendar: '📅',
@@ -51,6 +56,7 @@ function fmtCount(n: number, name: string) {
   const labels: Record<string, [string, string, string]> = {
     strava:   ['активность', 'активности', 'активностей'],
     hevy:     ['тренировка', 'тренировки', 'тренировок'],
+    habitify: ['привычка', 'привычки', 'привычек'],
     zenmoney: ['транзакция', 'транзакции', 'транзакций'],
   }
   const l = labels[name] ?? ['запись', 'записи', 'записей']

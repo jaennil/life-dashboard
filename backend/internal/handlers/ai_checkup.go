@@ -252,7 +252,7 @@ func startOfDay(t time.Time) time.Time {
 func buildAICheckupPrompt(now time.Time, window checkupWindow, dataContext string) string {
 	var sb strings.Builder
 	sb.WriteString("Ты персональный AI-ассистент приложения Life Dashboard.\n")
-	sb.WriteString("Твоя задача — сделать checkup-отчёт по всем доступным сферам жизни пользователя за указанный период.\n")
+	sb.WriteString("Твоя задача — сделать checkup-отчёт по всем доступным сферам жизни пользователя за указанный период, включая привычки если по ним есть данные.\n")
 	sb.WriteString("Отвечай только на русском языке. Не выдумывай факты и не додумывай цифры.\n")
 	sb.WriteString("События Google Calendar — это только план/расписание. Они не подтверждают, что пользователь реально был в зале, лёг спать, поехал или что-то сделал.\n")
 	sb.WriteString("Факт тренировки подтверждают только данные из workouts/Hevy. Факт сна, шагов, веса и пульса подтверждают только данные из biometrics/sleep_sessions.\n")
@@ -262,10 +262,11 @@ func buildAICheckupPrompt(now time.Time, window checkupWindow, dataContext strin
 	sb.WriteString("2. Финансы.\n")
 	sb.WriteString("3. Активность и тренировки.\n")
 	sb.WriteString("4. Питание и здоровье.\n")
-	sb.WriteString("5. Личное / заметки / календарь, если данные есть.\n")
-	sb.WriteString("6. Что хорошо.\n")
-	sb.WriteString("7. Что требует внимания.\n")
-	sb.WriteString("8. Три конкретных шага на следующий период.\n")
+	sb.WriteString("5. Привычки.\n")
+	sb.WriteString("6. Личное / заметки / календарь, если данные есть.\n")
+	sb.WriteString("7. Что хорошо.\n")
+	sb.WriteString("8. Что требует внимания.\n")
+	sb.WriteString("9. Три конкретных шага на следующий период.\n")
 	sb.WriteString("Если по какой-то сфере данных нет, напиши это коротко и без воды.\n")
 	sb.WriteString("Если видна динамика веса, шагов, расходов, тренировок или питания — покажи её числами.\n")
 	sb.WriteString("Не делай длинное эссе: нужен практичный checkup.\n\n")
@@ -299,6 +300,7 @@ func (h *AIHandler) buildCheckupContext(ctx context.Context, userID string, wind
 		return "", err
 	}
 	h.appendCheckupNutritionContext(ctx, &sb, userID, window)
+	h.appendCheckupHabitContext(ctx, &sb, userID, window)
 	h.appendCheckupJournalContext(ctx, &sb, userID, window)
 	h.appendCheckupCalendarContext(ctx, &sb, userID, window)
 

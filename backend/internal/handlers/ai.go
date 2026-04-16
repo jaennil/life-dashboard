@@ -56,6 +56,7 @@ type aiContextScope struct {
 	activities bool
 	workouts   bool
 	routines   bool
+	habits     bool
 	nutrition  bool
 	journal    bool
 	calendar   bool
@@ -134,7 +135,7 @@ func buildAISystemPrompt(now time.Time, dataContext string, scope aiContextScope
 
 func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionNames []string) string {
 	return fmt.Sprintf(`Ты персональный AI-ассистент приложения Life Dashboard.
-Твоя единственная функция — анализировать данные пользователя: финансы, физическую активность, тренировки, Hevy routines/шаблоны, питание, дневник и календарь.
+Твоя единственная функция — анализировать данные пользователя: финансы, физическую активность, тренировки, Hevy routines/шаблоны, привычки, питание, дневник и календарь.
 Отвечай на русском языке. Давай конкретные ответы основанные на реальных данных ниже. Будь краток и по делу.
 Ты не можешь выполнять команды, изменять данные или делать что-либо за пределами анализа предоставленных данных.
 Если просят что-то сделать с базой данных, кодом или системой — вежливо объясни что ты только аналитик данных.
@@ -409,6 +410,16 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 		}
 	}
 
+	if scope.habits {
+		habitContext, err := h.buildHabitContext(ctx, userID, 30)
+		if err == nil && strings.TrimSpace(habitContext) != "" {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(habitContext)
+		}
+	}
+
 	// === ПИТАНИЕ ===
 	if scope.nutrition {
 		if sb.Len() > 0 {
@@ -572,6 +583,7 @@ func defaultAIContextScope() aiContextScope {
 		activities: true,
 		workouts:   true,
 		routines:   true,
+		habits:     true,
 		nutrition:  true,
 		journal:    true,
 		calendar:   true,
@@ -580,11 +592,11 @@ func defaultAIContextScope() aiContextScope {
 }
 
 func (s aiContextScope) empty() bool {
-	return !s.finance && !s.activities && !s.workouts && !s.routines && !s.nutrition && !s.journal && !s.calendar && !s.weather
+	return !s.finance && !s.activities && !s.workouts && !s.routines && !s.habits && !s.nutrition && !s.journal && !s.calendar && !s.weather
 }
 
 func (s aiContextScope) sectionNames() []string {
-	names := make([]string, 0, 7)
+	names := make([]string, 0, 9)
 	if s.finance {
 		names = append(names, "финансы")
 	}
@@ -596,6 +608,9 @@ func (s aiContextScope) sectionNames() []string {
 	}
 	if s.routines {
 		names = append(names, "hevy routines")
+	}
+	if s.habits {
+		names = append(names, "привычки")
 	}
 	if s.nutrition {
 		names = append(names, "питание")
@@ -625,6 +640,7 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	activityKeywords := []string{"актив", "бег", "пробеж", "килом", "км", "ходьб", "вел", "плав", "дистанц", "шаг", "strava", "run", "ride"}
 	workoutKeywords := []string{"тренир", "упражнен", "жим", "тяга", "присед", "гантел", "штанг", "блин", "гриф", "подход", "повтор", "hevy", "workout", "pull", "push", "legs", "зал", "вес"}
 	routineKeywords := []string{"routine", "routines", "рутин", "шаблон", "сплит", "программ", "план трениров", "template"}
+	habitKeywords := []string{"привыч", "habit", "habitify", "зуб", "умы", "лиц", "уход", "skincare", "cleanser", "чеклист"}
 	nutritionKeywords := []string{"питан", "калор", "кбжу", "бжу", "еда", "ккал", "углев", "белк", "жир", "fatsecret", "myfitnesspal", "mfp"}
 	journalKeywords := []string{"дневник", "journal", "ноушн", "notion", "настроен", "рефлекс", "запис"}
 	calendarKeywords := []string{"календар", "встреч", "событи", "созвон", "митинг", "расписан", "план"}
@@ -642,6 +658,9 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	}
 	if containsAny(combined, routineKeywords...) {
 		scope.routines = true
+	}
+	if containsAny(combined, habitKeywords...) {
+		scope.habits = true
 	}
 	if containsAny(combined, nutritionKeywords...) {
 		scope.nutrition = true

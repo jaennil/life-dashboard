@@ -68,6 +68,10 @@ func main() {
 	// Connectors
 	var activeConnectors []connectors.Connector
 
+	habitify := connectors.NewHabitify(pool, log.Logger)
+	activeConnectors = append(activeConnectors, habitify)
+	log.Info().Msg("habitify connector enabled")
+
 	hevy := connectors.NewHevy(pool, log.Logger)
 	activeConnectors = append(activeConnectors, hevy)
 	log.Info().Msg("hevy connector enabled")
@@ -226,6 +230,7 @@ func main() {
 		configuredMap := map[string]bool{
 			"strava":          cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
 			"hevy":            true,
+			"habitify":        true,
 			"zenmoney":        true,
 			"myfitnesspal":    mfpEnabled,
 			"fatsecret":       fsc.ClientID != "" && fsc.ClientSecret != "",

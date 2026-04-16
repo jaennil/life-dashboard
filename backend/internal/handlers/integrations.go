@@ -38,11 +38,12 @@ type integrationMeta struct {
 	countQuery  string
 }
 
-var knownIntegrations = []string{"strava", "hevy", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion"}
+var knownIntegrations = []string{"strava", "hevy", "habitify", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion"}
 
 var personalIntegrations = map[string]bool{
 	"strava":          true,
 	"hevy":            true,
+	"habitify":        true,
 	"zenmoney":        true,
 	"myfitnesspal":    true,
 	"fatsecret":       true,
@@ -52,6 +53,7 @@ var personalIntegrations = map[string]bool{
 
 var manualTokenIntegrations = map[string]bool{
 	"hevy":     true,
+	"habitify": true,
 	"notion":   true,
 	"zenmoney": true,
 }
@@ -66,6 +68,11 @@ var integrationMeta_ = map[string]integrationMeta{
 		displayName: "Hevy",
 		description: "Тренировки с упражнениями и весами",
 		countQuery:  "SELECT COUNT(*) FROM workouts WHERE user_id = $1",
+	},
+	"habitify": {
+		displayName: "Habitify",
+		description: "Привычки и ежедневные отметки выполнения",
+		countQuery:  "SELECT COUNT(*) FROM habits WHERE source='habitify' AND archived = FALSE AND user_id = $1",
 	},
 	"zenmoney": {
 		displayName: "ZenMoney",
