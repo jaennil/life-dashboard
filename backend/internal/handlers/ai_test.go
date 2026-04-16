@@ -86,7 +86,7 @@ func TestSelectAIContextScopeEnablesRoutinesForTemplateQuestions(t *testing.T) {
 }
 
 func TestSelectAIContextScopeEnablesHabitsForRoutineQuestions(t *testing.T) {
-	scope := selectAIContextScope("как у меня с привычками habitify? чищу ли я зубы регулярно?", nil)
+	scope := selectAIContextScope("как у меня с привычками todoist? чищу ли я зубы регулярно?", nil)
 
 	if !scope.habits {
 		t.Fatalf("expected habits scope to be enabled")

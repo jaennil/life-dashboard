@@ -72,6 +72,10 @@ func main() {
 	activeConnectors = append(activeConnectors, habitify)
 	log.Info().Msg("habitify connector enabled")
 
+	todoist := connectors.NewTodoist(pool, log.Logger)
+	activeConnectors = append(activeConnectors, todoist)
+	log.Info().Msg("todoist connector enabled")
+
 	hevy := connectors.NewHevy(pool, log.Logger)
 	activeConnectors = append(activeConnectors, hevy)
 	log.Info().Msg("hevy connector enabled")
@@ -231,6 +235,7 @@ func main() {
 			"strava":          cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
 			"hevy":            true,
 			"habitify":        true,
+			"todoist":         true,
 			"zenmoney":        true,
 			"myfitnesspal":    mfpEnabled,
 			"fatsecret":       fsc.ClientID != "" && fsc.ClientSecret != "",

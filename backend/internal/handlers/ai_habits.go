@@ -7,6 +7,14 @@ import (
 	"time"
 )
 
+type aiHabitSourceMeta struct {
+	Title                     string
+	Intro                     string
+	NoStatusMessage           string
+	MissingStatusCaveat       string
+	TreatStatusesAsFullWindow bool
+}
+
 func (h *AIHandler) buildHabitContext(ctx context.Context, userID string, days int) (string, error) {
 	if days <= 0 {
 		days = 14
@@ -24,7 +32,7 @@ func (h *AIHandler) appendCheckupHabitContext(ctx context.Context, sb *strings.B
 	sb.WriteString("\n")
 	if err := h.appendHabitContextInRange(ctx, sb, userID, window.Start, window.End, "=== ПРИВЫЧКИ ===", 12); err != nil {
 		h.logger.Warn().Err(err).Str("user_id", userID).Msg("build habit checkup context")
-		sb.WriteString("=== ПРИВЫЧКИ ===\nДанные Habitify временно недоступны.\n")
+		sb.WriteString("=== ПРИВЫЧКИ ===\nДанные по привычкам временно недоступны.\n")
 	}
 }
 
@@ -33,8 +41,74 @@ func (h *AIHandler) appendHabitContextInRange(ctx context.Context, sb *strings.B
 		limit = 12
 	}
 
+	sources, err := h.loadHabitSources(ctx, userID)
+	if err != nil {
+		return err
+	}
+
 	sb.WriteString(header + "\n")
-	sb.WriteString("Источник: Habitify. Это факты по отметкам привычек за день, а не план из календаря.\n")
+	if len(sources) == 0 {
+		sb.WriteString("Нет подключённых источников привычек\n")
+		return nil
+	}
+
+	for idx, source := range sources {
+		if idx > 0 {
+			sb.WriteString("\n")
+		}
+		if err := h.appendHabitSourceContext(ctx, sb, userID, source, start, end, limit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *AIHandler) loadHabitSources(ctx context.Context, userID string) ([]string, error) {
+	rows, err := h.db.Query(ctx, `
+		SELECT DISTINCT source
+		FROM habits
+		WHERE user_id = $1
+			AND source IN ('habitify', 'todoist')
+		ORDER BY CASE source WHEN 'habitify' THEN 1 WHEN 'todoist' THEN 2 ELSE 99 END
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	sources := make([]string, 0, 2)
+	for rows.Next() {
+		var source string
+		if err := rows.Scan(&source); err == nil && strings.TrimSpace(source) != "" {
+			sources = append(sources, source)
+		}
+	}
+	return sources, nil
+}
+
+func habitSourceMeta(source string) aiHabitSourceMeta {
+	switch source {
+	case "todoist":
+		return aiHabitSourceMeta{
+			Title:               "Todoist",
+			Intro:               "Источник: recurring tasks из Todoist. Фактом выполнения считаются completion events, а не план из календаря.",
+			NoStatusMessage:     "Нет completion events Todoist за период",
+			MissingStatusCaveat: "Todoist completed archive может быть недоступен на текущем плане, поэтому пропуски и полная история выполнения могут быть видны не полностью.",
+		}
+	default:
+		return aiHabitSourceMeta{
+			Title:                     "Habitify",
+			Intro:                     "Источник: Habitify. Это факты по отметкам привычек за день, а не план из календаря.",
+			NoStatusMessage:           "Нет дневных отметок Habitify за период",
+			TreatStatusesAsFullWindow: true,
+		}
+	}
+}
+
+func (h *AIHandler) appendHabitSourceContext(ctx context.Context, sb *strings.Builder, userID, source string, start, end time.Time, limit int) error {
+	meta := habitSourceMeta(source)
+	sb.WriteString(fmt.Sprintf("--- %s ---\n", meta.Title))
+	sb.WriteString(meta.Intro + "\n")
 
 	var activeHabits, archivedHabits int
 	if err := h.db.QueryRow(ctx, `
@@ -42,8 +116,8 @@ func (h *AIHandler) appendHabitContextInRange(ctx context.Context, sb *strings.B
 			COUNT(*) FILTER (WHERE archived = FALSE),
 			COUNT(*) FILTER (WHERE archived = TRUE)
 		FROM habits
-		WHERE user_id = $1 AND source = 'habitify'
-	`, userID).Scan(&activeHabits, &archivedHabits); err != nil {
+		WHERE user_id = $1 AND source = $2
+	`, userID, source).Scan(&activeHabits, &archivedHabits); err != nil {
 		return err
 	}
 
@@ -59,10 +133,10 @@ func (h *AIHandler) appendHabitContextInRange(ctx context.Context, sb *strings.B
 		FROM habit_daily_statuses s
 		JOIN habits h ON h.id = s.habit_id
 		WHERE h.user_id = $1
-			AND h.source = 'habitify'
-			AND s.target_date >= $2::date
-			AND s.target_date <= $3::date
-	`, userID, start, end).Scan(&totalStatuses, &completed, &inProgress, &skipped, &failed, &none); err != nil {
+			AND h.source = $2
+			AND s.target_date >= $3::date
+			AND s.target_date <= $4::date
+	`, userID, source, start, end).Scan(&totalStatuses, &completed, &inProgress, &skipped, &failed, &none); err != nil {
 		return err
 	}
 
@@ -73,34 +147,45 @@ func (h *AIHandler) appendHabitContextInRange(ctx context.Context, sb *strings.B
 	sb.WriteString("\n")
 
 	if totalStatuses == 0 {
-		sb.WriteString("Нет дневных отметок Habitify за период\n")
-		return nil
-	}
+		sb.WriteString(meta.NoStatusMessage + "\n")
+		if meta.MissingStatusCaveat != "" {
+			sb.WriteString(meta.MissingStatusCaveat + "\n")
+		}
+	} else {
+		trackedStatuses := make([]string, 0, 5)
+		trackedStatuses = append(trackedStatuses, fmt.Sprintf("выполнено %d", completed))
+		if inProgress > 0 {
+			trackedStatuses = append(trackedStatuses, fmt.Sprintf("в процессе %d", inProgress))
+		}
+		if skipped > 0 {
+			trackedStatuses = append(trackedStatuses, fmt.Sprintf("пропущено %d", skipped))
+		}
+		if failed > 0 {
+			trackedStatuses = append(trackedStatuses, fmt.Sprintf("не выполнено %d", failed))
+		}
+		if none > 0 {
+			trackedStatuses = append(trackedStatuses, fmt.Sprintf("без отметки %d", none))
+		}
 
-	completionRate := 0.0
-	if totalStatuses > 0 {
-		completionRate = float64(completed) / float64(totalStatuses) * 100
+		if meta.TreatStatusesAsFullWindow {
+			completionRate := 0.0
+			if totalStatuses > 0 {
+				completionRate = float64(completed) / float64(totalStatuses) * 100
+			}
+			sb.WriteString(fmt.Sprintf("За период: %d дневных статусов, completion rate %.0f%% (%s)\n", totalStatuses, completionRate, strings.Join(trackedStatuses, ", ")))
+		} else {
+			sb.WriteString(fmt.Sprintf("За период: %d зафиксированных статусов (%s)\n", totalStatuses, strings.Join(trackedStatuses, ", ")))
+			if meta.MissingStatusCaveat != "" {
+				sb.WriteString(meta.MissingStatusCaveat + "\n")
+			}
+		}
 	}
-	trackedStatuses := make([]string, 0, 5)
-	trackedStatuses = append(trackedStatuses, fmt.Sprintf("выполнено %d", completed))
-	if inProgress > 0 {
-		trackedStatuses = append(trackedStatuses, fmt.Sprintf("в процессе %d", inProgress))
-	}
-	if skipped > 0 {
-		trackedStatuses = append(trackedStatuses, fmt.Sprintf("пропущено %d", skipped))
-	}
-	if failed > 0 {
-		trackedStatuses = append(trackedStatuses, fmt.Sprintf("не выполнено %d", failed))
-	}
-	if none > 0 {
-		trackedStatuses = append(trackedStatuses, fmt.Sprintf("без отметки %d", none))
-	}
-	sb.WriteString(fmt.Sprintf("За период: %d дневных статусов, completion rate %.0f%% (%s)\n", totalStatuses, completionRate, strings.Join(trackedStatuses, ", ")))
 
 	rows, err := h.db.Query(ctx, `
 		SELECT
 			h.name,
 			COALESCE(h.area_name, ''),
+			COALESCE(h.recurrence, ''),
 			h.archived,
 			COUNT(s.id) AS tracked_days,
 			COUNT(*) FILTER (WHERE s.status = 'completed') AS completed_days,
@@ -116,23 +201,23 @@ func (h *AIHandler) appendHabitContextInRange(ctx context.Context, sb *strings.B
 		FROM habits h
 		LEFT JOIN habit_daily_statuses s
 			ON s.habit_id = h.id
-			AND s.target_date >= $2::date
-			AND s.target_date <= $3::date
+			AND s.target_date >= $3::date
+			AND s.target_date <= $4::date
 		LEFT JOIN LATERAL (
 			SELECT target_date, status, current_value, target_value, unit_type
 			FROM habit_daily_statuses s2
 			WHERE s2.habit_id = h.id
-				AND s2.target_date >= $2::date
-				AND s2.target_date <= $3::date
+				AND s2.target_date >= $3::date
+				AND s2.target_date <= $4::date
 			ORDER BY s2.target_date DESC
 			LIMIT 1
 		) latest ON true
 		WHERE h.user_id = $1
-			AND h.source = 'habitify'
+			AND h.source = $2
 		GROUP BY h.id, latest.target_date, latest.status, latest.current_value, latest.target_value, latest.unit_type
 		ORDER BY h.archived ASC, completed_days DESC, tracked_days DESC, h.name ASC
-		LIMIT $4
-	`, userID, start, end, limit)
+		LIMIT $5
+	`, userID, source, start, end, limit)
 	if err != nil {
 		return err
 	}
@@ -142,7 +227,7 @@ func (h *AIHandler) appendHabitContextInRange(ctx context.Context, sb *strings.B
 	hasRows := false
 	for rows.Next() {
 		hasRows = true
-		var name, areaName, latestStatus, unitType string
+		var name, areaName, recurrence, latestStatus, unitType string
 		var archived bool
 		var trackedDays, completedDays, inProgressDays, skippedDays, failedDays, noneDays int
 		var latestDate *time.Time
@@ -150,6 +235,7 @@ func (h *AIHandler) appendHabitContextInRange(ctx context.Context, sb *strings.B
 		if err := rows.Scan(
 			&name,
 			&areaName,
+			&recurrence,
 			&archived,
 			&trackedDays,
 			&completedDays,
@@ -166,7 +252,27 @@ func (h *AIHandler) appendHabitContextInRange(ctx context.Context, sb *strings.B
 			continue
 		}
 
-		parts := []string{fmt.Sprintf("%d/%d выполнено", completedDays, trackedDays)}
+		line := fmt.Sprintf("  - %s", name)
+		if areaName != "" {
+			line += fmt.Sprintf(" [%s]", areaName)
+		}
+		if recurrence != "" {
+			line += fmt.Sprintf(" {%s}", recurrence)
+		}
+		if archived {
+			line += " [архив]"
+		}
+
+		parts := make([]string, 0, 6)
+		if meta.TreatStatusesAsFullWindow {
+			parts = append(parts, fmt.Sprintf("%d/%d выполнено", completedDays, trackedDays))
+		} else if completedDays > 0 {
+			parts = append(parts, fmt.Sprintf("выполнено %d раз", completedDays))
+		} else if trackedDays > 0 {
+			parts = append(parts, fmt.Sprintf("статусов %d", trackedDays))
+		} else {
+			parts = append(parts, "нет completion events за период")
+		}
 		if noneDays > 0 {
 			parts = append(parts, fmt.Sprintf("без отметки %d", noneDays))
 		}
@@ -178,14 +284,6 @@ func (h *AIHandler) appendHabitContextInRange(ctx context.Context, sb *strings.B
 		}
 		if inProgressDays > 0 {
 			parts = append(parts, fmt.Sprintf("в процессе %d", inProgressDays))
-		}
-
-		line := fmt.Sprintf("  - %s", name)
-		if areaName != "" {
-			line += fmt.Sprintf(" [%s]", areaName)
-		}
-		if archived {
-			line += " [архив]"
 		}
 		line += ": " + strings.Join(parts, ", ")
 		if latestDate != nil {
@@ -200,7 +298,7 @@ func (h *AIHandler) appendHabitContextInRange(ctx context.Context, sb *strings.B
 		sb.WriteString(line + "\n")
 	}
 	if !hasRows {
-		sb.WriteString("  - Нет привычек Habitify\n")
+		sb.WriteString(fmt.Sprintf("  - Нет привычек %s\n", meta.Title))
 	}
 
 	return nil

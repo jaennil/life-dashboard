@@ -640,7 +640,7 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	activityKeywords := []string{"актив", "бег", "пробеж", "килом", "км", "ходьб", "вел", "плав", "дистанц", "шаг", "strava", "run", "ride"}
 	workoutKeywords := []string{"тренир", "упражнен", "жим", "тяга", "присед", "гантел", "штанг", "блин", "гриф", "подход", "повтор", "hevy", "workout", "pull", "push", "legs", "зал", "вес"}
 	routineKeywords := []string{"routine", "routines", "рутин", "шаблон", "сплит", "программ", "план трениров", "template"}
-	habitKeywords := []string{"привыч", "habit", "habitify", "зуб", "умы", "лиц", "уход", "skincare", "cleanser", "чеклист"}
+	habitKeywords := []string{"привыч", "habit", "habitify", "todoist", "зуб", "умы", "лиц", "уход", "skincare", "cleanser", "чеклист", "дейли", "daily"}
 	nutritionKeywords := []string{"питан", "калор", "кбжу", "бжу", "еда", "ккал", "углев", "белк", "жир", "fatsecret", "myfitnesspal", "mfp"}
 	journalKeywords := []string{"дневник", "journal", "ноушн", "notion", "настроен", "рефлекс", "запис"}
 	calendarKeywords := []string{"календар", "встреч", "событи", "созвон", "митинг", "расписан", "план"}

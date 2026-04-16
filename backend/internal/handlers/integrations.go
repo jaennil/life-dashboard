@@ -38,12 +38,13 @@ type integrationMeta struct {
 	countQuery  string
 }
 
-var knownIntegrations = []string{"strava", "hevy", "habitify", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion"}
+var knownIntegrations = []string{"strava", "hevy", "habitify", "todoist", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion"}
 
 var personalIntegrations = map[string]bool{
 	"strava":          true,
 	"hevy":            true,
 	"habitify":        true,
+	"todoist":         true,
 	"zenmoney":        true,
 	"myfitnesspal":    true,
 	"fatsecret":       true,
@@ -54,6 +55,7 @@ var personalIntegrations = map[string]bool{
 var manualTokenIntegrations = map[string]bool{
 	"hevy":     true,
 	"habitify": true,
+	"todoist":  true,
 	"notion":   true,
 	"zenmoney": true,
 }
@@ -73,6 +75,11 @@ var integrationMeta_ = map[string]integrationMeta{
 		displayName: "Habitify",
 		description: "Привычки и ежедневные отметки выполнения",
 		countQuery:  "SELECT COUNT(*) FROM habits WHERE source='habitify' AND archived = FALSE AND user_id = $1",
+	},
+	"todoist": {
+		displayName: "Todoist Habits",
+		description: "Recurring tasks и чеклисты из Todoist",
+		countQuery:  "SELECT COUNT(*) FROM habits WHERE source='todoist' AND archived = FALSE AND user_id = $1",
 	},
 	"zenmoney": {
 		displayName: "ZenMoney",

@@ -1,0 +1,566 @@
+package connectors
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog"
+)
+
+const (
+	todoistSyncURL             = "https://api.todoist.com/api/v1/sync"
+	todoistCompletedURL        = "https://api.todoist.com/api/v1/tasks/completed/by_completion_date"
+	todoistInitialBackfillDays = 60
+	todoistIncrementalLookback = 14
+	todoistRequestTimeout      = 30 * time.Second
+	todoistCompletedPageLimit  = 200
+)
+
+var errTodoistCompletedArchiveUnavailable = errors.New("todoist completed archive unavailable")
+
+type todoistDB interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+type todoistSyncResponse struct {
+	Items []todoistItem `json:"items"`
+}
+
+type todoistItem struct {
+	ID          string      `json:"id"`
+	Content     string      `json:"content"`
+	Description string      `json:"description"`
+	ProjectID   string      `json:"project_id"`
+	SectionID   string      `json:"section_id"`
+	Labels      []string    `json:"labels"`
+	Priority    int         `json:"priority"`
+	Checked     bool        `json:"checked"`
+	IsDeleted   bool        `json:"is_deleted"`
+	AddedAt     string      `json:"added_at"`
+	CompletedAt string      `json:"completed_at"`
+	Due         *todoistDue `json:"due"`
+}
+
+type todoistDue struct {
+	Date        string `json:"date"`
+	DateTime    string `json:"datetime"`
+	Recurring   bool   `json:"recurring"`
+	IsRecurring bool   `json:"is_recurring"`
+	String      string `json:"string"`
+	Timezone    string `json:"timezone"`
+}
+
+type todoistProject struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type todoistSection struct {
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+}
+
+type todoistCompletedResponse struct {
+	Items      []todoistItem `json:"items"`
+	NextCursor string        `json:"next_cursor"`
+}
+
+type todoistCompletionEvent struct {
+	TaskID      string
+	CompletedAt time.Time
+	ProjectID   string
+	SectionID   string
+	Content     string
+	Raw         json.RawMessage
+}
+
+type TodoistConnector struct {
+	db     *pgxpool.Pool
+	client *http.Client
+	logger zerolog.Logger
+}
+
+func NewTodoist(db *pgxpool.Pool, logger zerolog.Logger) *TodoistConnector {
+	return &TodoistConnector{
+		db:     db,
+		client: &http.Client{Timeout: todoistRequestTimeout},
+		logger: logger.With().Str("connector", "todoist").Logger(),
+	}
+}
+
+func (t *TodoistConnector) Name() string { return "todoist" }
+
+func (t *TodoistConnector) Sync(ctx context.Context, userID string) error {
+	token, err := t.loadToken(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	tasks, projects, sections, err := t.fetchActiveRecurringTasks(ctx, token)
+	if err != nil {
+		return fmt.Errorf("fetch todoist tasks: %w", err)
+	}
+
+	lastSync, err := t.getLastSync(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get last sync: %w", err)
+	}
+	lookbackStart := t.syncStart(lastSync, time.Now())
+
+	completions, completedArchiveAvailable, err := t.fetchCompletionEvents(ctx, token, lookbackStart)
+	if err != nil {
+		if errors.Is(err, errTodoistCompletedArchiveUnavailable) {
+			completedArchiveAvailable = false
+			t.logger.Warn().Str("user_id", userID).Msg("todoist completed archive not available on current plan; syncing active recurring tasks only")
+		} else {
+			return fmt.Errorf("fetch todoist completed items: %w", err)
+		}
+	}
+
+	tx, err := t.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	projectNames := make(map[string]string, len(projects))
+	for _, project := range projects {
+		projectNames[project.ID] = strings.TrimSpace(project.Name)
+	}
+
+	sectionNames := make(map[string]todoistSection, len(sections))
+	for _, section := range sections {
+		sectionNames[section.ID] = section
+	}
+
+	habitIDs := make(map[string]string, len(tasks))
+	activeIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		raw, err := json.Marshal(task)
+		if err != nil {
+			return fmt.Errorf("marshal todoist task: %w", err)
+		}
+		habitID, err := t.upsertTaskAsHabit(ctx, tx, userID, task, raw, projectNames, sectionNames)
+		if err != nil {
+			return fmt.Errorf("upsert todoist habit: %w", err)
+		}
+		habitIDs[task.ID] = habitID
+		activeIDs = append(activeIDs, task.ID)
+	}
+
+	if err := t.archiveMissingHabits(ctx, tx, userID, activeIDs); err != nil {
+		return fmt.Errorf("archive missing todoist habits: %w", err)
+	}
+
+	if completedArchiveAvailable {
+		if err := t.clearRecentStatuses(ctx, tx, userID, lookbackStart); err != nil {
+			return fmt.Errorf("clear recent todoist statuses: %w", err)
+		}
+		for _, event := range completions {
+			habitID, ok := habitIDs[event.TaskID]
+			if !ok {
+				continue
+			}
+			if err := t.upsertCompletionStatus(ctx, tx, userID, habitID, event); err != nil {
+				return fmt.Errorf("upsert todoist completion status: %w", err)
+			}
+		}
+	}
+
+	if err := t.updateLastSync(ctx, tx, userID); err != nil {
+		return fmt.Errorf("update todoist last sync: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	t.logger.Info().Int("habits", len(tasks)).Int("completions", len(completions)).Bool("completed_archive_available", completedArchiveAvailable).Msg("todoist sync complete")
+	return nil
+}
+
+func (t *TodoistConnector) loadToken(ctx context.Context, userID string) (string, error) {
+	var token string
+	err := t.db.QueryRow(ctx, `SELECT access_token FROM oauth_tokens WHERE source = 'todoist' AND user_id = $1`, userID).Scan(&token)
+	if err != nil || strings.TrimSpace(token) == "" {
+		return "", fmt.Errorf("no Todoist token — add your Todoist personal API token in Settings")
+	}
+	return token, nil
+}
+
+func (t *TodoistConnector) fetchActiveRecurringTasks(ctx context.Context, token string) ([]todoistItem, []todoistProject, []todoistSection, error) {
+	form := url.Values{}
+	form.Set("sync_token", "*")
+	form.Set("resource_types", `["items","projects","sections"]`)
+
+	respBody, err := t.doFormRequest(ctx, token, todoistSyncURL, form)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	var payload struct {
+		Items    []todoistItem    `json:"items"`
+		Projects []todoistProject `json:"projects"`
+		Sections []todoistSection `json:"sections"`
+	}
+	if err := json.Unmarshal(respBody, &payload); err != nil {
+		return nil, nil, nil, fmt.Errorf("decode todoist sync response: %w", err)
+	}
+
+	recurring := make([]todoistItem, 0, len(payload.Items))
+	for _, item := range payload.Items {
+		if !todoistIsRecurringHabit(item) {
+			continue
+		}
+		recurring = append(recurring, item)
+	}
+	return recurring, payload.Projects, payload.Sections, nil
+}
+
+func todoistIsRecurringHabit(item todoistItem) bool {
+	if item.IsDeleted || item.Checked || item.Due == nil {
+		return false
+	}
+	return todoistDueIsRecurring(item.Due)
+}
+
+func todoistDueIsRecurring(due *todoistDue) bool {
+	return due != nil && (due.Recurring || due.IsRecurring)
+}
+
+func (t *TodoistConnector) fetchCompletionEvents(ctx context.Context, token string, since time.Time) ([]todoistCompletionEvent, bool, error) {
+	completions := make([]todoistCompletionEvent, 0)
+	cursor := ""
+	until := time.Now().UTC()
+
+	for {
+		query := url.Values{}
+		query.Set("since", since.UTC().Format(time.RFC3339))
+		query.Set("until", until.Format(time.RFC3339))
+		query.Set("limit", fmt.Sprintf("%d", todoistCompletedPageLimit))
+		if cursor != "" {
+			query.Set("cursor", cursor)
+		}
+
+		respBody, err := t.doJSONRequest(ctx, token, todoistCompletedURL+"?"+query.Encode())
+		if err != nil {
+			if errors.Is(err, errTodoistCompletedArchiveUnavailable) {
+				return nil, false, err
+			}
+			return nil, false, err
+		}
+
+		var payload todoistCompletedResponse
+		if err := json.Unmarshal(respBody, &payload); err != nil {
+			return nil, false, fmt.Errorf("decode todoist completed response: %w", err)
+		}
+
+		for _, item := range payload.Items {
+			if !todoistDueIsRecurring(item.Due) {
+				continue
+			}
+			completedAt, err := parseTodoistTime(item.CompletedAt)
+			if err != nil {
+				continue
+			}
+			raw, err := json.Marshal(item)
+			if err != nil {
+				return nil, false, fmt.Errorf("marshal todoist completed item: %w", err)
+			}
+			completions = append(completions, todoistCompletionEvent{
+				TaskID:      strings.TrimSpace(item.ID),
+				CompletedAt: completedAt,
+				ProjectID:   strings.TrimSpace(item.ProjectID),
+				SectionID:   strings.TrimSpace(item.SectionID),
+				Content:     strings.TrimSpace(item.Content),
+				Raw:         raw,
+			})
+		}
+
+		if strings.TrimSpace(payload.NextCursor) == "" {
+			break
+		}
+		cursor = payload.NextCursor
+	}
+
+	return completions, true, nil
+}
+
+func (t *TodoistConnector) doFormRequest(ctx context.Context, token, endpoint string, form url.Values) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return t.do(req, false)
+}
+
+func (t *TodoistConnector) doJSONRequest(ctx context.Context, token, endpoint string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return t.do(req, true)
+}
+
+func (t *TodoistConnector) do(req *http.Request, allowCompletedArchiveUnavailable bool) ([]byte, error) {
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if allowCompletedArchiveUnavailable && (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusPaymentRequired) {
+		return nil, errTodoistCompletedArchiveUnavailable
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("todoist api returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	return respBody, nil
+}
+
+func (t *TodoistConnector) upsertTaskAsHabit(ctx context.Context, db todoistDB, userID string, task todoistItem, raw []byte, projects map[string]string, sections map[string]todoistSection) (string, error) {
+	if _, err := db.Exec(ctx, `
+		INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
+		VALUES ('todoist', 'task', $1, $2, $3)
+	`, task.ID, raw, userID); err != nil {
+		return "", fmt.Errorf("insert todoist raw task event: %w", err)
+	}
+
+	areaName := todoistAreaName(task.ProjectID, task.SectionID, projects, sections)
+	recurrence := ""
+	if task.Due != nil {
+		recurrence = strings.TrimSpace(task.Due.String)
+	}
+	timeOfDay := todoistTimeOfDay(task.Due)
+	sourceCreatedAt, _ := parseTodoistTime(task.AddedAt)
+
+	var habitID string
+	err := db.QueryRow(ctx, `
+		INSERT INTO habits (
+			user_id, source, external_id, name, area_name, archived,
+			recurrence, log_method, time_of_day, remind_at, goal, goal_history_items,
+			raw_payload, source_created_at
+		)
+		VALUES ($1, 'todoist', $2, $3, $4, FALSE, $5, 'task', $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (user_id, source, external_id) DO UPDATE SET
+			name = EXCLUDED.name,
+			area_name = EXCLUDED.area_name,
+			archived = FALSE,
+			recurrence = EXCLUDED.recurrence,
+			log_method = EXCLUDED.log_method,
+			time_of_day = EXCLUDED.time_of_day,
+			remind_at = EXCLUDED.remind_at,
+			goal = EXCLUDED.goal,
+			goal_history_items = EXCLUDED.goal_history_items,
+			raw_payload = EXCLUDED.raw_payload,
+			source_created_at = COALESCE(EXCLUDED.source_created_at, habits.source_created_at)
+		RETURNING id
+	`,
+		userID,
+		task.ID,
+		strings.TrimSpace(task.Content),
+		nullIfEmpty(areaName),
+		nullIfEmpty(recurrence),
+		timeOfDay,
+		[]string{},
+		nullJSON(todoistGoalJSON(task)),
+		nil,
+		raw,
+		nullTime(sourceCreatedAt),
+	).Scan(&habitID)
+	if err != nil {
+		return "", fmt.Errorf("upsert todoist habit row: %w", err)
+	}
+
+	return habitID, nil
+}
+
+func todoistAreaName(projectID, sectionID string, projects map[string]string, sections map[string]todoistSection) string {
+	projectName := strings.TrimSpace(projects[projectID])
+	sectionName := ""
+	if section, ok := sections[sectionID]; ok {
+		sectionName = strings.TrimSpace(section.Name)
+		if projectName == "" {
+			projectName = strings.TrimSpace(projects[section.ProjectID])
+		}
+	}
+	switch {
+	case projectName != "" && sectionName != "":
+		return projectName + " / " + sectionName
+	case sectionName != "":
+		return sectionName
+	default:
+		return projectName
+	}
+}
+
+func todoistTimeOfDay(due *todoistDue) []string {
+	if due == nil {
+		return []string{}
+	}
+	raw := strings.TrimSpace(due.DateTime)
+	if raw == "" && strings.Contains(due.Date, "T") {
+		raw = strings.TrimSpace(due.Date)
+	}
+	if raw == "" {
+		return []string{}
+	}
+
+	t, err := parseTodoistTime(raw)
+	if err != nil {
+		return []string{}
+	}
+	if due.Timezone != "" {
+		if loc, err := time.LoadLocation(due.Timezone); err == nil {
+			t = t.In(loc)
+		}
+	}
+	return []string{t.Format("15:04")}
+}
+
+func todoistGoalJSON(task todoistItem) []byte {
+	payload := map[string]any{}
+	if len(task.Labels) > 0 {
+		payload["labels"] = task.Labels
+	}
+	if task.Priority > 0 {
+		payload["priority"] = task.Priority
+	}
+	if strings.TrimSpace(task.Description) != "" {
+		payload["description"] = strings.TrimSpace(task.Description)
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func (t *TodoistConnector) archiveMissingHabits(ctx context.Context, db todoistDB, userID string, activeIDs []string) error {
+	if _, err := db.Exec(ctx, `
+		UPDATE habits
+		SET archived = TRUE
+		WHERE user_id = $1
+			AND source = 'todoist'
+			AND NOT (external_id = ANY($2))
+	`, userID, activeIDs); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *TodoistConnector) clearRecentStatuses(ctx context.Context, db todoistDB, userID string, since time.Time) error {
+	_, err := db.Exec(ctx, `
+		DELETE FROM habit_daily_statuses s
+		USING habits h
+		WHERE s.habit_id = h.id
+			AND h.user_id = $1
+			AND h.source = 'todoist'
+			AND s.target_date >= $2::date
+	`, userID, since.Format("2006-01-02"))
+	return err
+}
+
+func (t *TodoistConnector) upsertCompletionStatus(ctx context.Context, db todoistDB, userID, habitID string, event todoistCompletionEvent) error {
+	if _, err := db.Exec(ctx, `
+		INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
+		VALUES ('todoist', 'completed_task', $1, $2, $3)
+	`, event.TaskID+":"+event.CompletedAt.UTC().Format(time.RFC3339), event.Raw, userID); err != nil {
+		return fmt.Errorf("insert todoist raw completion event: %w", err)
+	}
+
+	_, err := db.Exec(ctx, `
+		INSERT INTO habit_daily_statuses (habit_id, target_date, status, current_value, target_value, unit_type, periodicity, raw_payload)
+		VALUES ($1, $2, 'completed', 1, 1, 'task', 'daily', $3)
+		ON CONFLICT (habit_id, target_date) DO UPDATE SET
+			status = EXCLUDED.status,
+			current_value = EXCLUDED.current_value,
+			target_value = EXCLUDED.target_value,
+			unit_type = EXCLUDED.unit_type,
+			periodicity = EXCLUDED.periodicity,
+			raw_payload = EXCLUDED.raw_payload
+	`, habitID, event.CompletedAt.Format("2006-01-02"), event.Raw)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *TodoistConnector) syncStart(lastSync time.Time, now time.Time) time.Time {
+	if lastSync.IsZero() {
+		start := now.AddDate(0, 0, -(todoistInitialBackfillDays - 1))
+		return time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
+	}
+	start := lastSync.AddDate(0, 0, -todoistIncrementalLookback)
+	return time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
+}
+
+func (t *TodoistConnector) getLastSync(ctx context.Context, userID string) (time.Time, error) {
+	var ts time.Time
+	err := t.db.QueryRow(ctx, `SELECT last_synced_at FROM sync_state WHERE source = 'todoist' AND user_id = $1`, userID).Scan(&ts)
+	if err != nil {
+		return time.Time{}, nil
+	}
+	return ts, nil
+}
+
+func (t *TodoistConnector) updateLastSync(ctx context.Context, db todoistDB, userID string) error {
+	_, err := db.Exec(ctx, `
+		INSERT INTO sync_state (source, last_synced_at, updated_at, enabled, user_id)
+		VALUES ('todoist', NOW(), NOW(), TRUE, $1)
+		ON CONFLICT (source, user_id) DO UPDATE SET
+			last_synced_at = EXCLUDED.last_synced_at,
+			updated_at = EXCLUDED.updated_at,
+			enabled = TRUE
+	`, userID)
+	return err
+}
+
+func parseTodoistTime(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, fmt.Errorf("empty time")
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.000000Z",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05.000000",
+		"2006-01-02T15:04:05.000",
+		"2006-01-02T15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		if ts, err := time.Parse(layout, raw); err == nil {
+			return ts, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported todoist time: %s", raw)
+}
+
+func nullTime(ts time.Time) any {
+	if ts.IsZero() {
+		return nil
+	}
+	return ts
+}
