@@ -9,6 +9,8 @@ spec:
       app: backend
   template:
     metadata:
+      annotations:
+        life-dashboard/config-revision: "todoist-oauth-20260416"
       labels:
         app: backend
     spec:
