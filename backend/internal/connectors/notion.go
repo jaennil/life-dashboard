@@ -26,9 +26,9 @@ type notionQueryResponse struct {
 }
 
 type notionPage struct {
-	ID             string                        `json:"id"`
-	CreatedTime    time.Time                     `json:"created_time"`
-	LastEditedTime time.Time                     `json:"last_edited_time"`
+	ID             string                         `json:"id"`
+	CreatedTime    time.Time                      `json:"created_time"`
+	LastEditedTime time.Time                      `json:"last_edited_time"`
 	Properties     map[string]notionPropertyValue `json:"properties"`
 }
 
@@ -62,17 +62,17 @@ type notionBlocksResponse struct {
 }
 
 type notionBlock struct {
-	Type      string          `json:"type"`
-	Paragraph *notionTextBlock `json:"paragraph,omitempty"`
-	Heading1  *notionTextBlock `json:"heading_1,omitempty"`
-	Heading2  *notionTextBlock `json:"heading_2,omitempty"`
-	Heading3  *notionTextBlock `json:"heading_3,omitempty"`
+	Type             string           `json:"type"`
+	Paragraph        *notionTextBlock `json:"paragraph,omitempty"`
+	Heading1         *notionTextBlock `json:"heading_1,omitempty"`
+	Heading2         *notionTextBlock `json:"heading_2,omitempty"`
+	Heading3         *notionTextBlock `json:"heading_3,omitempty"`
 	BulletedListItem *notionTextBlock `json:"bulleted_list_item,omitempty"`
 	NumberedListItem *notionTextBlock `json:"numbered_list_item,omitempty"`
-	Toggle    *notionTextBlock `json:"toggle,omitempty"`
-	Quote     *notionTextBlock `json:"quote,omitempty"`
-	Callout   *notionTextBlock `json:"callout,omitempty"`
-	ToDo      *notionToDo      `json:"to_do,omitempty"`
+	Toggle           *notionTextBlock `json:"toggle,omitempty"`
+	Quote            *notionTextBlock `json:"quote,omitempty"`
+	Callout          *notionTextBlock `json:"callout,omitempty"`
+	ToDo             *notionToDo      `json:"to_do,omitempty"`
 }
 
 type notionTextBlock struct {
@@ -112,6 +112,7 @@ func (n *NotionConnector) AuthURL(state string) string {
 		"response_type": {"code"},
 		"owner":         {"user"},
 		"redirect_uri":  {n.redirectURI},
+		"state":         {state},
 	}
 	return "https://api.notion.com/v1/oauth/authorize?" + params.Encode()
 }
