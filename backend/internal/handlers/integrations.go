@@ -16,10 +16,11 @@ type IntegrationsHandler struct {
 	db         *pgxpool.Pool
 	connectors map[string]connectors.Connector
 	configured map[string]bool
+	oauth      map[string]bool
 	logger     zerolog.Logger
 }
 
-func NewIntegrations(db *pgxpool.Pool, conns []connectors.Connector, configured map[string]bool, logger zerolog.Logger) *IntegrationsHandler {
+func NewIntegrations(db *pgxpool.Pool, conns []connectors.Connector, configured map[string]bool, oauthConfigured map[string]bool, logger zerolog.Logger) *IntegrationsHandler {
 	m := make(map[string]connectors.Connector, len(conns))
 	for _, c := range conns {
 		m[c.Name()] = c
@@ -28,6 +29,7 @@ func NewIntegrations(db *pgxpool.Pool, conns []connectors.Connector, configured 
 		db:         db,
 		connectors: m,
 		configured: configured,
+		oauth:      oauthConfigured,
 		logger:     logger.With().Str("handler", "integrations").Logger(),
 	}
 }
@@ -109,14 +111,15 @@ var integrationMeta_ = map[string]integrationMeta{
 }
 
 type IntegrationStatus struct {
-	Name           string     `json:"name"`
-	DisplayName    string     `json:"display_name"`
-	Description    string     `json:"description"`
-	Configured     bool       `json:"configured"`
-	Enabled        bool       `json:"enabled"`
-	HasCredentials bool       `json:"has_credentials"`
-	LastSyncAt     *time.Time `json:"last_sync_at"`
-	RecordCount    int        `json:"record_count"`
+	Name            string     `json:"name"`
+	DisplayName     string     `json:"display_name"`
+	Description     string     `json:"description"`
+	Configured      bool       `json:"configured"`
+	OAuthConfigured bool       `json:"oauth_configured"`
+	Enabled         bool       `json:"enabled"`
+	HasCredentials  bool       `json:"has_credentials"`
+	LastSyncAt      *time.Time `json:"last_sync_at"`
+	RecordCount     int        `json:"record_count"`
 }
 
 func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Request) {
@@ -170,14 +173,15 @@ func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Req
 		}
 
 		result = append(result, IntegrationStatus{
-			Name:           name,
-			DisplayName:    meta.displayName,
-			Description:    meta.description,
-			Configured:     h.configured[name],
-			Enabled:        enabled,
-			HasCredentials: hasCredentials[name],
-			LastSyncAt:     state.lastSyncAt,
-			RecordCount:    count,
+			Name:            name,
+			DisplayName:     meta.displayName,
+			Description:     meta.description,
+			Configured:      h.configured[name],
+			OAuthConfigured: h.oauth[name],
+			Enabled:         enabled,
+			HasCredentials:  hasCredentials[name],
+			LastSyncAt:      state.lastSyncAt,
+			RecordCount:     count,
 		})
 	}
 

@@ -72,9 +72,14 @@ func main() {
 	activeConnectors = append(activeConnectors, habitify)
 	log.Info().Msg("habitify connector enabled")
 
-	todoist := connectors.NewTodoist(pool, log.Logger)
+	tc := cfg.Connectors.Todoist
+	todoist := connectors.NewTodoist(tc.ClientID, tc.ClientSecret, tc.RedirectURI, pool, log.Logger)
 	activeConnectors = append(activeConnectors, todoist)
-	log.Info().Msg("todoist connector enabled")
+	if todoist.OAuthConfigured() {
+		log.Info().Msg("todoist connector enabled (OAuth + token)")
+	} else {
+		log.Info().Msg("todoist connector enabled (token-only, no OAuth)")
+	}
 
 	hevy := connectors.NewHevy(pool, log.Logger)
 	activeConnectors = append(activeConnectors, hevy)
@@ -217,7 +222,7 @@ func main() {
 	r.Post("/api/v1/auth/login", usersHandler.Login)
 	r.Post("/api/v1/auth/logout", usersHandler.Logout)
 
-	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, zenmoney, googleCalConn, notionConn, log.Logger)
+	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, zenmoney, googleCalConn, notionConn, todoist, log.Logger)
 
 	// Protected routes
 	r.Group(func(r chi.Router) {
@@ -242,7 +247,14 @@ func main() {
 			"google_calendar": gc.ClientID != "" && gc.ClientSecret != "",
 			"notion":          true,
 		}
-		integrationsHandler := handlers.NewIntegrations(pool, activeConnectors, configuredMap, log.Logger)
+		oauthConfiguredMap := map[string]bool{
+			"strava":          cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
+			"fatsecret":       fsc.ClientID != "" && fsc.ClientSecret != "",
+			"google_calendar": gc.ClientID != "" && gc.ClientSecret != "",
+			"notion":          nc.ClientID != "" && nc.ClientSecret != "",
+			"todoist":         todoist.OAuthConfigured(),
+		}
+		integrationsHandler := handlers.NewIntegrations(pool, activeConnectors, configuredMap, oauthConfiguredMap, log.Logger)
 		r.Get("/api/v1/integrations", integrationsHandler.GetIntegrations)
 		r.Post("/api/v1/integrations/{name}/toggle", integrationsHandler.ToggleIntegration)
 		r.Post("/api/v1/integrations/myfitnesspal/token", integrationsHandler.SaveMFPToken)
@@ -315,6 +327,10 @@ func main() {
 		if nc.ClientID != "" && nc.ClientSecret != "" {
 			r.Get("/api/v1/auth/notion", authHandler.NotionAuthorize)
 			r.Get("/api/v1/auth/notion/callback", authHandler.NotionCallback)
+		}
+		if todoist.OAuthConfigured() {
+			r.Get("/api/v1/auth/todoist", authHandler.TodoistAuthorize)
+			r.Get("/api/v1/auth/todoist/callback", authHandler.TodoistCallback)
 		}
 		healthWebhook := handlers.NewHealthWebhook(pool, log.Logger)
 		r.Get("/api/v1/health/apikey", healthWebhook.GetAPIKey)

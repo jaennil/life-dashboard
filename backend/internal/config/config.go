@@ -27,6 +27,13 @@ type ConnectorsConfig struct {
 	FatSecret      FatSecretConfig      `mapstructure:"fatsecret"`
 	GoogleCalendar GoogleCalendarConfig `mapstructure:"google_calendar"`
 	Notion         NotionConfig         `mapstructure:"notion"`
+	Todoist        TodoistConfig        `mapstructure:"todoist"`
+}
+
+type TodoistConfig struct {
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	RedirectURI  string `mapstructure:"redirect_uri"`
 }
 
 type NotionConfig struct {
@@ -130,6 +137,10 @@ func Load() (*Config, error) {
 	viper.BindEnv("connectors.notion.client_secret", "NOTION_CLIENT_SECRET")
 	viper.BindEnv("connectors.notion.redirect_uri", "NOTION_REDIRECT_URI")
 	viper.SetDefault("connectors.notion.redirect_uri", "http://localhost:8080/api/v1/auth/notion/callback")
+	viper.BindEnv("connectors.todoist.client_id", "TODOIST_CLIENT_ID")
+	viper.BindEnv("connectors.todoist.client_secret", "TODOIST_CLIENT_SECRET")
+	viper.BindEnv("connectors.todoist.redirect_uri", "TODOIST_REDIRECT_URI")
+	viper.SetDefault("connectors.todoist.redirect_uri", "http://localhost:8080/api/v1/auth/todoist/callback")
 	viper.BindEnv("unleash.url", "UNLEASH_URL")
 	viper.BindEnv("unleash.api_token", "UNLEASH_API_TOKEN")
 	viper.SetDefault("unleash.url", "http://unleash.unleash.svc.cluster.local:4242/api")

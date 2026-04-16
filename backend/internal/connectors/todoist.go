@@ -18,6 +18,9 @@ import (
 )
 
 const (
+	todoistAuthURL             = "https://app.todoist.com/oauth/authorize"
+	todoistOAuthTokenURL       = "https://api.todoist.com/oauth/access_token"
+	todoistOAuthScope          = "data:read"
 	todoistSyncURL             = "https://api.todoist.com/api/v1/sync"
 	todoistCompletedURL        = "https://api.todoist.com/api/v1/tasks/completed/by_completion_date"
 	todoistInitialBackfillDays = 60
@@ -87,20 +90,104 @@ type todoistCompletionEvent struct {
 }
 
 type TodoistConnector struct {
-	db     *pgxpool.Pool
-	client *http.Client
-	logger zerolog.Logger
+	clientID     string
+	clientSecret string
+	redirectURI  string
+	db           *pgxpool.Pool
+	client       *http.Client
+	logger       zerolog.Logger
 }
 
-func NewTodoist(db *pgxpool.Pool, logger zerolog.Logger) *TodoistConnector {
+func NewTodoist(clientID, clientSecret, redirectURI string, db *pgxpool.Pool, logger zerolog.Logger) *TodoistConnector {
 	return &TodoistConnector{
-		db:     db,
-		client: &http.Client{Timeout: todoistRequestTimeout},
-		logger: logger.With().Str("connector", "todoist").Logger(),
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		redirectURI:  redirectURI,
+		db:           db,
+		client:       &http.Client{Timeout: todoistRequestTimeout},
+		logger:       logger.With().Str("connector", "todoist").Logger(),
 	}
 }
 
 func (t *TodoistConnector) Name() string { return "todoist" }
+
+func (t *TodoistConnector) OAuthConfigured() bool {
+	return strings.TrimSpace(t.clientID) != "" && strings.TrimSpace(t.clientSecret) != ""
+}
+
+func (t *TodoistConnector) AuthURL(state string) string {
+	params := url.Values{
+		"client_id": {t.clientID},
+		"scope":     {todoistOAuthScope},
+		"state":     {state},
+	}
+	if strings.TrimSpace(t.redirectURI) != "" {
+		params.Set("redirect_uri", t.redirectURI)
+	}
+	return todoistAuthURL + "?" + params.Encode()
+}
+
+func (t *TodoistConnector) ExchangeCode(ctx context.Context, userID, code string) error {
+	if !t.OAuthConfigured() {
+		return fmt.Errorf("todoist oauth is not configured")
+	}
+
+	form := url.Values{
+		"client_id":     {t.clientID},
+		"client_secret": {t.clientSecret},
+		"code":          {code},
+	}
+	if strings.TrimSpace(t.redirectURI) != "" {
+		form.Set("redirect_uri", t.redirectURI)
+	}
+
+	resp, err := t.client.PostForm(todoistOAuthTokenURL, form)
+	if err != nil {
+		return fmt.Errorf("todoist token request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("todoist token exchange returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var result struct {
+		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("decode todoist token response: %w", err)
+	}
+	if strings.TrimSpace(result.AccessToken) == "" {
+		return fmt.Errorf("todoist token response missing access_token")
+	}
+
+	_, err = t.db.Exec(ctx, `
+		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, updated_at, user_id)
+		VALUES ('todoist', $1, '', NOW() + INTERVAL '100 years', NOW(), $2)
+		ON CONFLICT (source, user_id) DO UPDATE SET
+			access_token = EXCLUDED.access_token,
+			refresh_token = EXCLUDED.refresh_token,
+			expires_at = EXCLUDED.expires_at,
+			updated_at = NOW()
+	`, result.AccessToken, userID)
+	if err != nil {
+		return fmt.Errorf("save todoist token: %w", err)
+	}
+
+	_, err = t.db.Exec(ctx, `
+		INSERT INTO sync_state (source, enabled, updated_at, user_id)
+		VALUES ('todoist', TRUE, NOW(), $1)
+		ON CONFLICT (source, user_id) DO UPDATE SET enabled = TRUE, updated_at = NOW()
+	`, userID)
+	if err != nil {
+		return fmt.Errorf("enable todoist sync state: %w", err)
+	}
+
+	t.logger.Info().Str("user_id", userID).Msg("todoist authorized")
+	return nil
+}
 
 func (t *TodoistConnector) Sync(ctx context.Context, userID string) error {
 	token, err := t.loadToken(ctx, userID)

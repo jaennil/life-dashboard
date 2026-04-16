@@ -207,6 +207,7 @@ export interface Integration {
   display_name: string
   description: string
   configured: boolean
+  oauth_configured: boolean
   enabled: boolean
   has_credentials: boolean
   last_sync_at: string | null

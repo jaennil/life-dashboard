@@ -22,16 +22,18 @@ type AuthHandler struct {
 	zenmoney       *connectors.ZenmoneyConnector
 	googleCalendar *connectors.GoogleCalendarConnector
 	notion         *connectors.NotionConnector
+	todoist        *connectors.TodoistConnector
 	logger         zerolog.Logger
 }
 
-func NewAuth(strava *connectors.StravaConnector, fatsecret *connectors.FatSecretConnector, zenmoney *connectors.ZenmoneyConnector, googleCalendar *connectors.GoogleCalendarConnector, notion *connectors.NotionConnector, logger zerolog.Logger) *AuthHandler {
+func NewAuth(strava *connectors.StravaConnector, fatsecret *connectors.FatSecretConnector, zenmoney *connectors.ZenmoneyConnector, googleCalendar *connectors.GoogleCalendarConnector, notion *connectors.NotionConnector, todoist *connectors.TodoistConnector, logger zerolog.Logger) *AuthHandler {
 	return &AuthHandler{
 		strava:         strava,
 		fatsecret:      fatsecret,
 		zenmoney:       zenmoney,
 		googleCalendar: googleCalendar,
 		notion:         notion,
+		todoist:        todoist,
 		logger:         logger.With().Str("handler", "auth").Logger(),
 	}
 }
@@ -224,6 +226,53 @@ func (h *AuthHandler) NotionCallback(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	redirectToSettingsAfterSync(w, r, "notion")
+}
+
+// GET /api/v1/auth/todoist — redirect to Todoist OAuth
+func (h *AuthHandler) TodoistAuthorize(w http.ResponseWriter, r *http.Request) {
+	if h.todoist == nil || !h.todoist.OAuthConfigured() {
+		http.Error(w, "todoist oauth not configured", http.StatusServiceUnavailable)
+		return
+	}
+	state, err := issueOAuthState(w, r, "todoist")
+	if err != nil {
+		h.logger.Error().Err(err).Msg("issue todoist oauth state")
+		http.Error(w, "failed to start authorization", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, h.todoist.AuthURL(state), http.StatusTemporaryRedirect)
+}
+
+// GET /api/v1/auth/todoist/callback — exchange code for token
+func (h *AuthHandler) TodoistCallback(w http.ResponseWriter, r *http.Request) {
+	if err := verifyOAuthState(w, r, "todoist"); err != nil {
+		h.logger.Warn().Err(err).Msg("todoist callback invalid state")
+		http.Error(w, "invalid oauth state", http.StatusBadRequest)
+		return
+	}
+
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		h.logger.Error().Str("error", r.URL.Query().Get("error")).Msg("todoist callback missing code")
+		http.Error(w, "missing code", http.StatusBadRequest)
+		return
+	}
+
+	todoistUserID := r.Context().Value(middleware.UserIDKey).(string)
+	if err := h.todoist.ExchangeCode(r.Context(), todoistUserID, code); err != nil {
+		h.logger.Error().Err(err).Msg("todoist token exchange failed")
+		http.Error(w, "authorization failed", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().Str("user_id", todoistUserID).Msg("todoist authorized, starting sync")
+	go func() {
+		if err := h.todoist.Sync(context.Background(), todoistUserID); err != nil {
+			h.logger.Error().Err(err).Msg("todoist initial sync failed")
+		}
+	}()
+
+	redirectToSettingsAfterSync(w, r, "todoist")
 }
 
 // GET /api/v1/auth/google — redirect to Google OAuth

@@ -1,11 +1,36 @@
 package connectors
 
 import (
+	"net/url"
 	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
 )
+
+func TestTodoistAuthURLIncludesStateAndRedirectURI(t *testing.T) {
+	connector := NewTodoist("client-id", "client-secret", "https://lifedash.dubrovskih.ru/api/v1/auth/todoist/callback", nil, zerolog.Nop())
+
+	authURL := connector.AuthURL("state-123")
+	parsed, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatalf("parse auth url: %v", err)
+	}
+
+	query := parsed.Query()
+	if got := query.Get("client_id"); got != "client-id" {
+		t.Fatalf("unexpected client_id %q", got)
+	}
+	if got := query.Get("scope"); got != todoistOAuthScope {
+		t.Fatalf("unexpected scope %q", got)
+	}
+	if got := query.Get("state"); got != "state-123" {
+		t.Fatalf("unexpected state %q", got)
+	}
+	if got := query.Get("redirect_uri"); got != "https://lifedash.dubrovskih.ru/api/v1/auth/todoist/callback" {
+		t.Fatalf("unexpected redirect_uri %q", got)
+	}
+}
 
 func TestTodoistIsRecurringHabit(t *testing.T) {
 	item := todoistItem{ID: "1", Content: "Brush teeth", Due: &todoistDue{Recurring: true}}
@@ -37,7 +62,7 @@ func TestTodoistTimeOfDay(t *testing.T) {
 }
 
 func TestTodoistSyncStart(t *testing.T) {
-	connector := NewTodoist(nil, zerolog.Nop())
+	connector := NewTodoist("", "", "", nil, zerolog.Nop())
 	now := time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)
 
 	start := connector.syncStart(time.Time{}, now)

@@ -10,6 +10,7 @@ const OAUTH_INTEGRATIONS: Record<string, string> = {
   fatsecret: '/api/v1/auth/fatsecret',
   google_calendar: '/api/v1/auth/google',
   notion: '/api/v1/auth/notion',
+  todoist: '/api/v1/auth/todoist',
 }
 
 const MANAGED_CONNECTION_INTEGRATIONS = new Set(['myfitnesspal'])
@@ -29,7 +30,7 @@ const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.Reac
   },
   todoist: {
     placeholder: 'Personal API token от Todoist',
-    help: <>Откройте Todoist → Settings → Integrations → Developer и скопируйте personal API token. Подробности есть в <a href="https://developer.todoist.com/rest/v2/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">официальной REST API документации</a>.</>,
+    help: <>Fallback без OAuth: откройте Todoist → Settings → Integrations → Developer и скопируйте personal API token. Подробности есть в <a href="https://developer.todoist.com/api/v1/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">официальной API документации</a>.</>,
   },
   notion: {
     placeholder: 'Notion Integration Token (ntn_...)',
@@ -124,7 +125,7 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
     }
   }
 
-  const isOAuth = !!OAUTH_INTEGRATIONS[integration.name]
+  const isOAuth = !!OAUTH_INTEGRATIONS[integration.name] && integration.oauth_configured
   const tokenMeta = TOKEN_INTEGRATIONS[integration.name]
   const isDual = isOAuth && !!tokenMeta
   const requiresCredentials = isOAuth || !!tokenMeta || MANAGED_CONNECTION_INTEGRATIONS.has(integration.name)
