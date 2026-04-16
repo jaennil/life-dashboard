@@ -25,7 +25,7 @@ const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.Reac
   },
   habitify: {
     placeholder: 'API ключ от Habitify',
-    help: <>Откройте Habitify → Settings → API Key и скопируйте ключ. Подробности есть в <a href="https://docs.habitify.me/authentication" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">официальной документации API</a>.</>,
+    help: <>Откройте Habitify → Settings → API Key и скопируйте ключ. Подробности есть в <a href="https://docs.habitify.me/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">официальной документации API</a>.</>,
   },
   notion: {
     placeholder: 'Notion Integration Token (ntn_...)',
