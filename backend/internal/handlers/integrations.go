@@ -40,11 +40,12 @@ type integrationMeta struct {
 	countQuery  string
 }
 
-var knownIntegrations = []string{"strava", "hevy", "habitify", "todoist", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion"}
+var knownIntegrations = []string{"strava", "hevy", "apple_health", "habitify", "todoist", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion"}
 
 var personalIntegrations = map[string]bool{
 	"strava":          true,
 	"hevy":            true,
+	"apple_health":    true,
 	"habitify":        true,
 	"todoist":         true,
 	"zenmoney":        true,
@@ -72,6 +73,11 @@ var integrationMeta_ = map[string]integrationMeta{
 		displayName: "Hevy",
 		description: "Тренировки с упражнениями и весами",
 		countQuery:  "SELECT COUNT(*) FROM workouts WHERE user_id = $1",
+	},
+	"apple_health": {
+		displayName: "Apple Health",
+		description: "Фактические метрики здоровья: шаги, сон, пульс, вес",
+		countQuery:  "SELECT (SELECT COUNT(*) FROM biometrics WHERE source='apple_health' AND user_id = $1) + (SELECT COUNT(*) FROM sleep_sessions WHERE source='apple_health' AND user_id = $1)",
 	},
 	"habitify": {
 		displayName: "Habitify",
@@ -156,6 +162,9 @@ func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Req
 		}
 		tokenRows.Close()
 	}
+	if hasStoredCredentials(ctx, h.db, appleHealthSource, userID) {
+		hasCredentials[appleHealthSource] = true
+	}
 
 	result := make([]IntegrationStatus, 0, len(knownIntegrations))
 	for _, name := range knownIntegrations {
@@ -221,15 +230,27 @@ func (h *IntegrationsHandler) ToggleIntegration(w http.ResponseWriter, r *http.R
 
 	credentialsDeleted := false
 	if !body.Enabled && personalIntegrations[name] {
-		if _, err := tx.Exec(ctx, `
-			DELETE FROM oauth_tokens
-			WHERE source = $1 AND user_id = $2
-		`, name, userID); err != nil {
-			h.logger.Error().Err(err).Str("name", name).Msg("delete integration credentials")
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+		if name == appleHealthSource {
+			if _, err := tx.Exec(ctx, `
+				DELETE FROM api_keys
+				WHERE user_id = $1
+			`, userID); err != nil {
+				h.logger.Error().Err(err).Str("name", name).Msg("delete apple health api key")
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			credentialsDeleted = true
+		} else {
+			if _, err := tx.Exec(ctx, `
+				DELETE FROM oauth_tokens
+				WHERE source = $1 AND user_id = $2
+			`, name, userID); err != nil {
+				h.logger.Error().Err(err).Str("name", name).Msg("delete integration credentials")
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			credentialsDeleted = true
 		}
-		credentialsDeleted = true
 	}
 
 	_, err = tx.Exec(ctx, `
@@ -363,6 +384,14 @@ func hasIntegrationActivationState(ctx context.Context, db *pgxpool.Pool, source
 }
 
 func hasStoredCredentials(ctx context.Context, db *pgxpool.Pool, source string, userID string) bool {
+	if source == appleHealthSource {
+		var exists int
+		if err := db.QueryRow(ctx, `SELECT 1 FROM api_keys WHERE user_id = $1 LIMIT 1`, userID).Scan(&exists); err != nil {
+			return false
+		}
+		return true
+	}
+
 	query := `SELECT 1 FROM oauth_tokens WHERE source = $1 AND user_id = $2 LIMIT 1`
 	args := []any{source, userID}
 	if source == "notion" {

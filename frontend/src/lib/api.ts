@@ -234,6 +234,14 @@ export interface AILatestCheckup {
   generated_at?: string
 }
 
+export interface HealthAPIKeyInfo {
+  api_key: string
+  webhook_url: string
+  last_sync_at: string | null
+  metric_count: number
+  sleep_count: number
+}
+
 export const api = {
   getDashboardSummary: () => get<DashboardSummary>('/dashboard/summary'),
   getRecentTransactions: () => get<Transaction[]>('/dashboard/transactions'),
@@ -331,12 +339,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code }),
     }).then(async r => { if (!r.ok) throw new Error(await r.text()) }),
-  getAPIKey: () => get<{ api_key: string }>('/health/apikey'),
+  getAPIKey: () => get<HealthAPIKeyInfo>('/health/apikey'),
   generateAPIKey: () =>
     fetch(BASE + '/health/apikey', { method: 'POST' })
       .then(async r => {
         if (!r.ok) throw new Error(r.statusText)
-        return r.json() as Promise<{ api_key: string }>
+        return r.json() as Promise<HealthAPIKeyInfo>
       }),
   getWeather: (lat?: number, lon?: number, city?: string) => {
     const params = new URLSearchParams()

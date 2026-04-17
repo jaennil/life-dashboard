@@ -101,6 +101,42 @@ func (h *AIHandler) appendHealthContextInRange(ctx context.Context, sb *strings.
 		sb.WriteString("Пульс покоя: нет данных за период\n")
 	}
 
+	var avgHRV float64
+	var hrvCount int
+	h.db.QueryRow(ctx, `
+		SELECT COALESCE(AVG(value), 0), COUNT(*)
+		FROM biometrics
+		WHERE user_id = $1
+			AND metric_type = 'hrv'
+			AND timestamp >= $2
+			AND timestamp < $3
+	`, userID, start, end).Scan(&avgHRV, &hrvCount)
+	if hrvCount > 0 {
+		sb.WriteString(fmt.Sprintf("HRV: среднее %.0f ms\n", avgHRV))
+	} else {
+		sb.WriteString("HRV: нет данных за период\n")
+	}
+
+	var activeEnergy float64
+	var activeEnergyDays int
+	h.db.QueryRow(ctx, `
+		SELECT COALESCE(SUM(day_energy), 0), COUNT(*)
+		FROM (
+			SELECT DATE(timestamp) AS day, SUM(value) AS day_energy
+			FROM biometrics
+			WHERE user_id = $1
+				AND metric_type = 'active_energy'
+				AND timestamp >= $2
+				AND timestamp < $3
+			GROUP BY DATE(timestamp)
+		) energy
+	`, userID, start, end).Scan(&activeEnergy, &activeEnergyDays)
+	if activeEnergyDays > 0 {
+		sb.WriteString(fmt.Sprintf("Активная энергия: всего %.0f ккал за %d дн.\n", activeEnergy, activeEnergyDays))
+	} else {
+		sb.WriteString("Активная энергия: нет данных за период\n")
+	}
+
 	var sleepSessions int
 	var avgSleepMinutes float64
 	h.db.QueryRow(ctx, `

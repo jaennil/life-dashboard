@@ -96,12 +96,40 @@ func TestSelectAIContextScopeEnablesHabitsForRoutineQuestions(t *testing.T) {
 	}
 }
 
+func TestSelectAIContextScopeEnablesHealthForSleepQuestions(t *testing.T) {
+	scope := selectAIContextScope("как у меня со сном и пульсом по zepp за неделю?", nil)
+
+	if !scope.health {
+		t.Fatalf("expected health scope to be enabled")
+	}
+	if scope.finance || scope.calendar {
+		t.Fatalf("expected unrelated scopes to stay disabled, got %+v", scope)
+	}
+}
+
 func TestSelectAIContextScopeDefaultsToAllForGenericSummary(t *testing.T) {
 	scope := selectAIContextScope("что меня удивило в последнее время?", nil)
 
 	expected := defaultAIContextScope()
 	if scope != expected {
 		t.Fatalf("expected default all scope, got %+v", scope)
+	}
+}
+
+func TestNormalizeHealthMetricTypeAliases(t *testing.T) {
+	cases := map[string]string{
+		"Step Count":             "steps",
+		"body-mass":              "weight",
+		"heart_rate_bpm":         "heart_rate",
+		"Resting HeartRate":      "resting_heart_rate",
+		"Active Energy Burned":   "active_energy",
+		"Heart Rate Variability": "hrv",
+	}
+
+	for input, expected := range cases {
+		if got := normalizeHealthMetricType(input); got != expected {
+			t.Fatalf("expected %q -> %q, got %q", input, expected, got)
+		}
 	}
 }
 

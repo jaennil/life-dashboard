@@ -2,7 +2,7 @@ import { startTransition, useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
 import { cn, formatLastSyncAt } from '@/lib/utils'
-import { api, type Integration } from '@/lib/api'
+import { api, type HealthAPIKeyInfo, type Integration } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 
 const OAUTH_INTEGRATIONS: Record<string, string> = {
@@ -14,6 +14,7 @@ const OAUTH_INTEGRATIONS: Record<string, string> = {
 }
 
 const MANAGED_CONNECTION_INTEGRATIONS = new Set(['myfitnesspal'])
+const WEBHOOK_ONLY_INTEGRATIONS = new Set(['apple_health'])
 
 const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.ReactNode; extraField?: { key: string; placeholder: string } }> = {
   zenmoney: {
@@ -42,6 +43,7 @@ const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.Reac
 const ICONS: Record<string, string> = {
   strava: '🚴',
   hevy: '🏋️',
+  apple_health: '❤️',
   habitify: '✅',
   todoist: '☑️',
   zenmoney: '💰',
@@ -55,6 +57,7 @@ function fmtCount(n: number, name: string) {
   const labels: Record<string, [string, string, string]> = {
     strava:   ['активность', 'активности', 'активностей'],
     hevy:     ['тренировка', 'тренировки', 'тренировок'],
+    apple_health: ['запись здоровья', 'записи здоровья', 'записей здоровья'],
     habitify: ['привычка', 'привычки', 'привычек'],
     todoist: ['привычка', 'привычки', 'привычек'],
     zenmoney: ['транзакция', 'транзакции', 'транзакций'],
@@ -121,7 +124,8 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
   const isOAuth = !!OAUTH_INTEGRATIONS[integration.name] && integration.oauth_configured
   const tokenMeta = TOKEN_INTEGRATIONS[integration.name]
   const isDual = isOAuth && !!tokenMeta
-  const requiresCredentials = isOAuth || !!tokenMeta || MANAGED_CONNECTION_INTEGRATIONS.has(integration.name)
+  const isWebhookOnly = WEBHOOK_ONLY_INTEGRATIONS.has(integration.name)
+  const requiresCredentials = isOAuth || !!tokenMeta || MANAGED_CONNECTION_INTEGRATIONS.has(integration.name) || isWebhookOnly
   const canSelfConnect = isOAuth || !!tokenMeta
   const hasSyncData = integration.record_count > 0 || !!integration.last_sync_at
   const isConnected = requiresCredentials ? integration.has_credentials : integration.enabled
@@ -337,7 +341,7 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
           )}
         </div>
 
-        {isActive && (
+        {isActive && !isWebhookOnly && (
           <button
             onClick={handleSync}
             disabled={syncing || showSyncPending}
@@ -346,6 +350,11 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
             <RefreshCw className={cn('w-3 h-3', (syncing || showSyncPending) && 'animate-spin')} />
             {syncing || showSyncPending ? 'Синхронизация...' : 'Синхронизировать'}
           </button>
+        )}
+        {isActive && isWebhookOnly && (
+          <span className="text-xs text-muted-foreground px-3 py-1.5">
+            Обновляется входящим webhook
+          </span>
         )}
       </div>
     </div>
@@ -527,24 +536,59 @@ function TOTPSection() {
   )
 }
 
-function AppleHealthSection() {
-  const [apiKey, setApiKey] = useState('')
+function AppleHealthSection({ onChanged, reloadKey }: { onChanged: () => void; reloadKey: number }) {
+  const [info, setInfo] = useState<HealthAPIKeyInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
 
+  function load() {
+    setLoading(true)
+    api.getAPIKey()
+      .then(setInfo)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+
   useEffect(() => {
-    api.getAPIKey().then(d => setApiKey(d.api_key)).catch(() => {}).finally(() => setLoading(false))
-  }, [])
+    load()
+  }, [reloadKey])
 
   async function generate() {
     setGenerating(true)
     try {
       const d = await api.generateAPIKey()
-      setApiKey(d.api_key)
+      setInfo(d)
+      onChanged()
     } catch { /* ignore */ } finally {
       setGenerating(false)
     }
   }
+
+  const apiKey = info?.api_key ?? ''
+  const webhookURL = info?.webhook_url || 'https://lifedash.dubrovskih.ru/api/v1/webhook/health'
+  const sampleMetricPayload = JSON.stringify({
+    api_key: 'ваш_ключ',
+    source: 'apple_health',
+    metrics: [
+      { type: 'steps', value: 8500, unit: 'count', date: '2026-04-17' },
+      { type: 'resting_heart_rate', value: 58, unit: 'bpm', date: '2026-04-17T09:00:00+03:00' },
+    ],
+  })
+  const sampleSleepPayload = JSON.stringify({
+    api_key: 'ваш_ключ',
+    source: 'apple_health',
+    sleep: [
+      {
+        date: '2026-04-17',
+        start_date: '2026-04-16T23:40:00+03:00',
+        end_date: '2026-04-17T07:20:00+03:00',
+        total_sleep_minutes: 460,
+        deep_sleep_minutes: 80,
+        rem_sleep_minutes: 95,
+        awake_minutes: 20,
+      },
+    ],
+  })
 
   return (
     <div>
@@ -553,8 +597,8 @@ function AppleHealthSection() {
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-xl shrink-0">❤️</div>
           <div>
-            <p className="text-sm font-semibold text-foreground">iOS Shortcuts → Webhook</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Шаги, вес, пульс через бесплатные Быстрые команды iOS</p>
+            <p className="text-sm font-semibold text-foreground">Apple Health / Zepp → Webhook</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Факт по шагам, сну, пульсу, HRV и весу. Zepp сначала пишет в Apple Health, потом Shortcut отправляет сюда.</p>
           </div>
         </div>
 
@@ -562,16 +606,37 @@ function AppleHealthSection() {
           <div className="h-8 animate-pulse bg-muted/30 rounded" />
         ) : apiKey ? (
           <div className="flex flex-col gap-2 border-t pt-3">
-            <p className="text-xs font-medium text-foreground">API Key:</p>
-            <code className="text-xs bg-muted px-3 py-2 rounded-lg font-mono break-all select-all">{apiKey}</code>
+            <div className="grid gap-2 md:grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-medium text-foreground">Webhook URL</p>
+                <code className="text-xs bg-muted px-3 py-2 rounded-lg font-mono break-all select-all">{webhookURL}</code>
+              </div>
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-medium text-foreground">API Key</p>
+                <code className="text-xs bg-muted px-3 py-2 rounded-lg font-mono break-all select-all">{apiKey}</code>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span>Синхр.: {formatLastSyncAt(info?.last_sync_at ?? null)}</span>
+              <span>•</span>
+              <span>{(info?.metric_count ?? 0).toLocaleString('ru-RU')} метрик</span>
+              <span>•</span>
+              <span>{(info?.sleep_count ?? 0).toLocaleString('ru-RU')} записей сна</span>
+            </div>
             <div className="text-xs text-muted-foreground flex flex-col gap-1 mt-1">
               <p className="font-medium text-foreground">Инструкция:</p>
-              <p>1. Откройте <a href="https://www.icloud.com/shortcuts/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Быстрые команды</a> на iPhone</p>
-              <p>2. Создайте Shortcut: Find Health Samples → Steps/Weight → Get Contents of URL</p>
-              <p>3. POST на <code className="bg-muted px-1 rounded">https://lifedash.dubrovskih.ru/api/v1/webhook/health</code></p>
-              <p>4. JSON body: <code className="bg-muted px-1 rounded">{'{"api_key":"ваш_ключ","data":[{"type":"steps","value":8500,"date":"2026-04-01"}]}'}</code></p>
-              <p>5. Настройте Automation для ежедневного запуска</p>
+              <p>1. Zepp → Profile → Add accounts / Apple Health, включить запись нужных типов данных в Health.</p>
+              <p>2. iPhone → Быстрые команды → Automation, запускать ежедневно после пробуждения и вечером.</p>
+              <p>3. В Shortcut собрать Health Samples и отправить через Get Contents of URL: Method POST, Header Content-Type = application/json.</p>
+              <p>4. Поддержанные метрики: steps, weight, heart_rate, resting_heart_rate, hrv, active_energy, walking_running_distance, body_fat, spo2, vo2max.</p>
             </div>
+            <details className="text-xs text-muted-foreground rounded-lg border bg-muted/20 p-3">
+              <summary className="cursor-pointer text-foreground font-medium">Примеры JSON payload</summary>
+              <div className="mt-2 flex flex-col gap-2">
+                <code className="block bg-background px-3 py-2 rounded font-mono break-all select-all">{sampleMetricPayload}</code>
+                <code className="block bg-background px-3 py-2 rounded font-mono break-all select-all">{sampleSleepPayload}</code>
+              </div>
+            </details>
             <button onClick={generate} disabled={generating}
               className="text-xs text-muted-foreground hover:text-foreground transition-colors mt-1 self-start">
               {generating ? '...' : 'Перегенерировать ключ'}
@@ -594,6 +659,7 @@ function AppleHealthSection() {
 export function Settings() {
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [loading, setLoading] = useState(true)
+  const [healthReloadKey, setHealthReloadKey] = useState(0)
   const location = useLocation()
   const navigate = useNavigate()
   const syncTarget = new URLSearchParams(location.search).get('sync')
@@ -700,6 +766,9 @@ export function Settings() {
   async function handleToggle(name: string, enabled: boolean) {
     await api.toggleIntegration(name, enabled)
     await load()
+    if (name === 'apple_health') {
+      setHealthReloadKey(key => key + 1)
+    }
   }
 
   async function handleSync(name: string) {
@@ -719,7 +788,7 @@ export function Settings() {
         <TOTPSection />
       </div>
 
-      <AppleHealthSection />
+      <AppleHealthSection onChanged={load} reloadKey={healthReloadKey} />
 
       <div>
         <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Интеграции</h2>

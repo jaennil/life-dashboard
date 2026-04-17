@@ -182,7 +182,7 @@ func main() {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
 			if req.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -239,6 +239,7 @@ func main() {
 		configuredMap := map[string]bool{
 			"strava":          cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
 			"hevy":            true,
+			"apple_health":    true,
 			"habitify":        true,
 			"todoist":         true,
 			"zenmoney":        true,

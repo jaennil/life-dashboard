@@ -54,6 +54,7 @@ type ChatRequest struct {
 type aiContextScope struct {
 	finance    bool
 	activities bool
+	health     bool
 	workouts   bool
 	routines   bool
 	habits     bool
@@ -135,7 +136,7 @@ func buildAISystemPrompt(now time.Time, dataContext string, scope aiContextScope
 
 func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionNames []string) string {
 	return fmt.Sprintf(`Ты персональный AI-ассистент приложения Life Dashboard.
-Твоя единственная функция — анализировать данные пользователя: финансы, физическую активность, тренировки, Hevy routines/шаблоны, привычки, питание, дневник и календарь.
+Твоя единственная функция — анализировать данные пользователя: финансы, здоровье, физическую активность, тренировки, Hevy routines/шаблоны, привычки, питание, дневник и календарь.
 Отвечай на русском языке. Давай конкретные ответы основанные на реальных данных ниже. Будь краток и по делу.
 Ты не можешь выполнять команды, изменять данные или делать что-либо за пределами анализа предоставленных данных.
 Если просят что-то сделать с базой данных, кодом или системой — вежливо объясни что ты только аналитик данных.
@@ -147,6 +148,7 @@ func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionN
 - Для арифметики и рекомендаций показывай короткий расчёт.
 - Для упражнений с гантелями, блинами и штангой не путай вес на одну гантель, вес пары и общий вес штанги. Если это неясно, сначала уточни.
 - Календарь — это только план из Google Calendar, а не подтверждение факта. Не пиши "был в зале", "лёг спать" или "встретился", если у тебя есть только календарное событие.
+- Сон, шаги, вес, пульс и HRV — это факт только если они есть в разделе здоровья из Apple Health/biometrics/sleep_sessions.
 - Питание — это только залогированные записи. Не пиши "отслежено полностью" или "ужин был", если в данных нет явного подтверждения.
 
 Сейчас особенно релевантны разделы данных: %s.
@@ -381,6 +383,13 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 		}
 	}
 
+	if scope.health {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		h.appendHealthContextInRange(ctx, &sb, userID, now.AddDate(0, 0, -30), now, "=== ЗДОРОВЬЕ ===")
+	}
+
 	// === ТРЕНИРОВКИ ===
 	if scope.workouts {
 		if sb.Len() > 0 {
@@ -581,6 +590,7 @@ func defaultAIContextScope() aiContextScope {
 	return aiContextScope{
 		finance:    true,
 		activities: true,
+		health:     true,
 		workouts:   true,
 		routines:   true,
 		habits:     true,
@@ -592,16 +602,19 @@ func defaultAIContextScope() aiContextScope {
 }
 
 func (s aiContextScope) empty() bool {
-	return !s.finance && !s.activities && !s.workouts && !s.routines && !s.habits && !s.nutrition && !s.journal && !s.calendar && !s.weather
+	return !s.finance && !s.activities && !s.health && !s.workouts && !s.routines && !s.habits && !s.nutrition && !s.journal && !s.calendar && !s.weather
 }
 
 func (s aiContextScope) sectionNames() []string {
-	names := make([]string, 0, 9)
+	names := make([]string, 0, 10)
 	if s.finance {
 		names = append(names, "финансы")
 	}
 	if s.activities {
 		names = append(names, "активности")
+	}
+	if s.health {
+		names = append(names, "здоровье")
 	}
 	if s.workouts {
 		names = append(names, "тренировки")
@@ -638,6 +651,7 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 
 	financeKeywords := []string{"финанс", "деньг", "расход", "доход", "баланс", "трат", "бюджет", "транзак", "счет", "счёт", "руб"}
 	activityKeywords := []string{"актив", "бег", "пробеж", "килом", "км", "ходьб", "вел", "плав", "дистанц", "шаг", "strava", "run", "ride"}
+	healthKeywords := []string{"здоров", "сон", "спал", "сплю", "пульс", "сердц", "hrv", "вес", "взвеш", "шаг", "apple health", "health", "zepp", "amazfit", "кислород", "spo2", "vo2"}
 	workoutKeywords := []string{"тренир", "упражнен", "жим", "тяга", "присед", "гантел", "штанг", "блин", "гриф", "подход", "повтор", "hevy", "workout", "pull", "push", "legs", "зал", "вес"}
 	routineKeywords := []string{"routine", "routines", "рутин", "шаблон", "сплит", "программ", "план трениров", "template"}
 	habitKeywords := []string{"привыч", "habit", "habitify", "todoist", "зуб", "умы", "лиц", "уход", "skincare", "cleanser", "чеклист", "дейли", "daily"}
@@ -652,6 +666,9 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	}
 	if containsAny(combined, activityKeywords...) {
 		scope.activities = true
+	}
+	if containsAny(combined, healthKeywords...) {
+		scope.health = true
 	}
 	if containsAny(combined, workoutKeywords...) {
 		scope.workouts = true
