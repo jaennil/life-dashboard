@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Wallet, Dumbbell, TrendingUp, TrendingDown, Zap, Route, Droplets, Wind, MapPin, LocateFixed, Search, X } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
-import { cn } from '@/lib/utils'
+import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type DashboardSummary, type Transaction, type WeatherData, type Integration } from '@/lib/api'
 
 const LOC_KEY = 'weather_location'
@@ -320,6 +320,7 @@ export function Dashboard() {
   const enabledDashboardSources = integrations.filter(i =>
     (i.name === 'zenmoney' || i.name === 'strava' || i.name === 'hevy') && i.enabled
   )
+  const dashboardSyncCaption = syncCaptionForSources(enabledDashboardSources)
 
   async function handleSyncDashboard() {
     if (enabledDashboardSources.length === 0) return
@@ -364,6 +365,7 @@ export function Dashboard() {
         </div>
         <PageSyncButton
           label="Синхронизировать всё"
+          syncCaption={dashboardSyncCaption}
           syncing={syncing}
           disabled={enabledDashboardSources.length === 0}
           onClick={handleSyncDashboard}

@@ -7,7 +7,7 @@ import {
 import type { TooltipContentProps } from 'recharts/types/component/Tooltip'
 import { Route, Dumbbell, Flame, Heart, ChevronDown, ChevronUp, Timer } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
-import { cn } from '@/lib/utils'
+import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type FitnessSummary, type WeekStat, type Activity, type Workout, type Integration } from '@/lib/api'
 
 const ACTIVITY_ICONS: Record<string, string> = {
@@ -249,6 +249,7 @@ export function Fitness() {
   const stravaTotal = summary?.activities_total ?? activities.length
   const hevyTotal = summary?.workouts_total ?? workouts.length
   const activeIntegration = integrations.find(i => i.name === sourceTab)
+  const fitnessSyncCaption = syncCaptionForSources(activeIntegration?.enabled ? [activeIntegration] : [])
 
   const activityTypes = useMemo(() => {
     const types = new Set(activities.map(a => a.type))
@@ -345,6 +346,7 @@ export function Fitness() {
           </div>
           <PageSyncButton
             label={`Синхронизировать ${sourceTab === 'strava' ? 'Strava' : 'Hevy'}`}
+            syncCaption={fitnessSyncCaption}
             syncing={syncing}
             disabled={!activeIntegration?.enabled}
             onClick={handleSyncFitness}

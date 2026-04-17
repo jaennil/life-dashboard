@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatLastSyncAt } from '@/lib/utils'
 import { api, type Integration } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 
@@ -48,13 +48,6 @@ const ICONS: Record<string, string> = {
   myfitnesspal: '🥗',
   google_calendar: '📅',
   notion: '📓',
-}
-
-function fmtDate(iso: string | null) {
-  if (!iso) return 'никогда'
-  const d = new Date(iso)
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) +
-    ' в ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
 }
 
 function fmtCount(n: number, name: string) {
@@ -338,7 +331,7 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
             </div>
           ) : (requiresCredentials ? isConnected : integration.enabled) && (
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span>Синхр.: {fmtDate(integration.last_sync_at)}</span>
+              <span>Синхр.: {formatLastSyncAt(integration.last_sync_at)}</span>
               <span>•</span>
               <span>{fmtCount(integration.record_count, integration.name)}</span>
             </div>

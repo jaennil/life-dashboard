@@ -7,7 +7,7 @@ import {
 import type { TooltipContentProps } from 'recharts/types/component/Tooltip'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
-import { cn } from '@/lib/utils'
+import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type NutritionSummary, type NutritionDay, type Integration } from '@/lib/api'
 
 const MEAL_LABELS: Record<string, string> = {
@@ -159,6 +159,7 @@ export function Nutrition() {
   const nutritionSyncLabel = enabledNutritionIntegrations.length === 1
     ? `Синхронизировать ${enabledNutritionIntegrations[0].display_name}`
     : 'Синхронизировать питание'
+  const nutritionSyncCaption = syncCaptionForSources(enabledNutritionIntegrations)
 
   // Macro averages for summary
   const avgProtein = chartData.length ? chartData.reduce((s, d) => s + d.protein, 0) / chartData.length : 0
@@ -217,6 +218,7 @@ export function Nutrition() {
         <div className="flex flex-wrap items-center gap-2 xl:justify-end">
           <PageSyncButton
             label={nutritionSyncLabel}
+            syncCaption={nutritionSyncCaption}
             syncing={syncing}
             disabled={enabledNutritionIntegrations.length === 0}
             onClick={handleSyncNutrition}

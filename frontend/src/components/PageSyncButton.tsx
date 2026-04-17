@@ -3,15 +3,19 @@ import { cn } from '@/lib/utils'
 
 export function PageSyncButton({
   label,
+  syncCaption,
   syncing,
   disabled = false,
   onClick,
 }: {
   label: string
+  syncCaption?: string
   syncing: boolean
   disabled?: boolean
   onClick: () => void | Promise<void>
 }) {
+  const actionLabel = syncing ? 'Синхронизация...' : label
+
   return (
     <button
       onClick={() => void onClick()}
@@ -24,7 +28,14 @@ export function PageSyncButton({
       )}
     >
       <RefreshCw className={cn('h-3.5 w-3.5', syncing && 'animate-spin')} />
-      {syncing ? 'Синхронизация...' : label}
+      <span className="flex flex-col items-start gap-0.5 leading-none">
+        <span>{actionLabel}</span>
+        {syncCaption && (
+          <span className="text-[10px] font-normal leading-none text-current opacity-70">
+            {syncCaption}
+          </span>
+        )}
+      </span>
     </button>
   )
 }

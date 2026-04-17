@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
-import { cn } from '@/lib/utils'
+import { cn, syncCaptionForSources } from '@/lib/utils'
 import {
   api,
   type MonthStat, type Account, type FinanceTransaction,
@@ -281,6 +281,7 @@ export function Finance() {
 
   const currentMonth = monthly[monthly.length - 1]
   const zenmoneyIntegration = integrations.find(i => i.name === 'zenmoney')
+  const financeSyncCaption = syncCaptionForSources(zenmoneyIntegration?.enabled ? [zenmoneyIntegration] : [])
   const includedAccounts = accounts.filter(a => a.in_balance)
   const excludedAccounts = accounts.filter(a => !a.in_balance)
   const totalBalance = includedAccounts
@@ -314,6 +315,7 @@ export function Finance() {
         <div className="flex flex-wrap items-center gap-2 xl:justify-end">
           <PageSyncButton
             label="Синхронизировать ZenMoney"
+            syncCaption={financeSyncCaption}
             syncing={syncing}
             disabled={!zenmoneyIntegration?.enabled}
             onClick={handleSyncFinance}
