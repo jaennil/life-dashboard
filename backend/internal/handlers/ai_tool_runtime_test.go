@@ -15,7 +15,11 @@ func TestAIToolRunRenderIncludesToolMetadata(t *testing.T) {
 				Section:       "финансы",
 				ContextFormat: "plain_text_v1",
 				ContextText:   "=== ФИНАНСЫ ===\nБаланс: 100 ₽",
-				DurationMs:    125,
+				Data: map[string]any{
+					"current_balance_rub": 100.0,
+					"transaction_count":   3,
+				},
+				DurationMs: 125,
 			},
 			{
 				Name:          aiToolWorkoutOverview,
@@ -33,6 +37,8 @@ func TestAIToolRunRenderIncludesToolMetadata(t *testing.T) {
 		"\"tool_results\":",
 		"\"tool\": \"finance_overview\"",
 		"\"section\": \"финансы\"",
+		"\"data\": {",
+		"\"current_balance_rub\": 100",
 		"\"context_format\": \"plain_text_v1\"",
 		"\"duration_ms\": 125",
 		"=== ФИНАНСЫ ===",
@@ -93,6 +99,35 @@ func TestCheckupToolExecutionsOrder(t *testing.T) {
 		}
 		if executions[i].End == nil || !executions[i].End.Equal(window.End) {
 			t.Fatalf("expected execution %d end to be propagated", i)
+		}
+	}
+}
+
+func TestAIToolRunRenderSupportsStructuredDataWithoutText(t *testing.T) {
+	run := aiToolRun{
+		Results: []aiToolResult{
+			{
+				Name:          aiToolProductivityOverview,
+				Section:       "продуктивность",
+				ContextFormat: "none",
+				Data: map[string]any{
+					"active_total":  5,
+					"overdue_total": 2,
+				},
+				DurationMs: 15,
+			},
+		},
+	}
+
+	rendered := run.render()
+	for _, expected := range []string{
+		"\"tool\": \"productivity_overview\"",
+		"\"context_format\": \"none\"",
+		"\"active_total\": 5",
+		"\"overdue_total\": 2",
+	} {
+		if !strings.Contains(rendered, expected) {
+			t.Fatalf("expected rendered output to contain %q, got:\n%s", expected, rendered)
 		}
 	}
 }

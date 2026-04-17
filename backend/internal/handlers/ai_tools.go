@@ -334,33 +334,109 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 
 		switch call.Name {
 		case aiToolFinanceOverview:
+			end := time.Now()
+			start := end.AddDate(0, 0, -call.Days)
+			var cached *AIFinanceOverviewData
+			load := func() (AIFinanceOverviewData, error) {
+				if cached != nil {
+					return *cached, nil
+				}
+				data, err := h.buildFinanceOverviewInRange(ctx, userID, start, end)
+				if err != nil {
+					return AIFinanceOverviewData{}, err
+				}
+				cached = &data
+				return data, nil
+			}
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "финансы",
 				Days:    call.Days,
 				Run: func(sb *strings.Builder) error {
-					h.appendFinanceOverviewTool(ctx, sb, userID, call.Days)
+					data, err := load()
+					if err != nil {
+						return err
+					}
+					sb.WriteString(renderFinanceOverviewText(fmt.Sprintf("=== ФИНАНСЫ (%d дней) ===", call.Days), data))
 					return nil
+				},
+				Data: func() (any, error) {
+					data, err := load()
+					if err != nil {
+						return nil, err
+					}
+					return data, nil
 				},
 			})
 		case aiToolRecentTransactions:
+			end := time.Now()
+			start := end.AddDate(0, 0, -call.Days)
+			var cached *AIRecentTransactionsData
+			load := func() (AIRecentTransactionsData, error) {
+				if cached != nil {
+					return *cached, nil
+				}
+				data, err := h.buildRecentTransactionsInRange(ctx, userID, start, end, call.Limit)
+				if err != nil {
+					return AIRecentTransactionsData{}, err
+				}
+				cached = &data
+				return data, nil
+			}
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "финансы",
 				Days:    call.Days,
 				Limit:   call.Limit,
 				Run: func(sb *strings.Builder) error {
-					h.appendRecentTransactionsTool(ctx, sb, userID, call.Days, call.Limit)
+					data, err := load()
+					if err != nil {
+						return err
+					}
+					sb.WriteString(renderRecentTransactionsText(fmt.Sprintf("=== ПОСЛЕДНИЕ ТРАНЗАКЦИИ (%d дней, %d шт.) ===", call.Days, call.Limit), data))
 					return nil
+				},
+				Data: func() (any, error) {
+					data, err := load()
+					if err != nil {
+						return nil, err
+					}
+					return data, nil
 				},
 			})
 		case aiToolProductivityOverview:
+			end := time.Now()
+			start := end.AddDate(0, 0, -call.Days)
+			var cached *AIProductivityOverviewData
+			load := func() (AIProductivityOverviewData, error) {
+				if cached != nil {
+					return *cached, nil
+				}
+				data, err := h.buildProductivityOverviewInRange(ctx, userID, start, end, 10)
+				if err != nil {
+					return AIProductivityOverviewData{}, err
+				}
+				cached = &data
+				return data, nil
+			}
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "продуктивность",
 				Days:    call.Days,
 				Run: func(sb *strings.Builder) error {
-					return h.appendProductivityOverviewTool(ctx, sb, userID, call.Days)
+					data, err := load()
+					if err != nil {
+						return err
+					}
+					sb.WriteString(renderProductivityOverviewText(fmt.Sprintf("=== ПРОДУКТИВНОСТЬ (%d дней) ===", call.Days), data))
+					return nil
+				},
+				Data: func() (any, error) {
+					data, err := load()
+					if err != nil {
+						return nil, err
+					}
+					return data, nil
 				},
 			})
 		case aiToolActivityOverview:
@@ -491,109 +567,6 @@ func (h *AIHandler) appendHealthOverviewTool(ctx context.Context, sb *strings.Bu
 	end := time.Now()
 	start := end.AddDate(0, 0, -days)
 	h.appendHealthContextInRange(ctx, sb, userID, start, end, fmt.Sprintf("=== ЗДОРОВЬЕ (%d дней) ===", days))
-}
-
-func (h *AIHandler) appendProductivityOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days int) error {
-	end := time.Now()
-	start := end.AddDate(0, 0, -days)
-	return h.appendProductivityContextInRange(ctx, sb, userID, start, end, fmt.Sprintf("=== ПРОДУКТИВНОСТЬ (%d дней) ===", days), 10)
-}
-
-func (h *AIHandler) appendFinanceOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days int) {
-	since := time.Now().AddDate(0, 0, -days)
-
-	sb.WriteString(fmt.Sprintf("=== ФИНАНСЫ (%d дней) ===\n", days))
-
-	var totalBalance, spending, income float64
-	var txCount int
-	h.db.QueryRow(ctx, `SELECT COALESCE(SUM(balance),0) FROM accounts WHERE currency='RUB' AND in_balance = TRUE AND user_id = $1`, userID).Scan(&totalBalance)
-	h.db.QueryRow(ctx, `
-		SELECT
-			COALESCE(SUM(CASE WHEN t.amount < 0 THEN ABS(t.amount) ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0),
-			COUNT(*)
-		FROM transactions t
-		LEFT JOIN accounts a ON a.id = t.account_id
-		WHERE t.user_id = $1
-			AND t.currency = 'RUB'
-			AND t.is_transfer = FALSE
-			AND t.occurred_at >= $2
-			AND COALESCE(a.in_balance, TRUE) = TRUE
-	`, userID, since).Scan(&spending, &income, &txCount)
-
-	sb.WriteString(fmt.Sprintf("Текущий баланс: %.0f ₽\n", totalBalance))
-	sb.WriteString(fmt.Sprintf("За период: %d транзакций, расходы %.0f ₽, доходы %.0f ₽, net %.0f ₽\n", txCount, spending, income, income-spending))
-
-	rows, err := h.db.Query(ctx, `
-		SELECT COALESCE(NULLIF(category, ''), 'Без категории'), COALESCE(SUM(ABS(amount)), 0)
-		FROM transactions t
-		LEFT JOIN accounts a ON a.id = t.account_id
-		WHERE t.user_id = $1
-			AND t.amount < 0
-			AND t.currency = 'RUB'
-			AND t.is_transfer = FALSE
-			AND t.occurred_at >= $2
-			AND COALESCE(a.in_balance, TRUE) = TRUE
-		GROUP BY 1
-		ORDER BY 2 DESC
-		LIMIT 5
-	`, userID, since)
-	if err == nil {
-		defer rows.Close()
-		sb.WriteString("Топ категорий:\n")
-		hasRows := false
-		for rows.Next() {
-			hasRows = true
-			var category string
-			var amount float64
-			if rows.Scan(&category, &amount) == nil {
-				sb.WriteString(fmt.Sprintf("  - %s: %.0f ₽\n", category, amount))
-			}
-		}
-		if !hasRows {
-			sb.WriteString("  - Нет расходов за период\n")
-		}
-	}
-}
-
-func (h *AIHandler) appendRecentTransactionsTool(ctx context.Context, sb *strings.Builder, userID string, days, limit int) {
-	since := time.Now().AddDate(0, 0, -days)
-	sb.WriteString(fmt.Sprintf("=== ПОСЛЕДНИЕ ТРАНЗАКЦИИ (%d дней, %d шт.) ===\n", days, limit))
-
-	rows, err := h.db.Query(ctx, `
-		SELECT t.occurred_at, t.amount, t.currency, COALESCE(NULLIF(t.payee, ''), NULLIF(t.comment, ''), 'Без названия')
-		FROM transactions t
-		LEFT JOIN accounts a ON a.id = t.account_id
-		WHERE t.user_id = $1
-			AND t.is_transfer = FALSE
-			AND t.occurred_at >= $2
-			AND COALESCE(a.in_balance, TRUE) = TRUE
-		ORDER BY t.occurred_at DESC
-		LIMIT $3
-	`, userID, since, limit)
-	if err != nil {
-		sb.WriteString("Данные по транзакциям временно недоступны.\n")
-		return
-	}
-	defer rows.Close()
-
-	hasRows := false
-	for rows.Next() {
-		hasRows = true
-		var occurredAt time.Time
-		var amount float64
-		var currency, label string
-		if rows.Scan(&occurredAt, &amount, &currency, &label) == nil {
-			sign := ""
-			if amount > 0 {
-				sign = "+"
-			}
-			sb.WriteString(fmt.Sprintf("  %s %s%.0f %s %s\n", occurredAt.Format("02.01 15:04"), sign, amount, currency, label))
-		}
-	}
-	if !hasRows {
-		sb.WriteString("  Нет транзакций за период\n")
-	}
 }
 
 func (h *AIHandler) appendActivityOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days int) {

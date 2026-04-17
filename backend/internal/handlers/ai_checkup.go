@@ -258,7 +258,7 @@ func buildAICheckupPrompt(now time.Time, window checkupWindow, dataContext strin
 	sb.WriteString("Факт тренировки подтверждают только данные из workouts/Hevy. Факт сна, шагов, веса и пульса подтверждают только данные из biometrics/sleep_sessions.\n")
 	sb.WriteString("Продуктивность и задачи подтверждаются только данными Todoist, а не календарём.\n")
 	sb.WriteString("Питание отражает только залогированные записи из трекера. Не пиши \"отслежено полностью\", если в данных нет явного подтверждения полноты дня.\n")
-	sb.WriteString("Ниже данные пользователя приходят как JSON-результаты внутренних tools. Сначала опирайся на поля tool/section/window, а затем на context_text внутри этих объектов.\n")
+	sb.WriteString("Ниже данные пользователя приходят как JSON-результаты внутренних tools. Сначала опирайся на поля tool/section/window/data. Если data есть, это основной источник фактов и чисел. context_text используй как summary.\n")
 	sb.WriteString("Сделай структурированный ответ:\n")
 	sb.WriteString("1. Короткий итог в 2-4 предложениях.\n")
 	sb.WriteString("2. Финансы.\n")
@@ -317,6 +317,30 @@ func (h *AIHandler) buildCheckupContext(ctx context.Context, userID string, wind
 func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, window checkupWindow) []aiToolExecution {
 	start := window.Start
 	end := window.End
+	var financeData *AIFinanceOverviewData
+	loadFinanceData := func() (AIFinanceOverviewData, error) {
+		if financeData != nil {
+			return *financeData, nil
+		}
+		data, err := h.buildFinanceOverviewInRange(ctx, userID, window.Start, window.End)
+		if err != nil {
+			return AIFinanceOverviewData{}, err
+		}
+		financeData = &data
+		return data, nil
+	}
+	var productivityData *AIProductivityOverviewData
+	loadProductivityData := func() (AIProductivityOverviewData, error) {
+		if productivityData != nil {
+			return *productivityData, nil
+		}
+		data, err := h.buildProductivityOverviewInRange(ctx, userID, window.Start, window.End, 10)
+		if err != nil {
+			return AIProductivityOverviewData{}, err
+		}
+		productivityData = &data
+		return data, nil
+	}
 
 	return []aiToolExecution{
 		{
@@ -325,8 +349,20 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 			RequestedPeriod: window.RequestedPeriod,
 			Start:           &start,
 			End:             &end,
+			Data: func() (any, error) {
+				data, err := loadFinanceData()
+				if err != nil {
+					return nil, err
+				}
+				return data, nil
+			},
 			Run: func(sb *strings.Builder) error {
-				h.appendCheckupFinanceContext(ctx, sb, userID, window)
+				data, err := loadFinanceData()
+				if err != nil {
+					return err
+				}
+				sb.WriteString("\n")
+				sb.WriteString(renderFinanceOverviewText("=== ФИНАНСЫ ===", data))
 				return nil
 			},
 		},
@@ -336,8 +372,20 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 			RequestedPeriod: window.RequestedPeriod,
 			Start:           &start,
 			End:             &end,
+			Data: func() (any, error) {
+				data, err := loadProductivityData()
+				if err != nil {
+					return nil, err
+				}
+				return data, nil
+			},
 			Run: func(sb *strings.Builder) error {
-				h.appendCheckupProductivityContext(ctx, sb, userID, window)
+				data, err := loadProductivityData()
+				if err != nil {
+					return err
+				}
+				sb.WriteString("\n")
+				sb.WriteString(renderProductivityOverviewText("=== ПРОДУКТИВНОСТЬ ===", data))
 				return nil
 			},
 		},
@@ -417,107 +465,6 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 				return nil
 			},
 		},
-	}
-}
-
-func (h *AIHandler) appendCheckupFinanceContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
-	sb.WriteString("\n=== ФИНАНСЫ ===\n")
-
-	var currentBalance, spending, income float64
-	var txCount int
-	h.db.QueryRow(ctx, `
-		SELECT COALESCE(SUM(balance), 0)
-		FROM accounts
-		WHERE currency = 'RUB' AND in_balance = TRUE AND user_id = $1
-	`, userID).Scan(&currentBalance)
-	h.db.QueryRow(ctx, `
-		SELECT
-			COALESCE(SUM(CASE WHEN t.amount < 0 THEN ABS(t.amount) ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0),
-			COUNT(*)
-		FROM transactions t
-		LEFT JOIN accounts a ON a.id = t.account_id
-		WHERE t.user_id = $1
-			AND t.currency = 'RUB'
-			AND t.is_transfer = FALSE
-			AND COALESCE(a.in_balance, TRUE) = TRUE
-			AND t.occurred_at >= $2
-			AND t.occurred_at < $3
-	`, userID, window.Start, window.End).Scan(&spending, &income, &txCount)
-	sb.WriteString(fmt.Sprintf("Текущий баланс: %.0f ₽\n", currentBalance))
-	sb.WriteString(fmt.Sprintf("За период: %d транзакций, расходы %.0f ₽, доходы %.0f ₽, net %.0f ₽\n", txCount, spending, income, income-spending))
-
-	rows, err := h.db.Query(ctx, `
-		SELECT COALESCE(NULLIF(t.category, ''), 'Без категории'), COALESCE(SUM(ABS(t.amount)), 0)
-		FROM transactions t
-		LEFT JOIN accounts a ON a.id = t.account_id
-		WHERE t.user_id = $1
-			AND t.amount < 0
-			AND t.currency = 'RUB'
-			AND t.is_transfer = FALSE
-			AND COALESCE(a.in_balance, TRUE) = TRUE
-			AND t.occurred_at >= $2
-			AND t.occurred_at < $3
-		GROUP BY 1
-		ORDER BY 2 DESC
-		LIMIT 5
-	`, userID, window.Start, window.End)
-	if err == nil {
-		defer rows.Close()
-		sb.WriteString("Топ категорий:\n")
-		hasRows := false
-		for rows.Next() {
-			hasRows = true
-			var category string
-			var amount float64
-			if rows.Scan(&category, &amount) == nil {
-				sb.WriteString(fmt.Sprintf("  - %s: %.0f ₽\n", category, amount))
-			}
-		}
-		if !hasRows {
-			sb.WriteString("  - Нет расходных категорий за период\n")
-		}
-	}
-
-	payeeRows, err := h.db.Query(ctx, `
-		SELECT COALESCE(NULLIF(t.payee, ''), NULLIF(t.comment, ''), 'Без названия'), COALESCE(SUM(ABS(t.amount)), 0), COUNT(*)
-		FROM transactions t
-		LEFT JOIN accounts a ON a.id = t.account_id
-		WHERE t.user_id = $1
-			AND t.amount < 0
-			AND t.currency = 'RUB'
-			AND t.is_transfer = FALSE
-			AND COALESCE(a.in_balance, TRUE) = TRUE
-			AND t.occurred_at >= $2
-			AND t.occurred_at < $3
-		GROUP BY 1
-		ORDER BY 2 DESC
-		LIMIT 5
-	`, userID, window.Start, window.End)
-	if err == nil {
-		defer payeeRows.Close()
-		sb.WriteString("Крупные получатели денег:\n")
-		hasRows := false
-		for payeeRows.Next() {
-			hasRows = true
-			var label string
-			var amount float64
-			var count int
-			if payeeRows.Scan(&label, &amount, &count) == nil {
-				sb.WriteString(fmt.Sprintf("  - %s: %.0f ₽ (%d)\n", label, amount, count))
-			}
-		}
-		if !hasRows {
-			sb.WriteString("  - Нет заметных расходных получателей за период\n")
-		}
-	}
-}
-
-func (h *AIHandler) appendCheckupProductivityContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
-	sb.WriteString("\n")
-	if err := h.appendProductivityContextInRange(ctx, sb, userID, window.Start, window.End, "=== ПРОДУКТИВНОСТЬ ===", 10); err != nil {
-		h.logger.Warn().Err(err).Str("user_id", userID).Msg("build productivity checkup context")
-		sb.WriteString("=== ПРОДУКТИВНОСТЬ ===\nДанные по Todoist временно недоступны.\n")
 	}
 }
 

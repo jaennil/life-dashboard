@@ -7,20 +7,44 @@ import (
 	"time"
 )
 
+type AIProductivityCompletion struct {
+	CompletedAt time.Time `json:"completed_at"`
+	Content     string    `json:"content"`
+	ProjectName string    `json:"project_name,omitempty"`
+}
+
+type AIProductivityOverviewData struct {
+	Source            string                     `json:"source"`
+	Summary           ProductivitySummary        `json:"summary"`
+	CompletedInWindow int                        `json:"completed_in_window"`
+	KeyTasks          []ProductivityTask         `json:"key_tasks,omitempty"`
+	RecentCompleted   []AIProductivityCompletion `json:"recent_completed,omitempty"`
+}
+
 func (h *AIHandler) appendProductivityContextInRange(ctx context.Context, sb *strings.Builder, userID string, start, end time.Time, title string, limit int) error {
+	data, err := h.buildProductivityOverviewInRange(ctx, userID, start, end, limit)
+	if err != nil {
+		return err
+	}
+	sb.WriteString(renderProductivityOverviewText(title, data))
+	return nil
+}
+
+func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID string, start, end time.Time, limit int) (AIProductivityOverviewData, error) {
 	if limit <= 0 {
 		limit = 10
 	}
+
 	now := time.Now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	tomorrowStart := todayStart.AddDate(0, 0, 1)
 	nextWeekStart := todayStart.AddDate(0, 0, 8)
 	staleBefore := todayStart.AddDate(0, 0, -14)
 
-	sb.WriteString(title + "\n")
-	sb.WriteString("Источник: Todoist. Просрочка и план задач считаются только по todoist_tasks, завершения — по todoist_task_completions.\n")
+	data := AIProductivityOverviewData{
+		Source: "todoist_tasks + todoist_task_completions",
+	}
 
-	var activeTotal, overdueTotal, dueTodayTotal, dueNext7DaysTotal, recurringTotal, staleTotal int
 	if err := h.db.QueryRow(ctx, `
 		SELECT
 			COUNT(*) FILTER (WHERE is_active = TRUE),
@@ -50,25 +74,30 @@ func (h *AIHandler) appendProductivityContextInRange(ctx context.Context, sb *st
 		FROM todoist_tasks
 		WHERE user_id = $1
 	`, userID, now, todayStart, tomorrowStart, nextWeekStart, staleBefore).Scan(
-		&activeTotal, &overdueTotal, &dueTodayTotal, &dueNext7DaysTotal, &recurringTotal, &staleTotal,
+		&data.Summary.ActiveTotal,
+		&data.Summary.OverdueTotal,
+		&data.Summary.DueTodayTotal,
+		&data.Summary.DueNext7DaysTotal,
+		&data.Summary.RecurringTotal,
+		&data.Summary.StaleTotal,
 	); err != nil {
-		return err
+		return AIProductivityOverviewData{}, err
 	}
 
-	var completedInWindow, completedToday int
 	if err := h.db.QueryRow(ctx, `
 		SELECT
 			COUNT(*) FILTER (WHERE completed_at >= $2 AND completed_at < $3),
-			COUNT(*) FILTER (WHERE completed_at >= $4 AND completed_at < $5)
+			COUNT(*) FILTER (WHERE completed_at >= $4 AND completed_at < $5),
+			COUNT(*) FILTER (WHERE completed_at >= $6 AND completed_at < $5)
 		FROM todoist_task_completions
 		WHERE user_id = $1
-	`, userID, start, end, todayStart, tomorrowStart).Scan(&completedInWindow, &completedToday); err != nil {
-		return err
+	`, userID, start, end, todayStart, tomorrowStart, todayStart.AddDate(0, 0, -6)).Scan(
+		&data.CompletedInWindow,
+		&data.Summary.CompletedTodayTotal,
+		&data.Summary.Completed7DaysTotal,
+	); err != nil {
+		return AIProductivityOverviewData{}, err
 	}
-
-	sb.WriteString(fmt.Sprintf("Активных задач: %d | overdue: %d | сегодня: %d | ближайшие 7 дней: %d | recurring: %d | давно висят: %d\n",
-		activeTotal, overdueTotal, dueTodayTotal, dueNext7DaysTotal, recurringTotal, staleTotal))
-	sb.WriteString(fmt.Sprintf("Завершено за окно: %d | завершено сегодня: %d\n", completedInWindow, completedToday))
 
 	loadRows, err := h.db.Query(ctx, `
 		SELECT COALESCE(due_at::date, due_date) AS day, COUNT(*)
@@ -81,33 +110,41 @@ func (h *AIHandler) appendProductivityContextInRange(ctx context.Context, sb *st
 		ORDER BY day ASC
 		LIMIT 7
 	`, userID, todayStart, nextWeekStart)
-	if err == nil {
-		defer loadRows.Close()
-		sb.WriteString("Нагрузка по ближайшим дням:\n")
-		hasRows := false
-		for loadRows.Next() {
-			hasRows = true
-			var day time.Time
-			var count int
-			if loadRows.Scan(&day, &count) == nil {
-				sb.WriteString(fmt.Sprintf("  - %s: %d задач\n", day.Format("02.01"), count))
-			}
+	if err != nil {
+		return AIProductivityOverviewData{}, err
+	}
+	defer loadRows.Close()
+
+	data.Summary.UpcomingLoad = make([]ProductivityDayBucket, 0, 7)
+	for loadRows.Next() {
+		var day time.Time
+		var count int
+		if err := loadRows.Scan(&day, &count); err != nil {
+			return AIProductivityOverviewData{}, err
 		}
-		if !hasRows {
-			sb.WriteString("  - На ближайшие дни задач с дедлайном нет\n")
-		}
+		data.Summary.UpcomingLoad = append(data.Summary.UpcomingLoad, ProductivityDayBucket{
+			Date:  day.Format("2006-01-02"),
+			Count: count,
+		})
+	}
+	if err := loadRows.Err(); err != nil {
+		return AIProductivityOverviewData{}, err
 	}
 
 	taskRows, err := h.db.Query(ctx, `
 		SELECT
+			id,
+			external_id,
 			content,
+			COALESCE(description, ''),
 			COALESCE(project_name, ''),
 			COALESCE(section_name, ''),
 			COALESCE(priority, 1),
 			is_recurring,
 			added_at,
 			due_at,
-			due_date::timestamp
+			due_date::timestamp,
+			last_completed_at
 		FROM todoist_tasks
 		WHERE user_id = $1
 			AND is_active = TRUE
@@ -131,62 +168,34 @@ func (h *AIHandler) appendProductivityContextInRange(ctx context.Context, sb *st
 		LIMIT $7
 	`, userID, now, todayStart, tomorrowStart, nextWeekStart, staleBefore, limit)
 	if err != nil {
-		return err
+		return AIProductivityOverviewData{}, err
 	}
 	defer taskRows.Close()
 
-	sb.WriteString("Ключевые задачи:\n")
-	hasTasks := false
+	data.KeyTasks = make([]ProductivityTask, 0, limit)
 	for taskRows.Next() {
-		hasTasks = true
-		var content, projectName, sectionName string
-		var priority int
-		var isRecurring bool
-		var addedAt, dueAt, dueDate *time.Time
-		if taskRows.Scan(&content, &projectName, &sectionName, &priority, &isRecurring, &addedAt, &dueAt, &dueDate) != nil {
-			continue
+		var task ProductivityTask
+		if err := taskRows.Scan(
+			&task.ID,
+			&task.ExternalID,
+			&task.Content,
+			&task.Description,
+			&task.ProjectName,
+			&task.SectionName,
+			&task.Priority,
+			&task.IsRecurring,
+			&task.AddedAt,
+			&task.DueAt,
+			&task.DueDate,
+			&task.LastCompletedAt,
+		); err != nil {
+			return AIProductivityOverviewData{}, err
 		}
-
-		label := "без срока"
-		isOverdue, bucket := productivityDueState(dueAt, dueDate, now, todayStart, tomorrowStart, nextWeekStart)
-		switch bucket {
-		case "overdue":
-			label = "overdue"
-		case "today":
-			label = "сегодня"
-		case "upcoming":
-			label = "скоро"
-		case "later":
-			label = "позже"
-		}
-		if !isOverdue && addedAt != nil && addedAt.Before(staleBefore) && (bucket == "no_due" || bucket == "later") {
-			label = "висит давно"
-		}
-
-		line := fmt.Sprintf("  - %s", content)
-		if projectName != "" {
-			line += fmt.Sprintf(" [%s", projectName)
-			if sectionName != "" {
-				line += " / " + sectionName
-			}
-			line += "]"
-		}
-		line += fmt.Sprintf(" | p%d | %s", priority, label)
-		if isRecurring {
-			line += " | recurring"
-		}
-		if dueAt != nil {
-			line += " | дедлайн " + dueAt.Format("02.01 15:04")
-		} else if dueDate != nil {
-			line += " | дедлайн " + dueDate.Format("02.01")
-		}
-		if addedAt != nil {
-			line += " | добавлена " + addedAt.Format("02.01")
-		}
-		sb.WriteString(line + "\n")
+		task.IsOverdue, task.DueBucket = productivityDueState(task.DueAt, task.DueDate, now, todayStart, tomorrowStart, nextWeekStart)
+		data.KeyTasks = append(data.KeyTasks, task)
 	}
-	if !hasTasks {
-		sb.WriteString("  - Критичных или срочных задач сейчас нет\n")
+	if err := taskRows.Err(); err != nil {
+		return AIProductivityOverviewData{}, err
 	}
 
 	completedRows, err := h.db.Query(ctx, `
@@ -198,26 +207,121 @@ func (h *AIHandler) appendProductivityContextInRange(ctx context.Context, sb *st
 		ORDER BY completed_at DESC
 		LIMIT 6
 	`, userID, start, end)
-	if err == nil {
-		defer completedRows.Close()
-		sb.WriteString("Недавние закрытые задачи:\n")
-		hasCompleted := false
-		for completedRows.Next() {
-			hasCompleted = true
-			var completedAt time.Time
-			var content, projectName string
-			if completedRows.Scan(&completedAt, &content, &projectName) == nil {
-				line := fmt.Sprintf("  - %s: %s", completedAt.Format("02.01 15:04"), content)
-				if projectName != "" {
-					line += " [" + projectName + "]"
-				}
-				sb.WriteString(line + "\n")
-			}
+	if err != nil {
+		return AIProductivityOverviewData{}, err
+	}
+	defer completedRows.Close()
+
+	data.RecentCompleted = make([]AIProductivityCompletion, 0, 6)
+	for completedRows.Next() {
+		var item AIProductivityCompletion
+		if err := completedRows.Scan(&item.CompletedAt, &item.Content, &item.ProjectName); err != nil {
+			return AIProductivityOverviewData{}, err
 		}
-		if !hasCompleted {
-			sb.WriteString("  - Нет завершённых задач за окно\n")
+		data.RecentCompleted = append(data.RecentCompleted, item)
+	}
+	if err := completedRows.Err(); err != nil {
+		return AIProductivityOverviewData{}, err
+	}
+
+	return data, nil
+}
+
+func renderProductivityOverviewText(title string, data AIProductivityOverviewData) string {
+	var sb strings.Builder
+	sb.WriteString(title + "\n")
+	sb.WriteString("Источник: Todoist. Просрочка и план задач считаются только по todoist_tasks, завершения — по todoist_task_completions.\n")
+	sb.WriteString(fmt.Sprintf("Активных задач: %d | overdue: %d | сегодня: %d | ближайшие 7 дней: %d | recurring: %d | давно висят: %d\n",
+		data.Summary.ActiveTotal,
+		data.Summary.OverdueTotal,
+		data.Summary.DueTodayTotal,
+		data.Summary.DueNext7DaysTotal,
+		data.Summary.RecurringTotal,
+		data.Summary.StaleTotal,
+	))
+	sb.WriteString(fmt.Sprintf("Завершено за окно: %d | завершено сегодня: %d | завершено за 7 дней: %d\n",
+		data.CompletedInWindow,
+		data.Summary.CompletedTodayTotal,
+		data.Summary.Completed7DaysTotal,
+	))
+
+	sb.WriteString("Нагрузка по ближайшим дням:\n")
+	if len(data.Summary.UpcomingLoad) == 0 {
+		sb.WriteString("  - На ближайшие дни задач с дедлайном нет\n")
+	} else {
+		for _, bucket := range data.Summary.UpcomingLoad {
+			day, err := time.Parse("2006-01-02", bucket.Date)
+			if err != nil {
+				sb.WriteString(fmt.Sprintf("  - %s: %d задач\n", bucket.Date, bucket.Count))
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("  - %s: %d задач\n", day.Format("02.01"), bucket.Count))
 		}
 	}
 
-	return nil
+	sb.WriteString("Ключевые задачи:\n")
+	if len(data.KeyTasks) == 0 {
+		sb.WriteString("  - Критичных или срочных задач сейчас нет\n")
+	} else {
+		now := time.Now()
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		tomorrowStart := todayStart.AddDate(0, 0, 1)
+		nextWeekStart := todayStart.AddDate(0, 0, 8)
+		staleBefore := todayStart.AddDate(0, 0, -14)
+
+		for _, task := range data.KeyTasks {
+			label := "без срока"
+			isOverdue, bucket := productivityDueState(task.DueAt, task.DueDate, now, todayStart, tomorrowStart, nextWeekStart)
+			switch bucket {
+			case "overdue":
+				label = "overdue"
+			case "today":
+				label = "сегодня"
+			case "upcoming":
+				label = "скоро"
+			case "later":
+				label = "позже"
+			}
+			if !isOverdue && task.AddedAt != nil && task.AddedAt.Before(staleBefore) && (bucket == "no_due" || bucket == "later") {
+				label = "висит давно"
+			}
+
+			line := fmt.Sprintf("  - %s", task.Content)
+			if task.ProjectName != "" {
+				line += fmt.Sprintf(" [%s", task.ProjectName)
+				if task.SectionName != "" {
+					line += " / " + task.SectionName
+				}
+				line += "]"
+			}
+			line += fmt.Sprintf(" | p%d | %s", task.Priority, label)
+			if task.IsRecurring {
+				line += " | recurring"
+			}
+			if task.DueAt != nil {
+				line += " | дедлайн " + task.DueAt.Format("02.01 15:04")
+			} else if task.DueDate != nil {
+				line += " | дедлайн " + task.DueDate.Format("02.01")
+			}
+			if task.AddedAt != nil {
+				line += " | добавлена " + task.AddedAt.Format("02.01")
+			}
+			sb.WriteString(line + "\n")
+		}
+	}
+
+	sb.WriteString("Недавние закрытые задачи:\n")
+	if len(data.RecentCompleted) == 0 {
+		sb.WriteString("  - Нет завершённых задач за окно\n")
+	} else {
+		for _, item := range data.RecentCompleted {
+			line := fmt.Sprintf("  - %s: %s", item.CompletedAt.Format("02.01 15:04"), item.Content)
+			if item.ProjectName != "" {
+				line += " [" + item.ProjectName + "]"
+			}
+			sb.WriteString(line + "\n")
+		}
+	}
+
+	return strings.TrimSpace(sb.String())
 }

@@ -18,6 +18,7 @@ type aiToolExecution struct {
 	Start           *time.Time
 	End             *time.Time
 	Run             func(*strings.Builder) error
+	Data            func() (any, error)
 }
 
 type aiToolWindow struct {
@@ -36,6 +37,7 @@ type aiToolResult struct {
 	Window        *aiToolWindow `json:"window,omitempty"`
 	ContextFormat string        `json:"context_format"`
 	ContextText   string        `json:"context_text,omitempty"`
+	Data          any           `json:"data,omitempty"`
 	DurationMs    int64         `json:"duration_ms"`
 }
 
@@ -68,7 +70,7 @@ func (r aiToolRun) render() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Ниже результаты внутренних data-tools в JSON. Используй поля tool/section/window/context_text и не выдумывай отсутствующие поля.\n")
+	sb.WriteString("Ниже результаты внутренних data-tools в JSON. Используй поля tool/section/window/data/context_text и не выдумывай отсутствующие поля.\n")
 	sb.Write(body)
 	return strings.TrimSpace(sb.String())
 }
@@ -81,13 +83,16 @@ func (h *AIHandler) runAITools(ctx context.Context, userID string, executions []
 	seenSections := make(map[string]bool, len(executions))
 
 	for _, execution := range executions {
-		if execution.Run == nil {
+		if execution.Run == nil && execution.Data == nil {
 			continue
 		}
 
 		startedAt := time.Now()
 		var sb strings.Builder
-		err := execution.Run(&sb)
+		var err error
+		if execution.Run != nil {
+			err = execution.Run(&sb)
+		}
 		duration := time.Since(startedAt)
 		if err != nil {
 			h.logger.Warn().
@@ -101,13 +106,27 @@ func (h *AIHandler) runAITools(ctx context.Context, userID string, executions []
 		}
 
 		contextText := strings.TrimSpace(sb.String())
-		if contextText == "" {
+		var data any
+		if execution.Data != nil {
+			data, err = execution.Data()
+			if err != nil {
+				h.logger.Warn().
+					Err(err).
+					Str("user_id", userID).
+					Str("tool", string(execution.Name)).
+					Str("section", execution.Section).
+					Dur("duration", duration).
+					Msg("ai tool data build failed")
+				return aiToolRun{}, err
+			}
+		}
+		if contextText == "" && data == nil {
 			h.logger.Debug().
 				Str("user_id", userID).
 				Str("tool", string(execution.Name)).
 				Str("section", execution.Section).
 				Dur("duration", duration).
-				Msg("ai tool returned empty context")
+				Msg("ai tool returned empty context and data")
 			continue
 		}
 
@@ -116,12 +135,18 @@ func (h *AIHandler) runAITools(ctx context.Context, userID string, executions []
 			run.Sections = append(run.Sections, execution.Section)
 		}
 
+		contextFormat := "plain_text_v1"
+		if contextText == "" {
+			contextFormat = "none"
+		}
+
 		run.Results = append(run.Results, aiToolResult{
 			Name:          execution.Name,
 			Section:       execution.Section,
 			Window:        execution.window(),
-			ContextFormat: "plain_text_v1",
+			ContextFormat: contextFormat,
 			ContextText:   contextText,
+			Data:          data,
 			DurationMs:    duration.Milliseconds(),
 		})
 
