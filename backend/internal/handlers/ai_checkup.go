@@ -295,19 +295,98 @@ func (h *AIHandler) buildCheckupContext(ctx context.Context, userID string, wind
 		sb.WriteString("Примечание: " + window.Note + "\n")
 	}
 
-	h.appendCheckupFinanceContext(ctx, &sb, userID, window)
-	h.appendCheckupProductivityContext(ctx, &sb, userID, window)
-	h.appendCheckupHealthContext(ctx, &sb, userID, window)
-	h.appendCheckupActivityContext(ctx, &sb, userID, window)
-	if err := h.appendCheckupWorkoutContext(ctx, &sb, userID, window); err != nil {
+	run, err := h.runAITools(ctx, userID, h.checkupToolExecutions(ctx, userID, window))
+	if err != nil {
 		return "", err
 	}
-	h.appendCheckupNutritionContext(ctx, &sb, userID, window)
-	h.appendCheckupHabitContext(ctx, &sb, userID, window)
-	h.appendCheckupJournalContext(ctx, &sb, userID, window)
-	h.appendCheckupCalendarContext(ctx, &sb, userID, window)
+	if rendered := strings.TrimSpace(run.render()); rendered != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(rendered)
+	}
+
+	h.logger.Info().
+		Str("user_id", userID).
+		Str("period", window.RequestedPeriod).
+		Strs("sections", run.Sections).
+		Msg("ai checkup context built")
 
 	return sb.String(), nil
+}
+
+func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, window checkupWindow) []aiToolExecution {
+	return []aiToolExecution{
+		{
+			Name:    aiToolFinanceOverview,
+			Section: "финансы",
+			Run: func(sb *strings.Builder) error {
+				h.appendCheckupFinanceContext(ctx, sb, userID, window)
+				return nil
+			},
+		},
+		{
+			Name:    aiToolProductivityOverview,
+			Section: "продуктивность",
+			Run: func(sb *strings.Builder) error {
+				h.appendCheckupProductivityContext(ctx, sb, userID, window)
+				return nil
+			},
+		},
+		{
+			Name:    aiToolHealthOverview,
+			Section: "здоровье",
+			Run: func(sb *strings.Builder) error {
+				h.appendCheckupHealthContext(ctx, sb, userID, window)
+				return nil
+			},
+		},
+		{
+			Name:    aiToolActivityOverview,
+			Section: "активности",
+			Run: func(sb *strings.Builder) error {
+				h.appendCheckupActivityContext(ctx, sb, userID, window)
+				return nil
+			},
+		},
+		{
+			Name:    aiToolWorkoutOverview,
+			Section: "тренировки",
+			Run: func(sb *strings.Builder) error {
+				return h.appendCheckupWorkoutContext(ctx, sb, userID, window)
+			},
+		},
+		{
+			Name:    aiToolNutritionOverview,
+			Section: "питание",
+			Run: func(sb *strings.Builder) error {
+				h.appendCheckupNutritionContext(ctx, sb, userID, window)
+				return nil
+			},
+		},
+		{
+			Name:    aiToolHabitOverview,
+			Section: "привычки",
+			Run: func(sb *strings.Builder) error {
+				h.appendCheckupHabitContext(ctx, sb, userID, window)
+				return nil
+			},
+		},
+		{
+			Name:    aiToolJournalOverview,
+			Section: "дневник",
+			Run: func(sb *strings.Builder) error {
+				h.appendCheckupJournalContext(ctx, sb, userID, window)
+				return nil
+			},
+		},
+		{
+			Name:    aiToolCalendarOverview,
+			Section: "календарь",
+			Run: func(sb *strings.Builder) error {
+				h.appendCheckupCalendarContext(ctx, sb, userID, window)
+				return nil
+			},
+		},
+	}
 }
 
 func (h *AIHandler) appendCheckupFinanceContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {

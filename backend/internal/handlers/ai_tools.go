@@ -53,20 +53,27 @@ func (h *AIHandler) buildChatContext(ctx context.Context, userID, message string
 		return contextText, scope.sectionNames(), buildErr
 	}
 
-	contextText, sectionNames, err := h.buildToolContext(ctx, userID, toolCalls)
+	run, err := h.runAITools(ctx, userID, h.chatToolExecutions(ctx, userID, toolCalls))
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("ai tool execution failed, using fallback context")
 		scope := selectAIContextScope(message, history)
 		fallbackText, buildErr := h.buildContext(ctx, userID, scope)
 		return fallbackText, scope.sectionNames(), buildErr
 	}
+	contextText := run.render()
 	if strings.TrimSpace(contextText) == "" {
 		scope := selectAIContextScope(message, history)
 		fallbackText, buildErr := h.buildContext(ctx, userID, scope)
 		return fallbackText, scope.sectionNames(), buildErr
 	}
 
-	return contextText, sectionNames, nil
+	h.logger.Info().
+		Str("user_id", userID).
+		Strs("tools", aiToolNames(toolCalls)).
+		Strs("sections", run.Sections).
+		Msg("ai chat context built")
+
+	return contextText, run.Sections, nil
 }
 
 func (h *AIHandler) planToolCalls(ctx context.Context, message string, history []ChatMessage) ([]aiToolCall, error) {
@@ -319,79 +326,147 @@ func normalizeAILimit(value, fallback, max int) int {
 	return value
 }
 
-func (h *AIHandler) buildToolContext(ctx context.Context, userID string, tools []aiToolCall) (string, []string, error) {
-	var sb strings.Builder
-	sections := make([]string, 0, len(tools))
-	seenSections := make(map[string]bool)
-
-	appendSection := func(section string) {
-		if section == "" || seenSections[section] {
-			return
-		}
-		seenSections[section] = true
-		sections = append(sections, section)
-	}
+func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools []aiToolCall) []aiToolExecution {
+	executions := make([]aiToolExecution, 0, len(tools))
 
 	for _, call := range tools {
-		if sb.Len() > 0 {
-			sb.WriteString("\n")
-		}
+		call := call
 
 		switch call.Name {
 		case aiToolFinanceOverview:
-			appendSection("финансы")
-			h.appendFinanceOverviewTool(ctx, &sb, userID, call.Days)
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "финансы",
+				Run: func(sb *strings.Builder) error {
+					h.appendFinanceOverviewTool(ctx, sb, userID, call.Days)
+					return nil
+				},
+			})
 		case aiToolRecentTransactions:
-			appendSection("финансы")
-			h.appendRecentTransactionsTool(ctx, &sb, userID, call.Days, call.Limit)
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "финансы",
+				Run: func(sb *strings.Builder) error {
+					h.appendRecentTransactionsTool(ctx, sb, userID, call.Days, call.Limit)
+					return nil
+				},
+			})
 		case aiToolProductivityOverview:
-			appendSection("продуктивность")
-			if err := h.appendProductivityOverviewTool(ctx, &sb, userID, call.Days); err != nil {
-				return "", nil, err
-			}
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "продуктивность",
+				Run: func(sb *strings.Builder) error {
+					return h.appendProductivityOverviewTool(ctx, sb, userID, call.Days)
+				},
+			})
 		case aiToolActivityOverview:
-			appendSection("активности")
-			h.appendActivityOverviewTool(ctx, &sb, userID, call.Days)
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "активности",
+				Run: func(sb *strings.Builder) error {
+					h.appendActivityOverviewTool(ctx, sb, userID, call.Days)
+					return nil
+				},
+			})
 		case aiToolRecentActivities:
-			appendSection("активности")
-			h.appendRecentActivitiesTool(ctx, &sb, userID, call.Days, call.Limit)
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "активности",
+				Run: func(sb *strings.Builder) error {
+					h.appendRecentActivitiesTool(ctx, sb, userID, call.Days, call.Limit)
+					return nil
+				},
+			})
 		case aiToolHealthOverview:
-			appendSection("здоровье")
-			h.appendHealthOverviewTool(ctx, &sb, userID, call.Days)
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "здоровье",
+				Run: func(sb *strings.Builder) error {
+					h.appendHealthOverviewTool(ctx, sb, userID, call.Days)
+					return nil
+				},
+			})
 		case aiToolWorkoutOverview:
-			appendSection("тренировки")
-			h.appendWorkoutOverviewTool(ctx, &sb, userID, call.Days)
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "тренировки",
+				Run: func(sb *strings.Builder) error {
+					h.appendWorkoutOverviewTool(ctx, sb, userID, call.Days)
+					return nil
+				},
+			})
 		case aiToolRecentWorkouts:
-			appendSection("тренировки")
-			if err := h.appendRecentWorkoutsTool(ctx, &sb, userID, call.Limit); err != nil {
-				return "", nil, err
-			}
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "тренировки",
+				Run: func(sb *strings.Builder) error {
+					return h.appendRecentWorkoutsTool(ctx, sb, userID, call.Limit)
+				},
+			})
 		case aiToolRoutineOverview:
-			appendSection("hevy routines")
-			if err := h.appendRoutineOverviewTool(ctx, &sb, userID, call.Limit); err != nil {
-				return "", nil, err
-			}
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "hevy routines",
+				Run: func(sb *strings.Builder) error {
+					return h.appendRoutineOverviewTool(ctx, sb, userID, call.Limit)
+				},
+			})
 		case aiToolHabitOverview:
-			appendSection("привычки")
-			if err := h.appendHabitOverviewTool(ctx, &sb, userID, call.Days); err != nil {
-				return "", nil, err
-			}
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "привычки",
+				Run: func(sb *strings.Builder) error {
+					return h.appendHabitOverviewTool(ctx, sb, userID, call.Days)
+				},
+			})
 		case aiToolNutritionOverview:
-			appendSection("питание")
-			h.appendNutritionOverviewTool(ctx, &sb, userID, call.Days)
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "питание",
+				Run: func(sb *strings.Builder) error {
+					h.appendNutritionOverviewTool(ctx, sb, userID, call.Days)
+					return nil
+				},
+			})
 		case aiToolJournalOverview:
-			appendSection("дневник")
-			h.appendJournalOverviewTool(ctx, &sb, userID, call.Days, call.Limit)
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "дневник",
+				Run: func(sb *strings.Builder) error {
+					h.appendJournalOverviewTool(ctx, sb, userID, call.Days, call.Limit)
+					return nil
+				},
+			})
 		case aiToolCalendarOverview:
-			appendSection("календарь")
-			h.appendCalendarOverviewTool(ctx, &sb, userID, call.PastDays, call.FutureDays, call.Limit)
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "календарь",
+				Run: func(sb *strings.Builder) error {
+					h.appendCalendarOverviewTool(ctx, sb, userID, call.PastDays, call.FutureDays, call.Limit)
+					return nil
+				},
+			})
 		case aiToolWeatherOverview:
-			appendSection("погода")
-			h.appendWeatherOverviewTool(&sb)
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "погода",
+				Run: func(sb *strings.Builder) error {
+					h.appendWeatherOverviewTool(sb)
+					return nil
+				},
+			})
 		}
 	}
 
-	return sb.String(), sections, nil
+	return executions
+}
+
+func aiToolNames(calls []aiToolCall) []string {
+	names := make([]string, 0, len(calls))
+	for _, call := range calls {
+		names = append(names, string(call.Name))
+	}
+	return names
 }
 
 func (h *AIHandler) appendHealthOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days int) {
