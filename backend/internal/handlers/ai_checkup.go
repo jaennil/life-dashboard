@@ -252,21 +252,23 @@ func startOfDay(t time.Time) time.Time {
 func buildAICheckupPrompt(now time.Time, window checkupWindow, dataContext string) string {
 	var sb strings.Builder
 	sb.WriteString("Ты персональный AI-ассистент приложения Life Dashboard.\n")
-	sb.WriteString("Твоя задача — сделать checkup-отчёт по всем доступным сферам жизни пользователя за указанный период, включая привычки если по ним есть данные.\n")
+	sb.WriteString("Твоя задача — сделать checkup-отчёт по всем доступным сферам жизни пользователя за указанный период, включая продуктивность и привычки если по ним есть данные.\n")
 	sb.WriteString("Отвечай только на русском языке. Не выдумывай факты и не додумывай цифры.\n")
 	sb.WriteString("События Google Calendar — это только план/расписание. Они не подтверждают, что пользователь реально был в зале, лёг спать, поехал или что-то сделал.\n")
 	sb.WriteString("Факт тренировки подтверждают только данные из workouts/Hevy. Факт сна, шагов, веса и пульса подтверждают только данные из biometrics/sleep_sessions.\n")
+	sb.WriteString("Продуктивность и задачи подтверждаются только данными Todoist, а не календарём.\n")
 	sb.WriteString("Питание отражает только залогированные записи из трекера. Не пиши \"отслежено полностью\", если в данных нет явного подтверждения полноты дня.\n")
 	sb.WriteString("Сделай структурированный ответ:\n")
 	sb.WriteString("1. Короткий итог в 2-4 предложениях.\n")
 	sb.WriteString("2. Финансы.\n")
-	sb.WriteString("3. Активность и тренировки.\n")
-	sb.WriteString("4. Питание и здоровье.\n")
-	sb.WriteString("5. Привычки.\n")
-	sb.WriteString("6. Личное / заметки / календарь, если данные есть.\n")
-	sb.WriteString("7. Что хорошо.\n")
-	sb.WriteString("8. Что требует внимания.\n")
-	sb.WriteString("9. Три конкретных шага на следующий период.\n")
+	sb.WriteString("3. Продуктивность и задачи.\n")
+	sb.WriteString("4. Активность и тренировки.\n")
+	sb.WriteString("5. Питание и здоровье.\n")
+	sb.WriteString("6. Привычки.\n")
+	sb.WriteString("7. Личное / заметки / календарь, если данные есть.\n")
+	sb.WriteString("8. Что хорошо.\n")
+	sb.WriteString("9. Что требует внимания.\n")
+	sb.WriteString("10. Три конкретных шага на следующий период.\n")
 	sb.WriteString("Если по какой-то сфере данных нет, напиши это коротко и без воды.\n")
 	sb.WriteString("Если видна динамика веса, шагов, расходов, тренировок или питания — покажи её числами.\n")
 	sb.WriteString("Не делай длинное эссе: нужен практичный checkup.\n\n")
@@ -294,6 +296,7 @@ func (h *AIHandler) buildCheckupContext(ctx context.Context, userID string, wind
 	}
 
 	h.appendCheckupFinanceContext(ctx, &sb, userID, window)
+	h.appendCheckupProductivityContext(ctx, &sb, userID, window)
 	h.appendCheckupHealthContext(ctx, &sb, userID, window)
 	h.appendCheckupActivityContext(ctx, &sb, userID, window)
 	if err := h.appendCheckupWorkoutContext(ctx, &sb, userID, window); err != nil {
@@ -397,6 +400,14 @@ func (h *AIHandler) appendCheckupFinanceContext(ctx context.Context, sb *strings
 		if !hasRows {
 			sb.WriteString("  - Нет заметных расходных получателей за период\n")
 		}
+	}
+}
+
+func (h *AIHandler) appendCheckupProductivityContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
+	sb.WriteString("\n")
+	if err := h.appendProductivityContextInRange(ctx, sb, userID, window.Start, window.End, "=== ПРОДУКТИВНОСТЬ ===", 10); err != nil {
+		h.logger.Warn().Err(err).Str("user_id", userID).Msg("build productivity checkup context")
+		sb.WriteString("=== ПРОДУКТИВНОСТЬ ===\nДанные по Todoist временно недоступны.\n")
 	}
 }
 

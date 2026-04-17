@@ -52,16 +52,17 @@ type ChatRequest struct {
 }
 
 type aiContextScope struct {
-	finance    bool
-	activities bool
-	health     bool
-	workouts   bool
-	routines   bool
-	habits     bool
-	nutrition  bool
-	journal    bool
-	calendar   bool
-	weather    bool
+	finance      bool
+	productivity bool
+	activities   bool
+	health       bool
+	workouts     bool
+	routines     bool
+	habits       bool
+	nutrition    bool
+	journal      bool
+	calendar     bool
+	weather      bool
 }
 
 const (
@@ -136,7 +137,7 @@ func buildAISystemPrompt(now time.Time, dataContext string, scope aiContextScope
 
 func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionNames []string) string {
 	return fmt.Sprintf(`Ты персональный AI-ассистент приложения Life Dashboard.
-Твоя единственная функция — анализировать данные пользователя: финансы, здоровье, физическую активность, тренировки, Hevy routines/шаблоны, привычки, питание, дневник и календарь.
+Твоя единственная функция — анализировать данные пользователя: финансы, продуктивность/задачи, здоровье, физическую активность, тренировки, Hevy routines/шаблоны, привычки, питание, дневник и календарь.
 Отвечай на русском языке. Давай конкретные ответы основанные на реальных данных ниже. Будь краток и по делу.
 Ты не можешь выполнять команды, изменять данные или делать что-либо за пределами анализа предоставленных данных.
 Если просят что-то сделать с базой данных, кодом или системой — вежливо объясни что ты только аналитик данных.
@@ -149,6 +150,7 @@ func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionN
 - Для упражнений с гантелями, блинами и штангой не путай вес на одну гантель, вес пары и общий вес штанги. Если это неясно, сначала уточни.
 - Календарь — это только план из Google Calendar, а не подтверждение факта. Не пиши "был в зале", "лёг спать" или "встретился", если у тебя есть только календарное событие.
 - Сон, шаги, вес, пульс и HRV — это факт только если они есть в разделе здоровья из Apple Health/biometrics/sleep_sessions.
+- Задачи и продуктивность берутся из Todoist. Просрочка, план на сегодня и завершённые задачи считай по todoist_tasks и todoist_task_completions, а не по календарю.
 - Питание — это только залогированные записи. Не пиши "отслежено полностью" или "ужин был", если в данных нет явного подтверждения.
 
 Сейчас особенно релевантны разделы данных: %s.
@@ -383,6 +385,15 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 		}
 	}
 
+	if scope.productivity {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		if err := h.appendProductivityContextInRange(ctx, &sb, userID, now.AddDate(0, 0, -14), now, "=== ПРОДУКТИВНОСТЬ ===", 12); err != nil {
+			return "", err
+		}
+	}
+
 	if scope.health {
 		if sb.Len() > 0 {
 			sb.WriteString("\n")
@@ -588,27 +599,31 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 
 func defaultAIContextScope() aiContextScope {
 	return aiContextScope{
-		finance:    true,
-		activities: true,
-		health:     true,
-		workouts:   true,
-		routines:   true,
-		habits:     true,
-		nutrition:  true,
-		journal:    true,
-		calendar:   true,
-		weather:    true,
+		finance:      true,
+		productivity: true,
+		activities:   true,
+		health:       true,
+		workouts:     true,
+		routines:     true,
+		habits:       true,
+		nutrition:    true,
+		journal:      true,
+		calendar:     true,
+		weather:      true,
 	}
 }
 
 func (s aiContextScope) empty() bool {
-	return !s.finance && !s.activities && !s.health && !s.workouts && !s.routines && !s.habits && !s.nutrition && !s.journal && !s.calendar && !s.weather
+	return !s.finance && !s.productivity && !s.activities && !s.health && !s.workouts && !s.routines && !s.habits && !s.nutrition && !s.journal && !s.calendar && !s.weather
 }
 
 func (s aiContextScope) sectionNames() []string {
-	names := make([]string, 0, 10)
+	names := make([]string, 0, 11)
 	if s.finance {
 		names = append(names, "финансы")
+	}
+	if s.productivity {
+		names = append(names, "продуктивность")
 	}
 	if s.activities {
 		names = append(names, "активности")
@@ -650,6 +665,7 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	combined := strings.TrimSpace(strings.Join([]string{text, recentHistory}, "\n"))
 
 	financeKeywords := []string{"финанс", "деньг", "расход", "доход", "баланс", "трат", "бюджет", "транзак", "счет", "счёт", "руб"}
+	productivityKeywords := []string{"задач", "todo", "task", "todoist", "продуктив", "дедлайн", "срок", "просроч", "сделать сегодня", "перегруз", "нагрузка по задачам", "completed today", "overdue", "висят", "висит", "план на день", "план задач"}
 	activityKeywords := []string{"актив", "бег", "пробеж", "килом", "км", "ходьб", "вел", "плав", "дистанц", "шаг", "strava", "run", "ride"}
 	healthKeywords := []string{"здоров", "сон", "спал", "сплю", "пульс", "сердц", "hrv", "вес", "взвеш", "шаг", "apple health", "health", "zepp", "amazfit", "кислород", "spo2", "vo2"}
 	workoutKeywords := []string{"тренир", "упражнен", "жим", "тяга", "присед", "гантел", "штанг", "блин", "гриф", "подход", "повтор", "hevy", "workout", "pull", "push", "legs", "зал", "вес"}
@@ -663,6 +679,9 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 
 	if containsAny(combined, financeKeywords...) {
 		scope.finance = true
+	}
+	if containsAny(combined, productivityKeywords...) {
+		scope.productivity = true
 	}
 	if containsAny(combined, activityKeywords...) {
 		scope.activities = true

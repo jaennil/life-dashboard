@@ -11,19 +11,20 @@ import (
 type aiToolName string
 
 const (
-	aiToolFinanceOverview    aiToolName = "finance_overview"
-	aiToolRecentTransactions aiToolName = "recent_transactions"
-	aiToolActivityOverview   aiToolName = "activity_overview"
-	aiToolRecentActivities   aiToolName = "recent_activities"
-	aiToolHealthOverview     aiToolName = "health_overview"
-	aiToolWorkoutOverview    aiToolName = "workout_overview"
-	aiToolRecentWorkouts     aiToolName = "recent_workouts"
-	aiToolRoutineOverview    aiToolName = "routine_overview"
-	aiToolHabitOverview      aiToolName = "habit_overview"
-	aiToolNutritionOverview  aiToolName = "nutrition_overview"
-	aiToolJournalOverview    aiToolName = "journal_overview"
-	aiToolCalendarOverview   aiToolName = "calendar_overview"
-	aiToolWeatherOverview    aiToolName = "weather_overview"
+	aiToolFinanceOverview      aiToolName = "finance_overview"
+	aiToolRecentTransactions   aiToolName = "recent_transactions"
+	aiToolProductivityOverview aiToolName = "productivity_overview"
+	aiToolActivityOverview     aiToolName = "activity_overview"
+	aiToolRecentActivities     aiToolName = "recent_activities"
+	aiToolHealthOverview       aiToolName = "health_overview"
+	aiToolWorkoutOverview      aiToolName = "workout_overview"
+	aiToolRecentWorkouts       aiToolName = "recent_workouts"
+	aiToolRoutineOverview      aiToolName = "routine_overview"
+	aiToolHabitOverview        aiToolName = "habit_overview"
+	aiToolNutritionOverview    aiToolName = "nutrition_overview"
+	aiToolJournalOverview      aiToolName = "journal_overview"
+	aiToolCalendarOverview     aiToolName = "calendar_overview"
+	aiToolWeatherOverview      aiToolName = "weather_overview"
 )
 
 const (
@@ -108,6 +109,7 @@ func buildAIToolPlannerPrompt(message, recentHistory string) string {
 	sb.WriteString("Разрешённые tools:\n")
 	sb.WriteString("- finance_overview: баланс, доходы/расходы, агрегаты по финансам за период; args: days\n")
 	sb.WriteString("- recent_transactions: последние транзакции за период; args: days, limit\n")
+	sb.WriteString("- productivity_overview: Todoist задачи, просрочка, сделано за период, план на ближайшие дни; args: days\n")
 	sb.WriteString("- activity_overview: сводка по активностям за период; args: days\n")
 	sb.WriteString("- recent_activities: последние активности; args: days, limit\n")
 	sb.WriteString("- health_overview: фактические метрики здоровья из Apple Health/biometrics: шаги, сон, пульс, HRV, вес; args: days\n")
@@ -126,6 +128,7 @@ func buildAIToolPlannerPrompt(message, recentHistory string) string {
 	sb.WriteString("- Для вопросов про Hevy routine, шаблон тренировки, сплит, плановые веса и план упражнений используй routine_overview; при сравнении плана с фактом добавь recent_workouts или workout_overview.\n")
 	sb.WriteString("- Для вопросов про привычки, чеклисты, зубы, уход за лицом, умывание и Habitify используй habit_overview.\n")
 	sb.WriteString("- Для вопросов про траты, баланс, расходы по категориям или подозрительные операции используй finance_overview; при вопросах про конкретные покупки/операции добавь recent_transactions.\n")
+	sb.WriteString("- Для вопросов про задачи, overdue, что сделать сегодня, что висит давно, продуктивность и перегруз по Todoist используй productivity_overview.\n")
 	sb.WriteString("- Для бега, дистанции, активности и шагов используй activity_overview и при необходимости recent_activities.\n")
 	sb.WriteString("- Для вопросов про сон, пульс, HRV, вес, Apple Health, Zepp и шаги за день используй health_overview. Шаги из health_overview приоритетнее календаря и Strava.\n")
 	sb.WriteString("- Для питания используй nutrition_overview.\n")
@@ -178,6 +181,8 @@ func sanitizeAIToolPlan(plan aiToolPlan) []aiToolCall {
 		case aiToolRecentTransactions:
 			call.Days = normalizeAIDays(call.Days, 30, 365)
 			call.Limit = normalizeAILimit(call.Limit, 10, 20)
+		case aiToolProductivityOverview:
+			call.Days = normalizeAIDays(call.Days, 14, 90)
 		case aiToolActivityOverview:
 			call.Days = normalizeAIDays(call.Days, 14, 180)
 		case aiToolRecentActivities:
@@ -239,6 +244,9 @@ func fallbackToolPlan(message string, history []ChatMessage) []aiToolCall {
 		appendCall(aiToolCall{Name: aiToolFinanceOverview, Days: 30})
 		appendCall(aiToolCall{Name: aiToolRecentTransactions, Days: 30, Limit: 10})
 	}
+	if scope.productivity {
+		appendCall(aiToolCall{Name: aiToolProductivityOverview, Days: 14})
+	}
 	if scope.activities {
 		appendCall(aiToolCall{Name: aiToolActivityOverview, Days: 14})
 		appendCall(aiToolCall{Name: aiToolRecentActivities, Days: 30, Limit: 8})
@@ -271,6 +279,7 @@ func fallbackToolPlan(message string, history []ChatMessage) []aiToolCall {
 
 	if len(calls) == 0 {
 		appendCall(aiToolCall{Name: aiToolFinanceOverview, Days: 30})
+		appendCall(aiToolCall{Name: aiToolProductivityOverview, Days: 14})
 		appendCall(aiToolCall{Name: aiToolWorkoutOverview, Days: 30})
 		appendCall(aiToolCall{Name: aiToolHealthOverview, Days: 14})
 		appendCall(aiToolCall{Name: aiToolActivityOverview, Days: 14})
@@ -281,7 +290,7 @@ func fallbackToolPlan(message string, history []ChatMessage) []aiToolCall {
 
 func isAllowedAITool(name aiToolName) bool {
 	switch name {
-	case aiToolFinanceOverview, aiToolRecentTransactions, aiToolActivityOverview, aiToolRecentActivities,
+	case aiToolFinanceOverview, aiToolRecentTransactions, aiToolProductivityOverview, aiToolActivityOverview, aiToolRecentActivities,
 		aiToolHealthOverview, aiToolWorkoutOverview, aiToolRecentWorkouts, aiToolRoutineOverview, aiToolHabitOverview, aiToolNutritionOverview, aiToolJournalOverview,
 		aiToolCalendarOverview, aiToolWeatherOverview:
 		return true
@@ -335,6 +344,11 @@ func (h *AIHandler) buildToolContext(ctx context.Context, userID string, tools [
 		case aiToolRecentTransactions:
 			appendSection("финансы")
 			h.appendRecentTransactionsTool(ctx, &sb, userID, call.Days, call.Limit)
+		case aiToolProductivityOverview:
+			appendSection("продуктивность")
+			if err := h.appendProductivityOverviewTool(ctx, &sb, userID, call.Days); err != nil {
+				return "", nil, err
+			}
 		case aiToolActivityOverview:
 			appendSection("активности")
 			h.appendActivityOverviewTool(ctx, &sb, userID, call.Days)
@@ -384,6 +398,12 @@ func (h *AIHandler) appendHealthOverviewTool(ctx context.Context, sb *strings.Bu
 	end := time.Now()
 	start := end.AddDate(0, 0, -days)
 	h.appendHealthContextInRange(ctx, sb, userID, start, end, fmt.Sprintf("=== ЗДОРОВЬЕ (%d дней) ===", days))
+}
+
+func (h *AIHandler) appendProductivityOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days int) error {
+	end := time.Now()
+	start := end.AddDate(0, 0, -days)
+	return h.appendProductivityContextInRange(ctx, sb, userID, start, end, fmt.Sprintf("=== ПРОДУКТИВНОСТЬ (%d дней) ===", days), 10)
 }
 
 func (h *AIHandler) appendFinanceOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days int) {

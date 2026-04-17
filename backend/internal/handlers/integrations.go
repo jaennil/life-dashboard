@@ -85,9 +85,9 @@ var integrationMeta_ = map[string]integrationMeta{
 		countQuery:  "SELECT COUNT(*) FROM habits WHERE source='habitify' AND archived = FALSE AND user_id = $1",
 	},
 	"todoist": {
-		displayName: "Todoist Habits",
-		description: "Recurring tasks и чеклисты из Todoist",
-		countQuery:  "SELECT COUNT(*) FROM habits WHERE source='todoist' AND archived = FALSE AND user_id = $1",
+		displayName: "Todoist",
+		description: "Задачи, recurring tasks и productivity-аналитика из Todoist",
+		countQuery:  "SELECT COUNT(*) FROM todoist_tasks WHERE is_active = TRUE AND user_id = $1",
 	},
 	"zenmoney": {
 		displayName: "ZenMoney",

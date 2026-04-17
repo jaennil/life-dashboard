@@ -5,6 +5,7 @@ import { Dashboard } from '@/pages/Dashboard'
 import { Finance } from '@/pages/Finance'
 import { Fitness } from '@/pages/Fitness'
 import { Nutrition } from '@/pages/Nutrition'
+import { Productivity } from '@/pages/Productivity'
 import { AiChat } from '@/pages/AiChat'
 import { Settings } from '@/pages/Settings'
 import { Login } from '@/pages/Login'
@@ -58,6 +59,7 @@ function AppRoutes() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/finance" element={<Finance />} />
               <Route path="/fitness" element={<Fitness />} />
+              <Route path="/productivity" element={<Productivity />} />
               <Route path="/nutrition" element={<Nutrition />} />
               <Route path="/ai" element={<AiChat />} />
               <Route path="/settings" element={<Settings />} />

@@ -234,6 +234,40 @@ export interface AILatestCheckup {
   generated_at?: string
 }
 
+export interface ProductivityDayBucket {
+  date: string
+  count: number
+}
+
+export interface ProductivitySummary {
+  active_total: number
+  overdue_total: number
+  due_today_total: number
+  due_next_7_days_total: number
+  recurring_total: number
+  stale_total: number
+  completed_today_total: number
+  completed_7_days_total: number
+  upcoming_load: ProductivityDayBucket[]
+}
+
+export interface ProductivityTask {
+  id: string
+  external_id: string
+  content: string
+  description: string
+  project_name: string
+  section_name: string
+  priority: number
+  is_recurring: boolean
+  added_at: string | null
+  due_at: string | null
+  due_date: string | null
+  last_completed_at: string | null
+  is_overdue: boolean
+  due_bucket: 'overdue' | 'today' | 'upcoming' | 'later' | 'no_due'
+}
+
 export interface HealthAPIKeyInfo {
   api_key: string
   webhook_url: string
@@ -262,6 +296,9 @@ export const api = {
   getFitnessWeekly: () => get<WeekStat[]>('/fitness/weekly'),
   getActivities: () => get<Activity[]>('/fitness/activities'),
   getWorkouts: () => get<Workout[]>('/fitness/workouts'),
+  getProductivitySummary: () => get<ProductivitySummary>('/productivity/summary'),
+  getProductivityTasks: (filter: 'all' | 'overdue' | 'today' | 'upcoming' | 'stale' = 'all') =>
+    get<ProductivityTask[]>('/productivity/tasks?filter=' + encodeURIComponent(filter)),
   getSpendingByCategory: (from?: string) => get<CategoryStat[]>('/finance/categories' + (from ? '?from=' + from : '')),
   getDailyTotals: (from?: string, to?: string) => {
     const p = new URLSearchParams()

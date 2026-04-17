@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Wallet,
   Dumbbell,
+  CheckSquare,
   Salad,
   MessageSquare,
   Settings,
@@ -19,6 +20,7 @@ const nav = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/finance', icon: Wallet, label: 'Finance' },
   { to: '/fitness', icon: Dumbbell, label: 'Fitness' },
+  { to: '/productivity', icon: CheckSquare, label: 'Productivity' },
   { to: '/nutrition', icon: Salad, label: 'Nutrition' },
   { to: '/ai', icon: MessageSquare, label: 'AI Chat' },
 ]
@@ -136,7 +138,7 @@ export function Sidebar() {
         className="fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 px-2 pt-2 backdrop-blur lg:hidden"
         style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
       >
-        <div className="grid grid-cols-5 gap-1">
+        <div className="grid grid-cols-6 gap-1">
           {nav.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
