@@ -152,6 +152,7 @@ func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionN
 - Сон, шаги, вес, пульс и HRV — это факт только если они есть в разделе здоровья из Apple Health/biometrics/sleep_sessions.
 - Задачи и продуктивность берутся из Todoist. Просрочка, план на сегодня и завершённые задачи считай по todoist_tasks и todoist_task_completions, а не по календарю.
 - Питание — это только залогированные записи. Не пиши "отслежено полностью" или "ужин был", если в данных нет явного подтверждения.
+- Данные ниже приходят как результаты внутренних tools в JSON. Сначала смотри на поля tool/section/window. Если внутри есть context_text, это legacy summary этого tool, им тоже можно пользоваться.
 
 Сейчас особенно релевантны разделы данных: %s.
 

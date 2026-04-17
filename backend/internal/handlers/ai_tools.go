@@ -337,6 +337,7 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "финансы",
+				Days:    call.Days,
 				Run: func(sb *strings.Builder) error {
 					h.appendFinanceOverviewTool(ctx, sb, userID, call.Days)
 					return nil
@@ -346,6 +347,8 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "финансы",
+				Days:    call.Days,
+				Limit:   call.Limit,
 				Run: func(sb *strings.Builder) error {
 					h.appendRecentTransactionsTool(ctx, sb, userID, call.Days, call.Limit)
 					return nil
@@ -355,6 +358,7 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "продуктивность",
+				Days:    call.Days,
 				Run: func(sb *strings.Builder) error {
 					return h.appendProductivityOverviewTool(ctx, sb, userID, call.Days)
 				},
@@ -363,6 +367,7 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "активности",
+				Days:    call.Days,
 				Run: func(sb *strings.Builder) error {
 					h.appendActivityOverviewTool(ctx, sb, userID, call.Days)
 					return nil
@@ -372,6 +377,8 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "активности",
+				Days:    call.Days,
+				Limit:   call.Limit,
 				Run: func(sb *strings.Builder) error {
 					h.appendRecentActivitiesTool(ctx, sb, userID, call.Days, call.Limit)
 					return nil
@@ -381,6 +388,7 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "здоровье",
+				Days:    call.Days,
 				Run: func(sb *strings.Builder) error {
 					h.appendHealthOverviewTool(ctx, sb, userID, call.Days)
 					return nil
@@ -390,6 +398,7 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "тренировки",
+				Days:    call.Days,
 				Run: func(sb *strings.Builder) error {
 					h.appendWorkoutOverviewTool(ctx, sb, userID, call.Days)
 					return nil
@@ -399,6 +408,7 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "тренировки",
+				Limit:   call.Limit,
 				Run: func(sb *strings.Builder) error {
 					return h.appendRecentWorkoutsTool(ctx, sb, userID, call.Limit)
 				},
@@ -407,6 +417,7 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "hevy routines",
+				Limit:   call.Limit,
 				Run: func(sb *strings.Builder) error {
 					return h.appendRoutineOverviewTool(ctx, sb, userID, call.Limit)
 				},
@@ -415,6 +426,7 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "привычки",
+				Days:    call.Days,
 				Run: func(sb *strings.Builder) error {
 					return h.appendHabitOverviewTool(ctx, sb, userID, call.Days)
 				},
@@ -423,6 +435,7 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "питание",
+				Days:    call.Days,
 				Run: func(sb *strings.Builder) error {
 					h.appendNutritionOverviewTool(ctx, sb, userID, call.Days)
 					return nil
@@ -432,6 +445,8 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "дневник",
+				Days:    call.Days,
+				Limit:   call.Limit,
 				Run: func(sb *strings.Builder) error {
 					h.appendJournalOverviewTool(ctx, sb, userID, call.Days, call.Limit)
 					return nil
@@ -439,8 +454,11 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 			})
 		case aiToolCalendarOverview:
 			executions = append(executions, aiToolExecution{
-				Name:    call.Name,
-				Section: "календарь",
+				Name:       call.Name,
+				Section:    "календарь",
+				PastDays:   call.PastDays,
+				FutureDays: call.FutureDays,
+				Limit:      call.Limit,
 				Run: func(sb *strings.Builder) error {
 					h.appendCalendarOverviewTool(ctx, sb, userID, call.PastDays, call.FutureDays, call.Limit)
 					return nil

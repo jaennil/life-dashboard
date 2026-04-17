@@ -258,6 +258,7 @@ func buildAICheckupPrompt(now time.Time, window checkupWindow, dataContext strin
 	sb.WriteString("Факт тренировки подтверждают только данные из workouts/Hevy. Факт сна, шагов, веса и пульса подтверждают только данные из biometrics/sleep_sessions.\n")
 	sb.WriteString("Продуктивность и задачи подтверждаются только данными Todoist, а не календарём.\n")
 	sb.WriteString("Питание отражает только залогированные записи из трекера. Не пиши \"отслежено полностью\", если в данных нет явного подтверждения полноты дня.\n")
+	sb.WriteString("Ниже данные пользователя приходят как JSON-результаты внутренних tools. Сначала опирайся на поля tool/section/window, а затем на context_text внутри этих объектов.\n")
 	sb.WriteString("Сделай структурированный ответ:\n")
 	sb.WriteString("1. Короткий итог в 2-4 предложениях.\n")
 	sb.WriteString("2. Финансы.\n")
@@ -314,73 +315,103 @@ func (h *AIHandler) buildCheckupContext(ctx context.Context, userID string, wind
 }
 
 func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, window checkupWindow) []aiToolExecution {
+	start := window.Start
+	end := window.End
+
 	return []aiToolExecution{
 		{
-			Name:    aiToolFinanceOverview,
-			Section: "финансы",
+			Name:            aiToolFinanceOverview,
+			Section:         "финансы",
+			RequestedPeriod: window.RequestedPeriod,
+			Start:           &start,
+			End:             &end,
 			Run: func(sb *strings.Builder) error {
 				h.appendCheckupFinanceContext(ctx, sb, userID, window)
 				return nil
 			},
 		},
 		{
-			Name:    aiToolProductivityOverview,
-			Section: "продуктивность",
+			Name:            aiToolProductivityOverview,
+			Section:         "продуктивность",
+			RequestedPeriod: window.RequestedPeriod,
+			Start:           &start,
+			End:             &end,
 			Run: func(sb *strings.Builder) error {
 				h.appendCheckupProductivityContext(ctx, sb, userID, window)
 				return nil
 			},
 		},
 		{
-			Name:    aiToolHealthOverview,
-			Section: "здоровье",
+			Name:            aiToolHealthOverview,
+			Section:         "здоровье",
+			RequestedPeriod: window.RequestedPeriod,
+			Start:           &start,
+			End:             &end,
 			Run: func(sb *strings.Builder) error {
 				h.appendCheckupHealthContext(ctx, sb, userID, window)
 				return nil
 			},
 		},
 		{
-			Name:    aiToolActivityOverview,
-			Section: "активности",
+			Name:            aiToolActivityOverview,
+			Section:         "активности",
+			RequestedPeriod: window.RequestedPeriod,
+			Start:           &start,
+			End:             &end,
 			Run: func(sb *strings.Builder) error {
 				h.appendCheckupActivityContext(ctx, sb, userID, window)
 				return nil
 			},
 		},
 		{
-			Name:    aiToolWorkoutOverview,
-			Section: "тренировки",
+			Name:            aiToolWorkoutOverview,
+			Section:         "тренировки",
+			RequestedPeriod: window.RequestedPeriod,
+			Start:           &start,
+			End:             &end,
 			Run: func(sb *strings.Builder) error {
 				return h.appendCheckupWorkoutContext(ctx, sb, userID, window)
 			},
 		},
 		{
-			Name:    aiToolNutritionOverview,
-			Section: "питание",
+			Name:            aiToolNutritionOverview,
+			Section:         "питание",
+			RequestedPeriod: window.RequestedPeriod,
+			Start:           &start,
+			End:             &end,
 			Run: func(sb *strings.Builder) error {
 				h.appendCheckupNutritionContext(ctx, sb, userID, window)
 				return nil
 			},
 		},
 		{
-			Name:    aiToolHabitOverview,
-			Section: "привычки",
+			Name:            aiToolHabitOverview,
+			Section:         "привычки",
+			RequestedPeriod: window.RequestedPeriod,
+			Start:           &start,
+			End:             &end,
 			Run: func(sb *strings.Builder) error {
 				h.appendCheckupHabitContext(ctx, sb, userID, window)
 				return nil
 			},
 		},
 		{
-			Name:    aiToolJournalOverview,
-			Section: "дневник",
+			Name:            aiToolJournalOverview,
+			Section:         "дневник",
+			RequestedPeriod: window.RequestedPeriod,
+			Start:           &start,
+			End:             &end,
 			Run: func(sb *strings.Builder) error {
 				h.appendCheckupJournalContext(ctx, sb, userID, window)
 				return nil
 			},
 		},
 		{
-			Name:    aiToolCalendarOverview,
-			Section: "календарь",
+			Name:            aiToolCalendarOverview,
+			Section:         "календарь",
+			RequestedPeriod: window.RequestedPeriod,
+			Start:           &start,
+			End:             &end,
 			Run: func(sb *strings.Builder) error {
 				h.appendCheckupCalendarContext(ctx, sb, userID, window)
 				return nil

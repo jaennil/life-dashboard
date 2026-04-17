@@ -11,26 +11,34 @@ func TestAIToolRunRenderIncludesToolMetadata(t *testing.T) {
 	run := aiToolRun{
 		Results: []aiToolResult{
 			{
-				Name:     aiToolFinanceOverview,
-				Section:  "финансы",
-				Context:  "=== ФИНАНСЫ ===\nБаланс: 100 ₽",
-				Duration: 125 * time.Millisecond,
+				Name:          aiToolFinanceOverview,
+				Section:       "финансы",
+				ContextFormat: "plain_text_v1",
+				ContextText:   "=== ФИНАНСЫ ===\nБаланс: 100 ₽",
+				DurationMs:    125,
 			},
 			{
-				Name:     aiToolWorkoutOverview,
-				Section:  "тренировки",
-				Context:  "=== ТРЕНИРОВКИ ===\n2 тренировки",
-				Duration: 42 * time.Millisecond,
+				Name:          aiToolWorkoutOverview,
+				Section:       "тренировки",
+				ContextFormat: "plain_text_v1",
+				ContextText:   "=== ТРЕНИРОВКИ ===\n2 тренировки",
+				DurationMs:    42,
 			},
 		},
 	}
 
 	rendered := run.render()
 	for _, expected := range []string{
-		"Ниже результаты внутренних data-tools",
-		"--- TOOL finance_overview | SECTION финансы | 125ms ---",
+		"Ниже результаты внутренних data-tools в JSON",
+		"\"tool_results\":",
+		"\"tool\": \"finance_overview\"",
+		"\"section\": \"финансы\"",
+		"\"context_format\": \"plain_text_v1\"",
+		"\"duration_ms\": 125",
 		"=== ФИНАНСЫ ===",
-		"--- TOOL workout_overview | SECTION тренировки | 42ms ---",
+		"\"tool\": \"workout_overview\"",
+		"\"section\": \"тренировки\"",
+		"\"duration_ms\": 42",
 		"=== ТРЕНИРОВКИ ===",
 	} {
 		if !strings.Contains(rendered, expected) {
@@ -76,6 +84,15 @@ func TestCheckupToolExecutionsOrder(t *testing.T) {
 		}
 		if executions[i].Run == nil {
 			t.Fatalf("expected execution %d to have run func", i)
+		}
+		if executions[i].RequestedPeriod != checkupPeriodWeek {
+			t.Fatalf("expected execution %d requested period %q, got %q", i, checkupPeriodWeek, executions[i].RequestedPeriod)
+		}
+		if executions[i].Start == nil || !executions[i].Start.Equal(window.Start) {
+			t.Fatalf("expected execution %d start to be propagated", i)
+		}
+		if executions[i].End == nil || !executions[i].End.Equal(window.End) {
+			t.Fatalf("expected execution %d end to be propagated", i)
 		}
 	}
 }
