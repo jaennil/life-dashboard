@@ -210,7 +210,29 @@ func (h *IntegrationsHandler) ToggleIntegration(w http.ResponseWriter, r *http.R
 		http.Error(w, "integration is not connected", http.StatusConflict)
 		return
 	}
-	_, err := h.db.Exec(ctx, `
+
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		h.logger.Error().Err(err).Str("name", name).Msg("begin toggle integration")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	credentialsDeleted := false
+	if !body.Enabled && personalIntegrations[name] {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM oauth_tokens
+			WHERE source = $1 AND user_id = $2
+		`, name, userID); err != nil {
+			h.logger.Error().Err(err).Str("name", name).Msg("delete integration credentials")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		credentialsDeleted = true
+	}
+
+	_, err = tx.Exec(ctx, `
 		INSERT INTO sync_state (source, last_synced_at, updated_at, enabled, user_id)
 		VALUES ($1, NULL, NOW(), $2, $3)
 		ON CONFLICT (source, user_id) DO UPDATE SET enabled = $2, updated_at = NOW()
@@ -220,10 +242,15 @@ func (h *IntegrationsHandler) ToggleIntegration(w http.ResponseWriter, r *http.R
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	if err := tx.Commit(ctx); err != nil {
+		h.logger.Error().Err(err).Str("name", name).Msg("commit toggle integration")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
-	h.logger.Info().Str("name", name).Bool("enabled", body.Enabled).Msg("integration toggled")
+	h.logger.Info().Str("name", name).Bool("enabled", body.Enabled).Bool("credentials_deleted", credentialsDeleted).Msg("integration toggled")
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"name": name, "enabled": body.Enabled})
+	json.NewEncoder(w).Encode(map[string]any{"name": name, "enabled": body.Enabled, "credentials_deleted": credentialsDeleted})
 }
 
 func (h *IntegrationsHandler) SaveMFPToken(w http.ResponseWriter, r *http.Request) {
@@ -332,20 +359,7 @@ func hasIntegrationActivationState(ctx context.Context, db *pgxpool.Pool, source
 	if !personalIntegrations[source] {
 		return false
 	}
-	if hasStoredCredentials(ctx, db, source, userID) {
-		return true
-	}
-
-	meta, ok := integrationMeta_[source]
-	if !ok || meta.countQuery == "" {
-		return false
-	}
-
-	var count int
-	if err := db.QueryRow(ctx, meta.countQuery, userID).Scan(&count); err != nil {
-		return false
-	}
-	return count > 0
+	return hasStoredCredentials(ctx, db, source, userID)
 }
 
 func hasStoredCredentials(ctx context.Context, db *pgxpool.Pool, source string, userID string) bool {

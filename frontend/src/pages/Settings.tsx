@@ -124,9 +124,8 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
   const requiresCredentials = isOAuth || !!tokenMeta || MANAGED_CONNECTION_INTEGRATIONS.has(integration.name)
   const canSelfConnect = isOAuth || !!tokenMeta
   const hasSyncData = integration.record_count > 0 || !!integration.last_sync_at
-  const hasConnectionData = integration.has_credentials || hasSyncData
-  const isConnected = requiresCredentials ? hasConnectionData : integration.enabled
-  const isActive = integration.enabled && (requiresCredentials ? hasConnectionData : integration.configured)
+  const isConnected = requiresCredentials ? integration.has_credentials : integration.enabled
+  const isActive = integration.enabled && (requiresCredentials ? integration.has_credentials : integration.configured)
   const showSyncPending = syncPending && integration.enabled
 
   const statusIcon = !integration.configured
@@ -329,7 +328,7 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
             <div className="text-xs text-muted-foreground">
               Данные обновляются, карточка обновится автоматически
             </div>
-          ) : (requiresCredentials ? isConnected : integration.enabled) && (
+          ) : (requiresCredentials ? (isConnected || hasSyncData) : integration.enabled) && (
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <span>Синхр.: {formatLastSyncAt(integration.last_sync_at)}</span>
               <span>•</span>
