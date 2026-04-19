@@ -471,31 +471,104 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 				},
 			})
 		case aiToolWorkoutOverview:
+			end := time.Now()
+			start := end.AddDate(0, 0, -call.Days)
+			var cached *AIWorkoutOverviewData
+			load := func() (AIWorkoutOverviewData, error) {
+				if cached != nil {
+					return *cached, nil
+				}
+				data, err := h.buildWorkoutOverviewInRange(ctx, userID, start, end)
+				if err != nil {
+					return AIWorkoutOverviewData{}, err
+				}
+				cached = &data
+				return data, nil
+			}
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "тренировки",
 				Days:    call.Days,
 				Run: func(sb *strings.Builder) error {
-					h.appendWorkoutOverviewTool(ctx, sb, userID, call.Days)
+					data, err := load()
+					if err != nil {
+						return err
+					}
+					sb.WriteString(renderWorkoutOverviewText(fmt.Sprintf("=== ТРЕНИРОВКИ (%d дней) ===", call.Days), data))
 					return nil
+				},
+				Data: func() (any, error) {
+					data, err := load()
+					if err != nil {
+						return nil, err
+					}
+					return data, nil
 				},
 			})
 		case aiToolRecentWorkouts:
+			var cached *AIRecentWorkoutsData
+			load := func() (AIRecentWorkoutsData, error) {
+				if cached != nil {
+					return *cached, nil
+				}
+				data, err := h.buildRecentWorkoutsData(ctx, userID, call.Limit)
+				if err != nil {
+					return AIRecentWorkoutsData{}, err
+				}
+				cached = &data
+				return data, nil
+			}
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "тренировки",
 				Limit:   call.Limit,
 				Run: func(sb *strings.Builder) error {
-					return h.appendRecentWorkoutsTool(ctx, sb, userID, call.Limit)
+					data, err := load()
+					if err != nil {
+						return err
+					}
+					sb.WriteString(renderRecentWorkoutsText(fmt.Sprintf("=== ПОСЛЕДНИЕ ТРЕНИРОВКИ (%d шт.) ===", call.Limit), data))
+					return nil
+				},
+				Data: func() (any, error) {
+					data, err := load()
+					if err != nil {
+						return nil, err
+					}
+					return data, nil
 				},
 			})
 		case aiToolRoutineOverview:
+			var cached *AIRoutineOverviewData
+			load := func() (AIRoutineOverviewData, error) {
+				if cached != nil {
+					return *cached, nil
+				}
+				data, err := h.buildRoutineOverviewData(ctx, userID, call.Limit)
+				if err != nil {
+					return AIRoutineOverviewData{}, err
+				}
+				cached = &data
+				return data, nil
+			}
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "hevy routines",
 				Limit:   call.Limit,
 				Run: func(sb *strings.Builder) error {
-					return h.appendRoutineOverviewTool(ctx, sb, userID, call.Limit)
+					data, err := load()
+					if err != nil {
+						return err
+					}
+					sb.WriteString(renderRoutineOverviewText(fmt.Sprintf("=== HEVY ROUTINES (%d шт.) ===", call.Limit), data))
+					return nil
+				},
+				Data: func() (any, error) {
+					data, err := load()
+					if err != nil {
+						return nil, err
+					}
+					return data, nil
 				},
 			})
 		case aiToolHabitOverview:
@@ -649,85 +722,31 @@ func (h *AIHandler) appendRecentActivitiesTool(ctx context.Context, sb *strings.
 }
 
 func (h *AIHandler) appendWorkoutOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days int) {
-	since := time.Now().AddDate(0, 0, -days)
-	sb.WriteString(fmt.Sprintf("=== ТРЕНИРОВКИ (%d дней) ===\n", days))
-
-	var workoutCount, activeDays, setCount int
-	h.db.QueryRow(ctx, `
-		SELECT
-			COUNT(*),
-			COUNT(DISTINCT DATE(started_at))
-		FROM workouts
-		WHERE user_id = $1
-			AND started_at >= $2
-	`, userID, since).Scan(&workoutCount, &activeDays)
-	h.db.QueryRow(ctx, `
-		SELECT COUNT(*)
-		FROM workout_sets ws
-		JOIN workouts w ON w.id = ws.workout_id
-		WHERE w.user_id = $1
-			AND w.started_at >= $2
-	`, userID, since).Scan(&setCount)
-	sb.WriteString(fmt.Sprintf("За период: %d тренировок, %d активных дней, %d подходов\n", workoutCount, activeDays, setCount))
-
-	rows, err := h.db.Query(ctx, `
-		SELECT exercise_name, COUNT(*)
-		FROM workout_sets ws
-		JOIN workouts w ON w.id = ws.workout_id
-		WHERE w.user_id = $1
-			AND w.started_at >= $2
-		GROUP BY exercise_name
-		ORDER BY COUNT(*) DESC, exercise_name ASC
-		LIMIT 5
-	`, userID, since)
-	if err == nil {
-		defer rows.Close()
-		sb.WriteString("Топ упражнений по подходам:\n")
-		hasRows := false
-		for rows.Next() {
-			hasRows = true
-			var exercise string
-			var sets int
-			if rows.Scan(&exercise, &sets) == nil {
-				sb.WriteString(fmt.Sprintf("  - %s: %d подходов\n", exercise, sets))
-			}
-		}
-		if !hasRows {
-			sb.WriteString("  - Нет данных по упражнениям за период\n")
-		}
+	end := time.Now()
+	start := end.AddDate(0, 0, -days)
+	data, err := h.buildWorkoutOverviewInRange(ctx, userID, start, end)
+	if err != nil {
+		sb.WriteString(fmt.Sprintf("=== ТРЕНИРОВКИ (%d дней) ===\nДанные по тренировкам временно недоступны.\n", days))
+		return
 	}
+	sb.WriteString(renderWorkoutOverviewText(fmt.Sprintf("=== ТРЕНИРОВКИ (%d дней) ===", days), data))
 }
 
 func (h *AIHandler) appendRecentWorkoutsTool(ctx context.Context, sb *strings.Builder, userID string, limit int) error {
-	sb.WriteString(fmt.Sprintf("=== ПОСЛЕДНИЕ ТРЕНИРОВКИ (%d шт.) ===\n", limit))
-
-	workoutContext, err := h.buildRecentWorkoutContextLimit(ctx, userID, limit)
+	data, err := h.buildRecentWorkoutsData(ctx, userID, limit)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(workoutContext) == "" {
-		sb.WriteString("Нет тренировок.\n")
-		return nil
-	}
-	sb.WriteString(workoutContext)
+	sb.WriteString(renderRecentWorkoutsText(fmt.Sprintf("=== ПОСЛЕДНИЕ ТРЕНИРОВКИ (%d шт.) ===", limit), data))
 	return nil
 }
 
 func (h *AIHandler) appendRoutineOverviewTool(ctx context.Context, sb *strings.Builder, userID string, limit int) error {
-	sb.WriteString(fmt.Sprintf("=== HEVY ROUTINES (%d шт.) ===\n", limit))
-	sb.WriteString("Это шаблоны тренировок из Hevy. Они показывают план упражнений и плановые веса/повторы, а не факт выполнения.\n")
-
-	routineContext, err := h.buildRoutineContext(ctx, userID, limit)
+	data, err := h.buildRoutineOverviewData(ctx, userID, limit)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(routineContext) == "" {
-		sb.WriteString("Нет routines.\n")
-		return nil
-	}
-
-	sb.WriteString(routineContext)
-	sb.WriteString("\n")
+	sb.WriteString(renderRoutineOverviewText(fmt.Sprintf("=== HEVY ROUTINES (%d шт.) ===", limit), data))
 	return nil
 }
 

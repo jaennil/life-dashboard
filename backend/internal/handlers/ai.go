@@ -758,50 +758,11 @@ func (h *AIHandler) buildRecentWorkoutContext(ctx context.Context, userID string
 }
 
 func (h *AIHandler) buildRecentWorkoutContextLimit(ctx context.Context, userID string, limit int) (string, error) {
-	rows, err := h.db.Query(ctx, `
-		SELECT id, source, started_at, COALESCE(title,''), COALESCE(notes,''), raw_payload
-		FROM workouts
-		WHERE user_id = $1
-		ORDER BY started_at DESC
-		LIMIT $2
-	`, userID, limit)
+	data, err := h.buildRecentWorkoutsData(ctx, userID, limit)
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
-
-	fitnessHelper := &FitnessHandler{db: h.db, logger: h.logger}
-	var sb strings.Builder
-
-	for rows.Next() {
-		var workout Workout
-		var rawPayload []byte
-		if err := rows.Scan(
-			&workout.ID,
-			&workout.Source,
-			&workout.StartedAt,
-			&workout.Title,
-			&workout.Notes,
-			&rawPayload,
-		); err != nil {
-			continue
-		}
-
-		if workout.Source == "hevy" && len(rawPayload) > 0 {
-			if err := hydrateHevyWorkout(&workout, rawPayload); err != nil {
-				h.logger.Warn().Str("workout_id", workout.ID).Err(err).Msg("failed to hydrate hevy workout for ai context")
-			}
-		}
-		if len(workout.Exercises) == 0 {
-			if err := fitnessHelper.loadNormalizedWorkoutExercises(ctx, &workout); err != nil {
-				h.logger.Warn().Str("workout_id", workout.ID).Err(err).Msg("failed to load workout exercises for ai context")
-			}
-		}
-
-		sb.WriteString(formatAIWorkoutContext(workout))
-	}
-
-	return sb.String(), nil
+	return renderRecentWorkoutsText("", data), nil
 }
 
 func formatAIWorkoutContext(workout Workout) string {
@@ -900,160 +861,9 @@ func formatAICalendarEvent(startTime, endTime time.Time, allDay bool, title, loc
 }
 
 func (h *AIHandler) buildRoutineContext(ctx context.Context, userID string, limit int) (string, error) {
-	var totalCount int
-	if err := h.db.QueryRow(ctx, `
-		SELECT COUNT(*) FROM workout_routines WHERE user_id = $1
-	`, userID).Scan(&totalCount); err != nil {
-		return "", err
-	}
-
-	rows, err := h.db.Query(ctx, `
-		SELECT
-			r.id,
-			r.external_id,
-			r.title,
-			r.folder_id,
-			r.source_created_at,
-			r.source_updated_at,
-			COALESCE(stats.usage_count, 0),
-			stats.last_used_at
-		FROM workout_routines r
-		LEFT JOIN LATERAL (
-			SELECT COUNT(*) AS usage_count, MAX(started_at) AS last_used_at
-			FROM workouts w
-			WHERE w.user_id = r.user_id
-				AND w.routine_external_id = r.external_id
-		) stats ON true
-		WHERE r.user_id = $1
-		ORDER BY COALESCE(stats.last_used_at, r.source_updated_at, r.created_at) DESC NULLS LAST, r.title ASC
-		LIMIT $2
-	`, userID, limit)
+	data, err := h.buildRoutineOverviewData(ctx, userID, limit)
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
-
-	var sb strings.Builder
-	if totalCount > 0 {
-		sb.WriteString(fmt.Sprintf("Всего routines в Hevy: %d\n", totalCount))
-	}
-	for rows.Next() {
-		var routineID, externalID, title string
-		var folderID *int64
-		var createdAt, updatedAt, lastUsedAt *time.Time
-		var usageCount int
-		if err := rows.Scan(&routineID, &externalID, &title, &folderID, &createdAt, &updatedAt, &usageCount, &lastUsedAt); err != nil {
-			continue
-		}
-
-		sb.WriteString(fmt.Sprintf("Routine: %s\n", title))
-		sb.WriteString(fmt.Sprintf("  external_id: %s\n", externalID))
-		if folderID != nil {
-			sb.WriteString(fmt.Sprintf("  folder_id: %d\n", *folderID))
-		}
-		sb.WriteString(fmt.Sprintf("  выполнений по этой routine: %d\n", usageCount))
-		if lastUsedAt != nil {
-			sb.WriteString(fmt.Sprintf("  последний раз использовалась: %s\n", formatAITimestampLocal(*lastUsedAt, "02.01.2006 15:04")))
-		}
-		if updatedAt != nil {
-			sb.WriteString(fmt.Sprintf("  обновлено в Hevy: %s\n", formatAITimestampLocal(*updatedAt, "02.01.2006 15:04")))
-		}
-		if createdAt != nil {
-			sb.WriteString(fmt.Sprintf("  создано в Hevy: %s\n", formatAITimestampLocal(*createdAt, "02.01.2006 15:04")))
-		}
-		if err := h.appendRoutineExerciseContext(ctx, &sb, routineID); err != nil {
-			return "", err
-		}
-		sb.WriteString("\n")
-	}
-
-	return strings.TrimSpace(sb.String()), nil
-}
-
-func (h *AIHandler) appendRoutineExerciseContext(ctx context.Context, sb *strings.Builder, routineID string) error {
-	rows, err := h.db.Query(ctx, `
-		SELECT id, exercise_index, exercise_name, COALESCE(notes, ''), COALESCE(template_id, ''), COALESCE(superset_id, ''), rest_seconds
-		FROM routine_exercises
-		WHERE routine_id = $1
-		ORDER BY exercise_index ASC, exercise_name ASC
-	`, routineID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var exerciseID, name, notes, templateID, supersetID string
-		var index int
-		var restSeconds *int
-		if err := rows.Scan(&exerciseID, &index, &name, &notes, &templateID, &supersetID, &restSeconds); err != nil {
-			continue
-		}
-
-		header := fmt.Sprintf("  Упражнение %d: %s", index+1, name)
-		if templateID != "" {
-			header += fmt.Sprintf(" [tpl %s]", templateID)
-		}
-		if supersetID != "" {
-			header += fmt.Sprintf(" [superset %s]", supersetID)
-		}
-		sb.WriteString(header + "\n")
-		if notes != "" {
-			sb.WriteString(fmt.Sprintf("    Заметки: %s\n", truncateAIText(notes, 180)))
-		}
-		if restSeconds != nil {
-			sb.WriteString(fmt.Sprintf("    Отдых между подходами: %d сек\n", *restSeconds))
-		}
-
-		setRows, err := h.db.Query(ctx, `
-			SELECT set_index, COALESCE(set_type, 'normal'), weight_kg, reps, distance_meters, duration_seconds
-			FROM routine_sets
-			WHERE routine_exercise_id = $1
-			ORDER BY set_index ASC
-		`, exerciseID)
-		if err != nil {
-			return err
-		}
-
-		for setRows.Next() {
-			var setIndex int
-			var setType string
-			var weightKg, distanceMeters *float64
-			var reps, durationSeconds *int
-			if err := setRows.Scan(&setIndex, &setType, &weightKg, &reps, &distanceMeters, &durationSeconds); err != nil {
-				continue
-			}
-
-			parts := make([]string, 0, 3)
-			if weightKg != nil || reps != nil {
-				weight := "-"
-				repsValue := "-"
-				if weightKg != nil {
-					weight = formatAIFloat(*weightKg)
-				}
-				if reps != nil {
-					repsValue = strconv.Itoa(*reps)
-				}
-				parts = append(parts, fmt.Sprintf("%s кг x %s", weight, repsValue))
-			}
-			if distanceMeters != nil {
-				parts = append(parts, fmt.Sprintf("%s м", formatAIFloat(*distanceMeters)))
-			}
-			if durationSeconds != nil {
-				parts = append(parts, fmt.Sprintf("%d сек", *durationSeconds))
-			}
-			if len(parts) == 0 {
-				parts = append(parts, "без числовых метрик")
-			}
-
-			sb.WriteString(fmt.Sprintf("    Плановый подход %d: %s", setIndex, strings.Join(parts, ", ")))
-			if setType != "" && setType != "normal" {
-				sb.WriteString(fmt.Sprintf(" [%s]", setType))
-			}
-			sb.WriteString("\n")
-		}
-		setRows.Close()
-	}
-
-	return nil
+	return renderRoutineOverviewText("", data), nil
 }

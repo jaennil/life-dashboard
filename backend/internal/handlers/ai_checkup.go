@@ -341,6 +341,18 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 		productivityData = &data
 		return data, nil
 	}
+	var workoutData *AIWorkoutOverviewData
+	loadWorkoutData := func() (AIWorkoutOverviewData, error) {
+		if workoutData != nil {
+			return *workoutData, nil
+		}
+		data, err := h.buildWorkoutOverviewInRange(ctx, userID, window.Start, window.End)
+		if err != nil {
+			return AIWorkoutOverviewData{}, err
+		}
+		workoutData = &data
+		return data, nil
+	}
 
 	return []aiToolExecution{
 		{
@@ -417,6 +429,13 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 			RequestedPeriod: window.RequestedPeriod,
 			Start:           &start,
 			End:             &end,
+			Data: func() (any, error) {
+				data, err := loadWorkoutData()
+				if err != nil {
+					return nil, err
+				}
+				return data, nil
+			},
 			Run: func(sb *strings.Builder) error {
 				return h.appendCheckupWorkoutContext(ctx, sb, userID, window)
 			},
