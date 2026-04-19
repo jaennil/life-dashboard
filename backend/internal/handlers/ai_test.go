@@ -77,6 +77,47 @@ func TestSelectAIContextScopeUsesHistoryForFollowUpQuestions(t *testing.T) {
 	}
 }
 
+func TestMergeChatHistoryKeepsStoredOrderAndClientTail(t *testing.T) {
+	stored := []ChatMessage{
+		{Role: "user", Content: "у меня есть 2 грифа по 11кг"},
+		{Role: "assistant", Content: "запомнил"},
+	}
+	client := []ChatMessage{
+		{Role: "user", Content: "у меня есть 2 грифа по 11кг"},
+		{Role: "assistant", Content: "запомнил"},
+		{Role: "user", Content: "и блины 5кг и 2.5кг"},
+	}
+
+	merged := mergeChatHistory(stored, client, 10)
+	if len(merged) != 3 {
+		t.Fatalf("expected deduplicated merged history length 3, got %d: %#v", len(merged), merged)
+	}
+	if merged[0].Content != "у меня есть 2 грифа по 11кг" || merged[2].Content != "и блины 5кг и 2.5кг" {
+		t.Fatalf("expected stored order plus client tail, got %#v", merged)
+	}
+}
+
+func TestSanitizeChatHistoryTrimsInvalidAndLimits(t *testing.T) {
+	history := []ChatMessage{
+		{Role: "system", Content: "ignore"},
+		{Role: " user ", Content: " first "},
+		{Role: "assistant", Content: ""},
+		{Role: "assistant", Content: "second"},
+		{Role: "user", Content: "third"},
+	}
+
+	sanitized := sanitizeChatHistory(history, 2)
+	if len(sanitized) != 2 {
+		t.Fatalf("expected 2 sanitized messages, got %d: %#v", len(sanitized), sanitized)
+	}
+	if sanitized[0].Role != "assistant" || sanitized[0].Content != "second" {
+		t.Fatalf("expected assistant second as first sanitized message, got %#v", sanitized[0])
+	}
+	if sanitized[1].Role != "user" || sanitized[1].Content != "third" {
+		t.Fatalf("expected user third as second sanitized message, got %#v", sanitized[1])
+	}
+}
+
 func TestSelectAIContextScopeEnablesRoutinesForTemplateQuestions(t *testing.T) {
 	scope := selectAIContextScope("покажи мою hevy routine на pull и плановые веса", nil)
 

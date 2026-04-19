@@ -10,7 +10,10 @@ import (
 	authmw "life-dashboard/internal/middleware"
 )
 
-const aiHistoryLimit = 200
+const (
+	aiHistoryLimit        = 200
+	aiHistoryContextLimit = 24
+)
 
 type AIHistoryMessage struct {
 	ID        string    `json:"id"`
@@ -26,13 +29,13 @@ func (h *AIHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(ctx, `
 		SELECT id, role, content, created_at
 		FROM (
-			SELECT id, role, content, created_at
+			SELECT id, role, content, created_at, message_order
 			FROM ai_chat_messages
 			WHERE user_id = $1
-			ORDER BY created_at DESC
+			ORDER BY message_order DESC
 			LIMIT $2
 		) history
-		ORDER BY created_at ASC
+		ORDER BY message_order ASC
 	`, userID, aiHistoryLimit)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query ai history")
@@ -67,6 +70,44 @@ func (h *AIHandler) ClearHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *AIHandler) loadRecentChatMessages(ctx context.Context, userID string, limit int) ([]ChatMessage, error) {
+	if limit <= 0 {
+		limit = aiHistoryContextLimit
+	}
+
+	rows, err := h.db.Query(ctx, `
+		SELECT role, content
+		FROM (
+			SELECT role, content, message_order
+			FROM ai_chat_messages
+			WHERE user_id = $1
+			ORDER BY message_order DESC
+			LIMIT $2
+		) history
+		ORDER BY message_order ASC
+	`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	messages := make([]ChatMessage, 0, limit)
+	for rows.Next() {
+		var msg ChatMessage
+		if err := rows.Scan(&msg.Role, &msg.Content); err != nil {
+			return nil, err
+		}
+		if normalized := normalizeChatMessage(msg); normalized != nil {
+			messages = append(messages, *normalized)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return messages, nil
 }
 
 func (h *AIHandler) storeChatExchange(ctx context.Context, userID, userMessage, assistantMessage string) {

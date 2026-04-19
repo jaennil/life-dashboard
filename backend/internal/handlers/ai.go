@@ -96,8 +96,9 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
+	history := h.buildConversationHistory(ctx, userID, req.History)
 
-	dataContext, sectionNames, err := h.buildChatContext(ctx, userID, req.Message, req.History)
+	dataContext, sectionNames, err := h.buildChatContext(ctx, userID, req.Message, history)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("build context")
 		dataContext = "Данные пользователя временно недоступны."
@@ -107,7 +108,7 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	systemPrompt := buildAISystemPromptWithSections(time.Now(), dataContext, sectionNames)
 
 	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
-	messages = append(messages, req.History...)
+	messages = append(messages, history...)
 	messages = append(messages, ChatMessage{Role: "user", Content: req.Message})
 
 	content, err := h.complete(ctx, messages)
@@ -129,6 +130,84 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write(respBody); err != nil {
 		h.logger.Error().Err(err).Msg("write ai response")
 	}
+}
+
+func (h *AIHandler) buildConversationHistory(ctx context.Context, userID string, clientHistory []ChatMessage) []ChatMessage {
+	clientHistory = sanitizeChatHistory(clientHistory, aiHistoryContextLimit)
+
+	storedHistory, err := h.loadRecentChatMessages(ctx, userID, aiHistoryContextLimit)
+	if err != nil {
+		h.logger.Warn().Err(err).Str("user_id", userID).Msg("load ai chat history from db")
+		return clientHistory
+	}
+	if len(storedHistory) == 0 {
+		return clientHistory
+	}
+
+	history := mergeChatHistory(storedHistory, clientHistory, aiHistoryContextLimit)
+	h.logger.Debug().
+		Str("user_id", userID).
+		Int("stored_history", len(storedHistory)).
+		Int("client_history", len(clientHistory)).
+		Int("merged_history", len(history)).
+		Msg("ai chat history prepared")
+	return history
+}
+
+func sanitizeChatHistory(history []ChatMessage, limit int) []ChatMessage {
+	if limit <= 0 || len(history) == 0 {
+		return nil
+	}
+	start := len(history) - limit
+	if start < 0 {
+		start = 0
+	}
+
+	messages := make([]ChatMessage, 0, len(history)-start)
+	for _, msg := range history[start:] {
+		if normalized := normalizeChatMessage(msg); normalized != nil {
+			messages = append(messages, *normalized)
+		}
+	}
+	return messages
+}
+
+func normalizeChatMessage(msg ChatMessage) *ChatMessage {
+	role := strings.TrimSpace(strings.ToLower(msg.Role))
+	if role != "user" && role != "assistant" {
+		return nil
+	}
+	content := strings.TrimSpace(msg.Content)
+	if content == "" {
+		return nil
+	}
+	return &ChatMessage{Role: role, Content: content}
+}
+
+func mergeChatHistory(storedHistory, clientHistory []ChatMessage, limit int) []ChatMessage {
+	if limit <= 0 {
+		return nil
+	}
+
+	merged := make([]ChatMessage, 0, len(storedHistory)+len(clientHistory))
+	seen := make(map[string]bool, len(storedHistory)+len(clientHistory))
+	for _, msg := range append(storedHistory, clientHistory...) {
+		normalized := normalizeChatMessage(msg)
+		if normalized == nil {
+			continue
+		}
+		key := normalized.Role + "\x00" + normalized.Content
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		merged = append(merged, *normalized)
+	}
+
+	if len(merged) > limit {
+		merged = merged[len(merged)-limit:]
+	}
+	return merged
 }
 
 func buildAISystemPrompt(now time.Time, dataContext string, scope aiContextScope) string {
