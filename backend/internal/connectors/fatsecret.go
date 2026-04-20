@@ -260,6 +260,7 @@ type fsFoodEntry struct {
 	FoodEntryID            string `json:"food_entry_id"`
 	FoodEntryName          string `json:"food_entry_name"`
 	MealID                 string `json:"meal_id"`
+	Meal                   string `json:"meal"`
 	NumberOfUnits          string `json:"number_of_units"`
 	MeasurementDescription string `json:"measurement_description"`
 	Calories               string `json:"calories"`
@@ -300,6 +301,27 @@ var fsMealNames = map[string]string{
 	"1": "lunch",
 	"2": "dinner",
 	"3": "snacks",
+}
+
+func normalizeFatSecretMealType(meal, mealID string) string {
+	switch strings.TrimSpace(strings.ToLower(meal)) {
+	case "breakfast":
+		return "breakfast"
+	case "lunch":
+		return "lunch"
+	case "dinner":
+		return "dinner"
+	case "snack", "snacks", "morning snack", "afternoon snack", "evening snack":
+		return "snacks"
+	case "other":
+		return "other"
+	}
+
+	if normalized := fsMealNames[strings.TrimSpace(mealID)]; normalized != "" {
+		return normalized
+	}
+
+	return "other"
 }
 
 func (c *FatSecretConnector) syncProfile(ctx context.Context, userID, token, secret string) error {
@@ -513,10 +535,7 @@ func (c *FatSecretConnector) storeEntries(ctx context.Context, userID string, da
 	c.db.Exec(ctx, `DELETE FROM nutrition_items WHERE daily_id = $1`, dailyID)
 
 	for _, e := range entries {
-		mealName := fsMealNames[e.MealID]
-		if mealName == "" {
-			mealName = "other"
-		}
+		mealName := normalizeFatSecretMealType(e.Meal, e.MealID)
 		serving := fmt.Sprintf("%.0f %s", parseFloat(e.NumberOfUnits), e.MeasurementDescription)
 		macros, _ := json.Marshal(map[string]float64{
 			"protein":             parseFloat(e.Protein),
