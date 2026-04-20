@@ -25,6 +25,7 @@ const (
 	fsAuthorizeURL    = "https://authentication.fatsecret.com/oauth/authorize"
 	fsAccessTokenURL  = "https://authentication.fatsecret.com/oauth/access_token"
 	fsAPIBase         = "https://platform.fatsecret.com/rest/server.api"
+	nutritionSyncDays = 90
 )
 
 type requestTokenState struct {
@@ -233,7 +234,7 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 	}
 
 	today := time.Now().Truncate(24 * time.Hour)
-	for i := 0; i < 14; i++ {
+	for i := 0; i < nutritionSyncDays; i++ {
 		date := today.AddDate(0, 0, -i)
 		if err := c.syncDay(ctx, userID, token, secret, date); err != nil {
 			c.logger.Warn().Err(err).Str("date", date.Format("2006-01-02")).Msg("failed to sync day")

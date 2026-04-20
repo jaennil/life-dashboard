@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,6 +16,11 @@ type NutritionHandler struct {
 	db     *pgxpool.Pool
 	logger zerolog.Logger
 }
+
+const (
+	defaultNutritionWindowDays = 14
+	maxNutritionWindowDays     = 90
+)
 
 func NewNutrition(db *pgxpool.Pool, logger zerolog.Logger) *NutritionHandler {
 	return &NutritionHandler{db: db, logger: logger.With().Str("handler", "nutrition").Logger()}
@@ -151,14 +157,15 @@ func (h *NutritionHandler) SaveTargets(w http.ResponseWriter, r *http.Request) {
 func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
-	fourteenDaysAgo := time.Now().AddDate(0, 0, -14)
+	windowDays := parseNutritionWindowDays(r, defaultNutritionWindowDays)
+	startDate := time.Now().AddDate(0, 0, -(windowDays - 1))
 
 	rows, err := h.db.Query(ctx, `
 		SELECT id, TO_CHAR(date, 'YYYY-MM-DD'), calories_total, protein_g, carbs_g, fat_g, fiber_g
 		FROM nutrition_daily
 		WHERE date >= $1 AND user_id = $2
 		ORDER BY date DESC
-	`, fourteenDaysAgo, userID)
+	`, startDate, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query nutrition daily")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -170,27 +177,27 @@ func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 		NutritionDay
 		id string
 	}
-	days := make([]dayWithID, 0)
+	dayRows := make([]dayWithID, 0)
 	for rows.Next() {
 		var d dayWithID
 		if err := rows.Scan(&d.id, &d.Date, &d.Calories, &d.Protein, &d.Carbs, &d.Fat, &d.Fiber); err != nil {
 			continue
 		}
 		d.Meals = []NutritionMeal{}
-		days = append(days, d)
+		dayRows = append(dayRows, d)
 	}
 	rows.Close()
 
 	// Load meal items for each day
-	for i := range days {
+	for i := range dayRows {
 		itemRows, err := h.db.Query(ctx, `
 			SELECT meal_type, food_name, serving_description, calories, COALESCE(macros, '{}')
 			FROM nutrition_items
 			WHERE daily_id = $1
 			ORDER BY meal_type, calories DESC
-		`, days[i].id)
+		`, dayRows[i].id)
 		if err != nil {
-			h.logger.Warn().Err(err).Str("daily_id", days[i].id).Msg("query nutrition items")
+			h.logger.Warn().Err(err).Str("daily_id", dayRows[i].id).Msg("query nutrition items")
 			continue
 		}
 
@@ -219,12 +226,12 @@ func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 		itemRows.Close()
 
 		for _, mt := range mealOrder {
-			days[i].Meals = append(days[i].Meals, *mealMap[mt])
+			dayRows[i].Meals = append(dayRows[i].Meals, *mealMap[mt])
 		}
 	}
 
-	result := make([]NutritionDay, len(days))
-	for i, d := range days {
+	result := make([]NutritionDay, len(dayRows))
+	for i, d := range dayRows {
 		result[i] = d.NutritionDay
 	}
 
@@ -232,6 +239,22 @@ func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+func parseNutritionWindowDays(r *http.Request, fallback int) int {
+	raw := r.URL.Query().Get("days")
+	if raw == "" {
+		return fallback
+	}
+
+	days, err := strconv.Atoi(raw)
+	if err != nil || days <= 0 {
+		return fallback
+	}
+	if days > maxNutritionWindowDays {
+		return maxNutritionWindowDays
+	}
+	return days
 }
 
 func isEmptyNutritionTargetsRequest(req SaveNutritionTargetsRequest) bool {

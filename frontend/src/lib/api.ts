@@ -350,7 +350,7 @@ export const api = {
   },
   getCategoryList: () => get<string[]>('/finance/category-list'),
   getNutritionSummary: () => get<NutritionSummary>('/nutrition/summary'),
-  getNutritionDaily: () => get<NutritionDay[]>('/nutrition/daily'),
+  getNutritionDaily: (days = 14) => get<NutritionDay[]>(`/nutrition/daily?days=${days}`),
   saveNutritionTargets: (input: NutritionTargetsInput) =>
     fetch(BASE + '/nutrition/targets', {
       method: 'POST',

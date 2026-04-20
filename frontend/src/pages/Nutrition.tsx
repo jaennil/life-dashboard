@@ -368,7 +368,7 @@ export function Nutrition() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [s, d] = await Promise.all([api.getNutritionSummary(), api.getNutritionDaily()])
+      const [s, d] = await Promise.all([api.getNutritionSummary(), api.getNutritionDaily(period)])
       setSummary(s)
       setDaily(d)
     } catch (error) {
@@ -376,7 +376,7 @@ export function Nutrition() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [period])
 
   const loadIntegrations = useCallback(async () => {
     try {
@@ -405,7 +405,7 @@ export function Nutrition() {
     })
   }, [summary])
 
-  const chartData = [...daily].reverse().slice(-period)
+  const chartData = [...daily].reverse()
   const enabledNutritionIntegrations = integrations.filter(i =>
     (i.name === 'myfitnesspal' || i.name === 'fatsecret') && i.enabled
   )

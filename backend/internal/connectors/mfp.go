@@ -61,9 +61,9 @@ func (c *MFPConnector) Sync(ctx context.Context, userID string) error {
 		return fmt.Errorf("auth: %w", err)
 	}
 
-	// Sync last 14 days
+	// Sync last 90 days
 	today := time.Now().Truncate(24 * time.Hour)
-	for i := 0; i < 14; i++ {
+	for i := 0; i < nutritionSyncDays; i++ {
 		date := today.AddDate(0, 0, -i)
 		if err := c.syncDay(ctx, userID, date); err != nil {
 			c.logger.Warn().Err(err).Str("date", date.Format("2006-01-02")).Msg("failed to sync day")
