@@ -196,6 +196,24 @@ export interface NutritionTargets {
   height_measure?: string
   api_notes?: string[]
   synced_at?: string
+  manual?: NutritionManualTargets
+}
+
+export interface NutritionManualTargets {
+  target_weight_kg?: number
+  target_calories?: number
+  target_protein_g?: number
+  target_carbs_g?: number
+  target_fat_g?: number
+  updated_at?: string
+}
+
+export interface NutritionTargetsInput {
+  target_weight_kg?: number | null
+  target_calories?: number | null
+  target_protein_g?: number | null
+  target_carbs_g?: number | null
+  target_fat_g?: number | null
 }
 
 export interface NutritionMealItem {
@@ -333,6 +351,15 @@ export const api = {
   getCategoryList: () => get<string[]>('/finance/category-list'),
   getNutritionSummary: () => get<NutritionSummary>('/nutrition/summary'),
   getNutritionDaily: () => get<NutritionDay[]>('/nutrition/daily'),
+  saveNutritionTargets: (input: NutritionTargetsInput) =>
+    fetch(BASE + '/nutrition/targets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+      return r.json() as Promise<NutritionTargets | null>
+    }),
   getIntegrations: () => get<Integration[]>('/integrations'),
   toggleIntegration: (name: string, enabled: boolean) =>
     fetch(BASE + `/integrations/${name}/toggle`, {

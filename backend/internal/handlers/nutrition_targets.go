@@ -11,30 +11,51 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type NutritionManualTargets struct {
+	TargetWeightKg *float64   `json:"target_weight_kg,omitempty"`
+	TargetCalories *float64   `json:"target_calories,omitempty"`
+	TargetProteinG *float64   `json:"target_protein_g,omitempty"`
+	TargetCarbsG   *float64   `json:"target_carbs_g,omitempty"`
+	TargetFatG     *float64   `json:"target_fat_g,omitempty"`
+	UpdatedAt      *time.Time `json:"updated_at,omitempty"`
+}
+
 type NutritionTargets struct {
-	Source               string     `json:"source"`
-	CurrentWeightKg      *float64   `json:"current_weight_kg,omitempty"`
-	CurrentWeightDate    *string    `json:"current_weight_date,omitempty"`
-	CurrentWeightComment string     `json:"current_weight_comment,omitempty"`
-	TargetWeightKg       *float64   `json:"target_weight_kg,omitempty"`
-	HeightCm             *float64   `json:"height_cm,omitempty"`
-	TargetCalories       *float64   `json:"target_calories,omitempty"`
-	TargetProteinG       *float64   `json:"target_protein_g,omitempty"`
-	TargetCarbsG         *float64   `json:"target_carbs_g,omitempty"`
-	TargetFatG           *float64   `json:"target_fat_g,omitempty"`
-	WeightMeasure        string     `json:"weight_measure,omitempty"`
-	HeightMeasure        string     `json:"height_measure,omitempty"`
-	APINotes             []string   `json:"api_notes,omitempty"`
-	SyncedAt             *time.Time `json:"synced_at,omitempty"`
+	Source               string                  `json:"source"`
+	CurrentWeightKg      *float64                `json:"current_weight_kg,omitempty"`
+	CurrentWeightDate    *string                 `json:"current_weight_date,omitempty"`
+	CurrentWeightComment string                  `json:"current_weight_comment,omitempty"`
+	TargetWeightKg       *float64                `json:"target_weight_kg,omitempty"`
+	HeightCm             *float64                `json:"height_cm,omitempty"`
+	TargetCalories       *float64                `json:"target_calories,omitempty"`
+	TargetProteinG       *float64                `json:"target_protein_g,omitempty"`
+	TargetCarbsG         *float64                `json:"target_carbs_g,omitempty"`
+	TargetFatG           *float64                `json:"target_fat_g,omitempty"`
+	WeightMeasure        string                  `json:"weight_measure,omitempty"`
+	HeightMeasure        string                  `json:"height_measure,omitempty"`
+	APINotes             []string                `json:"api_notes,omitempty"`
+	SyncedAt             *time.Time              `json:"synced_at,omitempty"`
+	Manual               *NutritionManualTargets `json:"manual,omitempty"`
+}
+
+type nutritionTargetsRow struct {
+	Source               string
+	CurrentWeightKg      sql.NullFloat64
+	CurrentWeightDate    sql.NullString
+	CurrentWeightComment sql.NullString
+	TargetWeightKg       sql.NullFloat64
+	HeightCm             sql.NullFloat64
+	TargetCalories       sql.NullFloat64
+	TargetProteinG       sql.NullFloat64
+	TargetCarbsG         sql.NullFloat64
+	TargetFatG           sql.NullFloat64
+	WeightMeasure        sql.NullString
+	HeightMeasure        sql.NullString
+	SyncedAt             time.Time
 }
 
 func loadNutritionTargets(ctx context.Context, db *pgxpool.Pool, userID string) (*NutritionTargets, error) {
-	var source string
-	var currentWeight, targetWeight, height, targetCalories, targetProtein, targetCarbs, targetFat sql.NullFloat64
-	var currentWeightDate, currentWeightComment, weightMeasure, heightMeasure sql.NullString
-	var syncedAt time.Time
-
-	err := db.QueryRow(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT
 			source,
 			current_weight_kg,
@@ -51,55 +72,130 @@ func loadNutritionTargets(ctx context.Context, db *pgxpool.Pool, userID string) 
 			synced_at
 		FROM nutrition_targets
 		WHERE user_id = $1
+			AND source IN ('fatsecret', 'manual')
 		ORDER BY CASE WHEN source = 'fatsecret' THEN 0 ELSE 1 END, synced_at DESC
-		LIMIT 1
-	`, userID).Scan(
-		&source,
-		&currentWeight,
-		&currentWeightDate,
-		&currentWeightComment,
-		&targetWeight,
-		&height,
-		&targetCalories,
-		&targetProtein,
-		&targetCarbs,
-		&targetFat,
-		&weightMeasure,
-		&heightMeasure,
-		&syncedAt,
-	)
+	`, userID)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, nil
+		return nil, err
+	}
+	defer rows.Close()
+
+	var fatsecretRow *nutritionTargetsRow
+	var manualRow *nutritionTargetsRow
+	for rows.Next() {
+		row, scanErr := scanNutritionTargetsRow(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
+		switch row.Source {
+		case "fatsecret":
+			if fatsecretRow == nil {
+				fatsecretRow = row
+			}
+		case "manual":
+			if manualRow == nil {
+				manualRow = row
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	targets := &NutritionTargets{
-		Source:               source,
-		CurrentWeightKg:      floatPtr(currentWeight),
-		CurrentWeightDate:    stringPtr(currentWeightDate),
-		CurrentWeightComment: stringValueFromNull(currentWeightComment),
-		TargetWeightKg:       floatPtr(targetWeight),
-		HeightCm:             floatPtr(height),
-		TargetCalories:       floatPtr(targetCalories),
-		TargetProteinG:       floatPtr(targetProtein),
-		TargetCarbsG:         floatPtr(targetCarbs),
-		TargetFatG:           floatPtr(targetFat),
-		WeightMeasure:        stringValueFromNull(weightMeasure),
-		HeightMeasure:        stringValueFromNull(heightMeasure),
-		SyncedAt:             &syncedAt,
+	return mergeNutritionTargets(fatsecretRow, manualRow), nil
+}
+
+func scanNutritionTargetsRow(row pgx.Row) (*nutritionTargetsRow, error) {
+	result := &nutritionTargetsRow{}
+	if err := row.Scan(
+		&result.Source,
+		&result.CurrentWeightKg,
+		&result.CurrentWeightDate,
+		&result.CurrentWeightComment,
+		&result.TargetWeightKg,
+		&result.HeightCm,
+		&result.TargetCalories,
+		&result.TargetProteinG,
+		&result.TargetCarbsG,
+		&result.TargetFatG,
+		&result.WeightMeasure,
+		&result.HeightMeasure,
+		&result.SyncedAt,
+	); err != nil {
+		return nil, err
 	}
-	if !targets.hasMacroTargets() {
-		targets.APINotes = append(targets.APINotes, "FatSecret Platform API profile.get отдает целевой вес, текущий вес и рост, но не отдает целевые калории и БЖУ.")
+	return result, nil
+}
+
+func mergeNutritionTargets(fatsecretRow, manualRow *nutritionTargetsRow) *NutritionTargets {
+	if fatsecretRow == nil && manualRow == nil {
+		return nil
 	}
 
-	return targets, nil
+	result := &NutritionTargets{}
+	if fatsecretRow != nil {
+		result.Source = "fatsecret"
+		result.CurrentWeightKg = floatPtr(fatsecretRow.CurrentWeightKg)
+		result.CurrentWeightDate = stringPtr(fatsecretRow.CurrentWeightDate)
+		result.CurrentWeightComment = stringValueFromNull(fatsecretRow.CurrentWeightComment)
+		result.TargetWeightKg = floatPtr(fatsecretRow.TargetWeightKg)
+		result.HeightCm = floatPtr(fatsecretRow.HeightCm)
+		result.TargetCalories = floatPtr(fatsecretRow.TargetCalories)
+		result.TargetProteinG = floatPtr(fatsecretRow.TargetProteinG)
+		result.TargetCarbsG = floatPtr(fatsecretRow.TargetCarbsG)
+		result.TargetFatG = floatPtr(fatsecretRow.TargetFatG)
+		result.WeightMeasure = stringValueFromNull(fatsecretRow.WeightMeasure)
+		result.HeightMeasure = stringValueFromNull(fatsecretRow.HeightMeasure)
+		result.SyncedAt = &fatsecretRow.SyncedAt
+	}
+
+	if manualRow != nil {
+		if result.Source == "" {
+			result.Source = "manual"
+		} else {
+			result.Source += "+manual"
+		}
+		result.Manual = &NutritionManualTargets{
+			TargetWeightKg: floatPtr(manualRow.TargetWeightKg),
+			TargetCalories: floatPtr(manualRow.TargetCalories),
+			TargetProteinG: floatPtr(manualRow.TargetProteinG),
+			TargetCarbsG:   floatPtr(manualRow.TargetCarbsG),
+			TargetFatG:     floatPtr(manualRow.TargetFatG),
+			UpdatedAt:      &manualRow.SyncedAt,
+		}
+		if result.SyncedAt == nil || manualRow.SyncedAt.After(*result.SyncedAt) {
+			result.SyncedAt = &manualRow.SyncedAt
+		}
+		if manualRow.TargetWeightKg.Valid {
+			result.TargetWeightKg = floatPtr(manualRow.TargetWeightKg)
+		}
+		if manualRow.TargetCalories.Valid {
+			result.TargetCalories = floatPtr(manualRow.TargetCalories)
+		}
+		if manualRow.TargetProteinG.Valid {
+			result.TargetProteinG = floatPtr(manualRow.TargetProteinG)
+		}
+		if manualRow.TargetCarbsG.Valid {
+			result.TargetCarbsG = floatPtr(manualRow.TargetCarbsG)
+		}
+		if manualRow.TargetFatG.Valid {
+			result.TargetFatG = floatPtr(manualRow.TargetFatG)
+		}
+	}
+
+	if result.Manual != nil && result.Manual.hasAny() {
+		result.APINotes = append(result.APINotes, "Часть целей задана вручную и имеет приоритет над данными FatSecret.")
+	}
+	if !result.hasMacroTargets() {
+		result.APINotes = append(result.APINotes, "FatSecret Platform API profile.get отдает целевой вес, текущий вес и рост, но не отдает целевые калории и БЖУ.")
+	}
+
+	return result
 }
 
 func renderNutritionTargetsForAI(targets *NutritionTargets) string {
 	if targets == nil {
-		return "Цели питания/веса: нет данных профиля из FatSecret.\n"
+		return "Цели питания/веса: нет данных профиля или ручных целей.\n"
 	}
 
 	var lines []string
@@ -120,6 +216,9 @@ func renderNutritionTargetsForAI(targets *NutritionTargets) string {
 	}
 	if targets.HeightCm != nil {
 		lines = append(lines, fmt.Sprintf("- рост: %.0f см", *targets.HeightCm))
+	}
+	if targets.Manual != nil && targets.Manual.hasAny() {
+		lines = append(lines, "- часть nutrition goals задана вручную и имеет приоритет над данными API")
 	}
 	if targets.hasMacroTargets() {
 		lines = append(lines, "- целевые калории/БЖУ:")
@@ -147,6 +246,13 @@ func (t *NutritionTargets) hasMacroTargets() bool {
 		return false
 	}
 	return t.TargetCalories != nil || t.TargetProteinG != nil || t.TargetCarbsG != nil || t.TargetFatG != nil
+}
+
+func (t *NutritionManualTargets) hasAny() bool {
+	if t == nil {
+		return false
+	}
+	return t.TargetWeightKg != nil || t.TargetCalories != nil || t.TargetProteinG != nil || t.TargetCarbsG != nil || t.TargetFatG != nil
 }
 
 func floatPtr(value sql.NullFloat64) *float64 {
