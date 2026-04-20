@@ -68,8 +68,8 @@ func (h *AIHandler) loadHabitSources(ctx context.Context, userID string) ([]stri
 		SELECT DISTINCT source
 		FROM habits
 		WHERE user_id = $1
-			AND source IN ('habitify', 'todoist')
-		ORDER BY CASE source WHEN 'habitify' THEN 1 WHEN 'todoist' THEN 2 ELSE 99 END
+			AND source IN ('manual', 'habitify', 'todoist')
+		ORDER BY CASE source WHEN 'manual' THEN 1 WHEN 'habitify' THEN 2 WHEN 'todoist' THEN 3 ELSE 99 END
 	`, userID)
 	if err != nil {
 		return nil, err
@@ -88,6 +88,13 @@ func (h *AIHandler) loadHabitSources(ctx context.Context, userID string) ([]stri
 
 func habitSourceMeta(source string) aiHabitSourceMeta {
 	switch source {
+	case "manual":
+		return aiHabitSourceMeta{
+			Title:                     "Life Dashboard Routines",
+			Intro:                     "Источник: встроенные рутинные чеклисты Life Dashboard. Отсутствие отметки за день считается пропуском, это не план из календаря.",
+			NoStatusMessage:           "Нет локальных рутин или отметок за период",
+			TreatStatusesAsFullWindow: true,
+		}
 	case "todoist":
 		return aiHabitSourceMeta{
 			Title:               "Todoist",
@@ -122,22 +129,47 @@ func (h *AIHandler) appendHabitSourceContext(ctx context.Context, sb *strings.Bu
 	}
 
 	var totalStatuses, completed, inProgress, skipped, failed, none int
-	if err := h.db.QueryRow(ctx, `
-		SELECT
-			COUNT(*),
-			COUNT(*) FILTER (WHERE s.status = 'completed'),
-			COUNT(*) FILTER (WHERE s.status = 'in_progress'),
-			COUNT(*) FILTER (WHERE s.status = 'skipped'),
-			COUNT(*) FILTER (WHERE s.status = 'failed'),
-			COUNT(*) FILTER (WHERE s.status = 'none')
-		FROM habit_daily_statuses s
-		JOIN habits h ON h.id = s.habit_id
-		WHERE h.user_id = $1
-			AND h.source = $2
-			AND s.target_date >= $3::date
-			AND s.target_date <= $4::date
-	`, userID, source, start, end).Scan(&totalStatuses, &completed, &inProgress, &skipped, &failed, &none); err != nil {
-		return err
+	var countErr error
+	if source == manualHabitSource {
+		countErr = h.db.QueryRow(ctx, `
+			WITH days AS (
+				SELECT generate_series($3::date, $4::date, interval '1 day')::date AS target_date
+			)
+			SELECT
+				COUNT(*),
+				COUNT(*) FILTER (WHERE COALESCE(s.status, 'none') = 'completed'),
+				COUNT(*) FILTER (WHERE COALESCE(s.status, 'none') = 'in_progress'),
+				COUNT(*) FILTER (WHERE COALESCE(s.status, 'none') = 'skipped'),
+				COUNT(*) FILTER (WHERE COALESCE(s.status, 'none') = 'failed'),
+				COUNT(*) FILTER (WHERE COALESCE(s.status, 'none') = 'none')
+			FROM habits h
+			CROSS JOIN days d
+			LEFT JOIN habit_daily_statuses s
+				ON s.habit_id = h.id
+				AND s.target_date = d.target_date
+			WHERE h.user_id = $1
+				AND h.source = $2
+				AND h.archived = FALSE
+		`, userID, source, start, end).Scan(&totalStatuses, &completed, &inProgress, &skipped, &failed, &none)
+	} else {
+		countErr = h.db.QueryRow(ctx, `
+			SELECT
+				COUNT(*),
+				COUNT(*) FILTER (WHERE s.status = 'completed'),
+				COUNT(*) FILTER (WHERE s.status = 'in_progress'),
+				COUNT(*) FILTER (WHERE s.status = 'skipped'),
+				COUNT(*) FILTER (WHERE s.status = 'failed'),
+				COUNT(*) FILTER (WHERE s.status = 'none')
+			FROM habit_daily_statuses s
+			JOIN habits h ON h.id = s.habit_id
+			WHERE h.user_id = $1
+				AND h.source = $2
+				AND s.target_date >= $3::date
+				AND s.target_date <= $4::date
+		`, userID, source, start, end).Scan(&totalStatuses, &completed, &inProgress, &skipped, &failed, &none)
+	}
+	if countErr != nil {
+		return countErr
 	}
 
 	sb.WriteString(fmt.Sprintf("Активных привычек: %d", activeHabits))
@@ -181,7 +213,7 @@ func (h *AIHandler) appendHabitSourceContext(ctx context.Context, sb *strings.Bu
 		}
 	}
 
-	rows, err := h.db.Query(ctx, `
+	query := `
 		SELECT
 			h.name,
 			COALESCE(h.area_name, ''),
@@ -217,7 +249,41 @@ func (h *AIHandler) appendHabitSourceContext(ctx context.Context, sb *strings.Bu
 		GROUP BY h.id, latest.target_date, latest.status, latest.current_value, latest.target_value, latest.unit_type
 		ORDER BY h.archived ASC, completed_days DESC, tracked_days DESC, h.name ASC
 		LIMIT $5
-	`, userID, source, start, end, limit)
+	`
+	if source == manualHabitSource {
+		query = `
+			WITH days AS (
+				SELECT generate_series($3::date, $4::date, interval '1 day')::date AS target_date
+			)
+			SELECT
+				h.name,
+				COALESCE(h.area_name, ''),
+				COALESCE(h.recurrence, ''),
+				h.archived,
+				COUNT(*) AS tracked_days,
+				COUNT(*) FILTER (WHERE COALESCE(s.status, 'none') = 'completed') AS completed_days,
+				COUNT(*) FILTER (WHERE COALESCE(s.status, 'none') = 'in_progress') AS in_progress_days,
+				COUNT(*) FILTER (WHERE COALESCE(s.status, 'none') = 'skipped') AS skipped_days,
+				COUNT(*) FILTER (WHERE COALESCE(s.status, 'none') = 'failed') AS failed_days,
+				COUNT(*) FILTER (WHERE COALESCE(s.status, 'none') = 'none') AS none_days,
+				$4::date AS latest_target_date,
+				MAX(CASE WHEN d.target_date = $4::date THEN COALESCE(s.status, 'none') END) AS latest_status,
+				NULL::double precision AS current_value,
+				NULL::double precision AS target_value,
+				'' AS unit_type
+			FROM habits h
+			CROSS JOIN days d
+			LEFT JOIN habit_daily_statuses s
+				ON s.habit_id = h.id
+				AND s.target_date = d.target_date
+			WHERE h.user_id = $1
+				AND h.source = $2
+			GROUP BY h.id
+			ORDER BY h.archived ASC, completed_days DESC, tracked_days DESC, h.name ASC
+			LIMIT $5
+		`
+	}
+	rows, err := h.db.Query(ctx, query, userID, source, start, end, limit)
 	if err != nil {
 		return err
 	}

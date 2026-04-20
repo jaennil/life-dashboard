@@ -304,6 +304,39 @@ export interface ProductivityTask {
   due_bucket: 'overdue' | 'today' | 'upcoming' | 'later' | 'no_due'
 }
 
+export interface ProductivityHabitsSummary {
+  total: number
+  completed_today: number
+  pending_today: number
+  morning_pending: number
+  evening_pending: number
+  anytime_pending: number
+  completion_rate_7_days: number
+}
+
+export interface ProductivityHabit {
+  id: string
+  name: string
+  area_name: string
+  routine: 'morning' | 'evening' | 'anytime'
+  status: 'completed' | 'skipped' | 'failed' | 'none'
+  completed_7_days: number
+  current_streak: number
+  last_completed_at: string | null
+}
+
+export interface ProductivityHabitsResponse {
+  date: string
+  summary: ProductivityHabitsSummary
+  habits: ProductivityHabit[]
+}
+
+export interface ProductivityHabitInput {
+  name: string
+  routine: 'morning' | 'evening' | 'anytime'
+  area_name?: string
+}
+
 export interface HealthAPIKeyInfo {
   api_key: string
   webhook_url: string
@@ -335,6 +368,37 @@ export const api = {
   getProductivitySummary: () => get<ProductivitySummary>('/productivity/summary'),
   getProductivityTasks: (filter: 'all' | 'overdue' | 'today' | 'upcoming' | 'stale' = 'all') =>
     get<ProductivityTask[]>('/productivity/tasks?filter=' + encodeURIComponent(filter)),
+  getProductivityHabits: () => get<ProductivityHabitsResponse>('/productivity/habits'),
+  createProductivityHabit: (input: ProductivityHabitInput) =>
+    fetch(BASE + '/productivity/habits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+    }),
+  updateProductivityHabit: (id: string, input: ProductivityHabitInput) =>
+    fetch(BASE + `/productivity/habits/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+    }),
+  deleteProductivityHabit: (id: string) =>
+    fetch(BASE + `/productivity/habits/${id}`, {
+      method: 'DELETE',
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+    }),
+  setProductivityHabitStatus: (id: string, status: 'completed' | 'none' | 'skipped' | 'failed', date?: string) =>
+    fetch(BASE + `/productivity/habits/${id}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, date }),
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+    }),
   getSpendingByCategory: (from?: string) => get<CategoryStat[]>('/finance/categories' + (from ? '?from=' + from : '')),
   getDailyTotals: (from?: string, to?: string) => {
     const p = new URLSearchParams()

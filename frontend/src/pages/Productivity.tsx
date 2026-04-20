@@ -1,11 +1,34 @@
 import { useCallback, useEffect, useState, type ElementType } from 'react'
-import { AlertTriangle, CalendarClock, CheckCircle2, Clock3, ListTodo, Repeat2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  CalendarClock,
+  Check,
+  CheckCircle2,
+  Clock3,
+  ListTodo,
+  Moon,
+  Pencil,
+  Plus,
+  Repeat2,
+  Sparkles,
+  Sun,
+  Trash2,
+} from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
-import { api, type Integration, type ProductivitySummary, type ProductivityTask } from '@/lib/api'
+import {
+  api,
+  type Integration,
+  type ProductivityHabit,
+  type ProductivityHabitInput,
+  type ProductivityHabitsResponse,
+  type ProductivitySummary,
+  type ProductivityTask,
+} from '@/lib/api'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 
 type TaskFilter = 'all' | 'overdue' | 'today' | 'upcoming' | 'stale'
+type HabitRoutine = 'morning' | 'evening' | 'anytime'
 
 const FILTERS: Array<{ key: TaskFilter; label: string }> = [
   { key: 'overdue', label: 'Overdue' },
@@ -13,6 +36,12 @@ const FILTERS: Array<{ key: TaskFilter; label: string }> = [
   { key: 'upcoming', label: '7 дней' },
   { key: 'stale', label: 'Висят давно' },
   { key: 'all', label: 'Все активные' },
+]
+
+const ROUTINES: Array<{ key: HabitRoutine; label: string; icon: ElementType; accent: string }> = [
+  { key: 'morning', label: 'Утро', icon: Sun, accent: 'text-amber-300' },
+  { key: 'evening', label: 'Вечер', icon: Moon, accent: 'text-violet-300' },
+  { key: 'anytime', label: 'В течение дня', icon: Sparkles, accent: 'text-cyan-300' },
 ]
 
 function StatCard({ title, value, sub, icon: Icon, color }: {
@@ -78,14 +107,147 @@ function bucketLabel(task: ProductivityTask) {
   }
 }
 
+function routineAccent(routine: HabitRoutine) {
+  return ROUTINES.find(item => item.key === routine)?.accent ?? 'text-muted-foreground'
+}
+
+function HabitColumn({
+  title,
+  accent,
+  icon: Icon,
+  habits,
+  savingHabitID,
+  deletingHabitID,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  title: string
+  accent: string
+  icon: ElementType
+  habits: ProductivityHabit[]
+  savingHabitID: string | null
+  deletingHabitID: string | null
+  onToggle: (habit: ProductivityHabit) => void
+  onEdit: (habit: ProductivityHabit) => void
+  onDelete: (habit: ProductivityHabit) => void
+}) {
+  return (
+    <div className="rounded-2xl border bg-background/30 p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-muted/70">
+          <Icon className={cn('h-4 w-4', accent)} />
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <p className="text-xs text-muted-foreground">{habits.length > 0 ? `${habits.length} в списке` : 'Пока пусто'}</p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-3">
+        {habits.length === 0 ? (
+          <div className="rounded-xl border border-dashed px-3 py-4 text-sm text-muted-foreground">
+            Здесь пока нет привычек.
+          </div>
+        ) : habits.map((habit) => {
+          const isCompleted = habit.status === 'completed'
+          const isSaving = savingHabitID === habit.id
+          const isDeleting = deletingHabitID === habit.id
+
+          return (
+            <div
+              key={habit.id}
+              className={cn(
+                'rounded-xl border px-3 py-3 transition-colors',
+                isCompleted ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-border bg-card/60',
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <button
+                  type="button"
+                  disabled={isSaving || isDeleting}
+                  onClick={() => onToggle(habit)}
+                  className={cn(
+                    'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition-colors',
+                    isCompleted
+                      ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                      : 'border-border bg-background/50 text-muted-foreground hover:border-primary/30 hover:text-primary',
+                  )}
+                >
+                  {isCompleted ? <Check className="h-3.5 w-3.5" /> : <span className="h-2 w-2 rounded-full bg-current opacity-60" />}
+                </button>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className={cn('text-sm font-medium break-words', isCompleted ? 'text-emerald-100' : 'text-foreground')}>
+                        {habit.name}
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                        <span className={cn('rounded-full border px-2 py-0.5', isCompleted ? 'border-emerald-500/20 text-emerald-300' : 'border-border')}>
+                          {isCompleted ? 'сделано сегодня' : 'ожидает'}
+                        </span>
+                        <span>{habit.completed_7_days}/7 за неделю</span>
+                        <span>стрик {habit.current_streak}д</span>
+                        {habit.area_name && <span>{habit.area_name}</span>}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        disabled={isSaving || isDeleting}
+                        onClick={() => onEdit(habit)}
+                        className="rounded-lg border border-border px-2 py-1 text-muted-foreground transition-colors hover:bg-muted/60"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSaving || isDeleting}
+                        onClick={() => onDelete(habit)}
+                        className="rounded-lg border border-border px-2 py-1 text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-300"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {habit.last_completed_at && (
+                    <p className="mt-2 text-[11px] text-muted-foreground">
+                      Последний раз отмечено: {formatDate(habit.last_completed_at)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function Productivity() {
   const [summary, setSummary] = useState<ProductivitySummary | null>(null)
   const [tasks, setTasks] = useState<ProductivityTask[]>([])
+  const [habitsData, setHabitsData] = useState<ProductivityHabitsResponse | null>(null)
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [loading, setLoading] = useState(true)
   const [taskLoading, setTaskLoading] = useState(true)
+  const [habitsLoading, setHabitsLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [habitSavingID, setHabitSavingID] = useState<string | null>(null)
+  const [habitDeletingID, setHabitDeletingID] = useState<string | null>(null)
+  const [habitFormSaving, setHabitFormSaving] = useState(false)
+  const [habitFormError, setHabitFormError] = useState('')
   const [filter, setFilter] = useState<TaskFilter>('overdue')
+  const [editingHabitID, setEditingHabitID] = useState<string | null>(null)
+  const [habitForm, setHabitForm] = useState<ProductivityHabitInput>({
+    name: '',
+    routine: 'morning',
+    area_name: '',
+  })
 
   const loadIntegrations = useCallback(async () => {
     try {
@@ -114,11 +276,22 @@ export function Productivity() {
     }
   }, [])
 
+  const loadHabits = useCallback(async () => {
+    setHabitsLoading(true)
+    try {
+      setHabitsData(await api.getProductivityHabits())
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setHabitsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     setLoading(true)
-    Promise.all([loadSummary(), loadIntegrations(), loadTasks(filter)])
+    Promise.all([loadSummary(), loadIntegrations(), loadTasks(filter), loadHabits()])
       .finally(() => setLoading(false))
-  }, [filter, loadIntegrations, loadSummary, loadTasks])
+  }, [filter, loadHabits, loadIntegrations, loadSummary, loadTasks])
 
   const todoistIntegration = integrations.find(integration => integration.name === 'todoist')
   const syncCaption = todoistIntegration ? syncCaptionForSources([todoistIntegration]) : undefined
@@ -136,16 +309,78 @@ export function Productivity() {
     }
   }
 
+  async function handleSaveHabit() {
+    setHabitFormSaving(true)
+    setHabitFormError('')
+    try {
+      if (editingHabitID) {
+        await api.updateProductivityHabit(editingHabitID, habitForm)
+      } else {
+        await api.createProductivityHabit(habitForm)
+      }
+      setEditingHabitID(null)
+      setHabitForm({ name: '', routine: 'morning', area_name: '' })
+      await loadHabits()
+    } catch (error) {
+      setHabitFormError(error instanceof Error ? error.message : 'Не удалось сохранить привычку')
+    } finally {
+      setHabitFormSaving(false)
+    }
+  }
+
+  async function handleToggleHabit(habit: ProductivityHabit) {
+    setHabitSavingID(habit.id)
+    try {
+      await api.setProductivityHabitStatus(habit.id, habit.status === 'completed' ? 'none' : 'completed')
+      await loadHabits()
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setHabitSavingID(null)
+    }
+  }
+
+  async function handleDeleteHabit(habit: ProductivityHabit) {
+    setHabitDeletingID(habit.id)
+    try {
+      if (editingHabitID === habit.id) {
+        setEditingHabitID(null)
+        setHabitForm({ name: '', routine: 'morning', area_name: '' })
+      }
+      await api.deleteProductivityHabit(habit.id)
+      await loadHabits()
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setHabitDeletingID(null)
+    }
+  }
+
+  function startEditingHabit(habit: ProductivityHabit) {
+    setEditingHabitID(habit.id)
+    setHabitForm({
+      name: habit.name,
+      routine: habit.routine,
+      area_name: habit.area_name,
+    })
+    setHabitFormError('')
+  }
+
+  const habits = habitsData?.habits ?? []
+  const morningHabits = habits.filter(habit => habit.routine === 'morning')
+  const eveningHabits = habits.filter(habit => habit.routine === 'evening')
+  const anytimeHabits = habits.filter(habit => habit.routine === 'anytime')
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         eyebrow="Productivity"
         title="Productivity"
-        description="Todoist как слой задач и регулярных дел: overdue, близкая нагрузка, recurring и всё, что зависло дольше разумного."
+        description="Todoist остаётся слоем задач, а встроенные рутины закрывают повседневный уход и привычки: зубы, душ, умывание, кремы и всё, что важно отмечать фактами."
         badges={[
           { label: todoistIntegration?.enabled ? 'Todoist подключён' : 'Todoist не подключён', tone: todoistIntegration?.enabled ? 'success' : 'warning' },
+          ...(habitsData ? [{ label: `${habitsData.summary.total} локальных привычек`, tone: 'primary' as const }] : []),
           ...(summary ? [{ label: `${summary.active_total} активных задач`, tone: 'muted' as const }] : []),
-          ...(summary ? [{ label: `${summary.completed_today_total} закрыто сегодня`, tone: 'primary' as const }] : []),
         ]}
         actions={(
           <PageSyncButton
@@ -157,6 +392,163 @@ export function Productivity() {
           />
         )}
       />
+
+      <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Рутины и уход</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Свои ежедневные чеклисты внутри Life Dashboard. Отмечай факт выполнения, а AI увидит утренние и вечерние привычки как отдельный источник.
+            </p>
+          </div>
+          {habitsData && (
+            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span className="rounded-full border px-3 py-1">сделано сегодня {habitsData.summary.completed_today}/{habitsData.summary.total}</span>
+              <span className="rounded-full border px-3 py-1">completion rate 7д {habitsData.summary.completion_rate_7_days.toFixed(0)}%</span>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-5">
+          <StatCard
+            title="Сделано сегодня"
+            value={habitsLoading || !habitsData ? '—' : String(habitsData.summary.completed_today)}
+            sub={habitsLoading || !habitsData ? 'Локальные привычки' : `${habitsData.summary.pending_today} осталось`}
+            icon={CheckCircle2}
+            color="bg-emerald-500"
+          />
+          <StatCard
+            title="Утро"
+            value={habitsLoading || !habitsData ? '—' : String(morningHabits.length)}
+            sub={habitsLoading || !habitsData ? 'Рутина' : `${habitsData.summary.morning_pending} не закрыто`}
+            icon={Sun}
+            color="bg-amber-500"
+          />
+          <StatCard
+            title="Вечер"
+            value={habitsLoading || !habitsData ? '—' : String(eveningHabits.length)}
+            sub={habitsLoading || !habitsData ? 'Рутина' : `${habitsData.summary.evening_pending} не закрыто`}
+            icon={Moon}
+            color="bg-violet-500"
+          />
+          <StatCard
+            title="День"
+            value={habitsLoading || !habitsData ? '—' : String(anytimeHabits.length)}
+            sub={habitsLoading || !habitsData ? 'По ситуации' : `${habitsData.summary.anytime_pending} не закрыто`}
+            icon={Sparkles}
+            color="bg-cyan-500"
+          />
+          <StatCard
+            title="7 дней"
+            value={habitsLoading || !habitsData ? '—' : `${habitsData.summary.completion_rate_7_days.toFixed(0)}%`}
+            sub="Общая дисциплина по рутинам"
+            icon={Repeat2}
+            color="bg-blue-500"
+          />
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-dashed bg-background/30 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row">
+            <label className="flex-1">
+              <span className="mb-1 block text-[11px] text-muted-foreground">Привычка</span>
+              <input
+                type="text"
+                value={habitForm.name}
+                onChange={(event) => setHabitForm(current => ({ ...current, name: event.target.value }))}
+                placeholder="Например: чистка зубов, крем CeraVe, душ"
+                className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+              />
+            </label>
+            <label className="w-full lg:w-48">
+              <span className="mb-1 block text-[11px] text-muted-foreground">Когда</span>
+              <select
+                value={habitForm.routine}
+                onChange={(event) => setHabitForm(current => ({ ...current, routine: event.target.value as HabitRoutine }))}
+                className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+              >
+                {ROUTINES.map(routine => (
+                  <option key={routine.key} value={routine.key}>{routine.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="w-full lg:w-56">
+              <span className="mb-1 block text-[11px] text-muted-foreground">Группа</span>
+              <input
+                type="text"
+                value={habitForm.area_name ?? ''}
+                onChange={(event) => setHabitForm(current => ({ ...current, area_name: event.target.value }))}
+                placeholder="Опционально: уход, гигиена"
+                className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+              />
+            </label>
+          </div>
+
+          {habitFormError && (
+            <p className="mt-3 text-sm text-rose-400">{habitFormError}</p>
+          )}
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void handleSaveHabit()}
+              disabled={habitFormSaving}
+              className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+              {habitFormSaving ? 'Сохраняю...' : editingHabitID ? 'Сохранить привычку' : 'Добавить привычку'}
+            </button>
+            {editingHabitID && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingHabitID(null)
+                  setHabitForm({ name: '', routine: 'morning', area_name: '' })
+                  setHabitFormError('')
+                }}
+                className="rounded-xl border px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted/50"
+              >
+                Отменить редактирование
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <HabitColumn
+            title="Утренний блок"
+            accent={routineAccent('morning')}
+            icon={Sun}
+            habits={morningHabits}
+            savingHabitID={habitSavingID}
+            deletingHabitID={habitDeletingID}
+            onToggle={habit => { void handleToggleHabit(habit) }}
+            onEdit={startEditingHabit}
+            onDelete={habit => { void handleDeleteHabit(habit) }}
+          />
+          <HabitColumn
+            title="Вечерний блок"
+            accent={routineAccent('evening')}
+            icon={Moon}
+            habits={eveningHabits}
+            savingHabitID={habitSavingID}
+            deletingHabitID={habitDeletingID}
+            onToggle={habit => { void handleToggleHabit(habit) }}
+            onEdit={startEditingHabit}
+            onDelete={habit => { void handleDeleteHabit(habit) }}
+          />
+          <HabitColumn
+            title="В течение дня"
+            accent={routineAccent('anytime')}
+            icon={Sparkles}
+            habits={anytimeHabits}
+            savingHabitID={habitSavingID}
+            deletingHabitID={habitDeletingID}
+            onToggle={habit => { void handleToggleHabit(habit) }}
+            onEdit={startEditingHabit}
+            onDelete={habit => { void handleDeleteHabit(habit) }}
+          />
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard

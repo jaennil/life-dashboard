@@ -288,6 +288,11 @@ func main() {
 		productivityHandler := handlers.NewProductivity(pool, log.Logger)
 		r.Get("/api/v1/productivity/summary", productivityHandler.GetSummary)
 		r.Get("/api/v1/productivity/tasks", productivityHandler.GetTasks)
+		r.Get("/api/v1/productivity/habits", productivityHandler.GetHabits)
+		r.Post("/api/v1/productivity/habits", productivityHandler.CreateHabit)
+		r.Patch("/api/v1/productivity/habits/{habitID}", productivityHandler.UpdateHabit)
+		r.Delete("/api/v1/productivity/habits/{habitID}", productivityHandler.DeleteHabit)
+		r.Post("/api/v1/productivity/habits/{habitID}/status", productivityHandler.SetHabitStatus)
 
 		weatherHandler := handlers.NewWeather(cfg.Weather.Lat, cfg.Weather.Lon, cfg.Weather.City, log.Logger)
 		r.Get("/api/v1/weather", weatherHandler.GetWeather)
