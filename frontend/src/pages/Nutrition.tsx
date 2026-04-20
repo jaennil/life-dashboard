@@ -738,14 +738,19 @@ export function Nutrition() {
         <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Распределение БЖУ (ккал)</h2>
           {loading || macroPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
-            <div className="flex items-center gap-6">
-              <EChart option={buildNutritionDonutOption(macroPie, 'Всего', ' ккал')} height={160} className="w-[160px] shrink-0" />
-              <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-5 md:flex-row md:items-start">
+              <EChart option={buildNutritionDonutOption(macroPie, 'Всего', ' ккал')} height={160} className="mx-auto w-[160px] shrink-0 md:mx-0" />
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
                 {macroPie.map(m => (
-                  <div key={m.name} className="flex items-center gap-2 text-xs">
-                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: m.color }} />
-                    <span className="text-foreground">{m.name}</span>
-                    <span className="text-muted-foreground">{((m.value / macroPie.reduce((s, x) => s + x.value, 0)) * 100).toFixed(0)}%</span>
+                  <div key={m.name} className="rounded-xl border bg-background/45 px-3 py-2">
+                    <div className="flex items-center gap-3 text-xs">
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                      <span className="min-w-0 flex-1 text-sm text-foreground">{m.name}</span>
+                      <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                        {((m.value / macroPie.reduce((s, x) => s + x.value, 0)) * 100).toFixed(0)}%
+                      </span>
+                      <span className="shrink-0 text-sm font-medium text-foreground">{Math.round(m.value)} ккал</span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -757,15 +762,25 @@ export function Nutrition() {
         <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Калории по приёмам пищи</h2>
           {loading || mealPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
-            <div className="flex items-center gap-6">
-              <EChart option={buildNutritionDonutOption(mealPie, 'Всего', ' ккал')} height={160} className="w-[160px] shrink-0" />
-              <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-5 md:flex-row md:items-start">
+              <EChart option={buildNutritionDonutOption(mealPie, 'Всего', ' ккал')} height={160} className="mx-auto w-[160px] shrink-0 md:mx-0" />
+              <div className="flex max-h-[180px] min-w-0 flex-1 flex-col gap-2 overflow-y-auto py-1 pr-1">
                 {mealPie.map((m) => (
                   <button key={m.name} onClick={() => setMealFilter(mealFilter === m.key ? '' : m.key)}
-                    className="flex items-center gap-2 text-xs hover:bg-accent/50 rounded px-1 py-0.5 transition-colors">
-                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: m.color }} />
-                    <span className="text-foreground">{m.name}</span>
-                    <span className="text-muted-foreground">{m.value} ккал</span>
+                    className={cn(
+                      'rounded-xl border bg-background/45 px-3 py-2 text-left transition-colors hover:border-border hover:bg-accent/40',
+                      mealFilter === m.key && 'border-primary/30 bg-primary/10'
+                    )}>
+                    <div className="flex items-center gap-3 text-xs">
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                      <span className={cn('min-w-0 flex-1 text-sm text-foreground', mealFilter === m.key && 'font-medium text-primary')}>
+                        {m.name}
+                      </span>
+                      <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                        {((m.value / mealPie.reduce((s, x) => s + x.value, 0)) * 100).toFixed(0)}%
+                      </span>
+                      <span className="shrink-0 text-sm font-medium text-foreground">{m.value} ккал</span>
+                    </div>
                   </button>
                 ))}
               </div>
