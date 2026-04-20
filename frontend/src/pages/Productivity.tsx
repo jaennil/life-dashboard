@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ElementType } from 'react'
 import { AlertTriangle, CalendarClock, CheckCircle2, Clock3, ListTodo, Repeat2 } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
+import { PageHeader } from '@/components/PageHeader'
 import { api, type Integration, type ProductivitySummary, type ProductivityTask } from '@/lib/api'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 
@@ -22,7 +23,7 @@ function StatCard({ title, value, sub, icon: Icon, color }: {
   color: string
 }) {
   return (
-    <div className="rounded-xl border bg-card p-5 flex flex-col gap-3">
+    <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-muted-foreground">{title}</span>
         <div className={cn('flex items-center justify-center w-8 h-8 rounded-lg', color)}>
@@ -137,19 +138,25 @@ export function Productivity() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Productivity</h1>
-          <p className="text-sm text-muted-foreground mt-1">Todoist задачи, overdue, закрыто сегодня и ближайшая нагрузка</p>
-        </div>
-        <PageSyncButton
-          label="Синхронизировать Todoist"
-          syncCaption={syncCaption}
-          syncing={syncing}
-          disabled={!todoistIntegration?.enabled}
-          onClick={handleSync}
-        />
-      </div>
+      <PageHeader
+        eyebrow="Productivity"
+        title="Productivity"
+        description="Todoist как слой задач и регулярных дел: overdue, близкая нагрузка, recurring и всё, что зависло дольше разумного."
+        badges={[
+          { label: todoistIntegration?.enabled ? 'Todoist подключён' : 'Todoist не подключён', tone: todoistIntegration?.enabled ? 'success' : 'warning' },
+          ...(summary ? [{ label: `${summary.active_total} активных задач`, tone: 'muted' as const }] : []),
+          ...(summary ? [{ label: `${summary.completed_today_total} закрыто сегодня`, tone: 'primary' as const }] : []),
+        ]}
+        actions={(
+          <PageSyncButton
+            label="Синхронизировать Todoist"
+            syncCaption={syncCaption}
+            syncing={syncing}
+            disabled={!todoistIntegration?.enabled}
+            onClick={handleSync}
+          />
+        )}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard
@@ -183,7 +190,7 @@ export function Productivity() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_1.8fr] gap-4">
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Нагрузка по дням</h2>
           <div className="mt-4 flex flex-col gap-3">
             {summary?.upcoming_load?.length ? summary.upcoming_load.map(day => (
@@ -205,7 +212,7 @@ export function Productivity() {
           </div>
         </div>
 
-        <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+        <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
             {FILTERS.map(item => (
               <button
@@ -234,7 +241,7 @@ export function Productivity() {
           ) : (
             <div className="flex flex-col gap-3">
               {tasks.map(task => (
-                <div key={task.id} className="rounded-lg border bg-background/40 px-4 py-3">
+                <div key={task.id} className="rounded-2xl border bg-background/40 px-4 py-3 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Wallet, Dumbbell, TrendingUp, TrendingDown, Zap, Route, Droplets, Wind, MapPin, LocateFixed, Search, X } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
+import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type DashboardSummary, type Transaction, type WeatherData, type Integration } from '@/lib/api'
 
@@ -33,7 +34,7 @@ function StatCard({
   loading?: boolean
 }) {
   return (
-    <div className="rounded-xl border bg-card p-5 flex flex-col gap-3">
+    <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-muted-foreground">{title}</span>
         <div className={cn('flex items-center justify-center w-8 h-8 rounded-lg', color)}>
@@ -58,12 +59,12 @@ function StatCard({
 
 function InsightCard({ text, type }: { text: string; type: 'info' | 'warn' | 'good' }) {
   const colors = {
-    info: 'border-l-blue-500 bg-blue-500/5',
-    warn: 'border-l-amber-500 bg-amber-500/5',
-    good: 'border-l-emerald-500 bg-emerald-500/5',
+    info: 'border-blue-500/20 bg-blue-500/5',
+    warn: 'border-amber-500/20 bg-amber-500/5',
+    good: 'border-emerald-500/20 bg-emerald-500/5',
   }
   return (
-    <div className={cn('border-l-2 rounded-r-lg px-4 py-3 text-sm text-foreground', colors[type])}>
+    <div className={cn('rounded-2xl border border-white/5 px-4 py-3 text-sm text-foreground shadow-sm', colors[type])}>
       <Zap className="inline w-3 h-3 mr-1 opacity-70" />
       {text}
     </div>
@@ -134,7 +135,7 @@ function LocationPicker({ onSelect, onClose }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <div className="bg-card border rounded-xl shadow-xl w-full max-w-sm mx-4 p-4 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
+      <div className="bg-card border rounded-2xl shadow-xl w-full max-w-sm mx-4 p-4 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <span className="text-sm font-semibold text-foreground">Выбор города</span>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
@@ -186,7 +187,7 @@ function WeatherCard({ weather, loading, onPickLocation }: {
 }) {
   if (loading) {
     return (
-      <div className="rounded-xl border bg-card p-5">
+      <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
         <div className="h-5 w-24 bg-muted rounded animate-pulse mb-4" />
         <div className="h-12 w-32 bg-muted rounded animate-pulse" />
       </div>
@@ -195,7 +196,7 @@ function WeatherCard({ weather, loading, onPickLocation }: {
   if (!weather) return null
 
   return (
-    <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+    <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <button
@@ -354,23 +355,27 @@ export function Dashboard() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-6">
       {showPicker && <LocationPicker onSelect={handleLocationSelect} onClose={() => setShowPicker(false)} />}
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}
-          </p>
-        </div>
-        <PageSyncButton
-          label="Синхронизировать всё"
-          syncCaption={dashboardSyncCaption}
-          syncing={syncing}
-          disabled={enabledDashboardSources.length === 0}
-          onClick={handleSyncDashboard}
-        />
-      </div>
+      <PageHeader
+        eyebrow="Overview"
+        title="Dashboard"
+        description="Быстрый срез по деньгам, активности и текущему состоянию дня. Хорошая стартовая точка перед деталями по отдельным разделам."
+        badges={[
+          { label: new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }), tone: 'primary' },
+          { label: enabledDashboardSources.length > 0 ? `${enabledDashboardSources.length} активных источника` : 'Нет активных источников', tone: enabledDashboardSources.length > 0 ? 'muted' : 'warning' },
+          ...(weather?.city ? [{ label: weather.city, tone: 'muted' as const }] : []),
+        ]}
+        actions={(
+          <PageSyncButton
+            label="Синхронизировать всё"
+            syncCaption={dashboardSyncCaption}
+            syncing={syncing}
+            disabled={enabledDashboardSources.length === 0}
+            onClick={handleSyncDashboard}
+          />
+        )}
+      />
 
       {/* Weather + Stats */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -428,7 +433,7 @@ export function Dashboard() {
       {/* Recent transactions */}
       <div className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Последние транзакции</h2>
-        <div className="rounded-xl border bg-card overflow-hidden">
+        <div className="rounded-2xl border bg-card/90 overflow-hidden shadow-sm">
           {loading ? (
             <div className="divide-y">
               {Array.from({ length: 5 }).map((_, i) => (

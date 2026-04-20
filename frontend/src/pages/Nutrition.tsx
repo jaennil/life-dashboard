@@ -7,6 +7,7 @@ import {
 import type { TooltipContentProps } from 'recharts/types/component/Tooltip'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
+import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type NutritionSummary, type NutritionDay, type Integration, type NutritionTargetsInput } from '@/lib/api'
 
@@ -310,34 +311,38 @@ export function Nutrition() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Питание</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-          <PageSyncButton
-            label={nutritionSyncLabel}
-            syncCaption={nutritionSyncCaption}
-            syncing={syncing}
-            disabled={enabledNutritionIntegrations.length === 0}
-            onClick={handleSyncNutrition}
-          />
-          <div className="flex gap-1">
-            {PERIODS.map(p => (
-              <button key={p.days} onClick={() => setPeriod(p.days)}
-                className={cn('px-3 py-1 text-xs rounded-lg transition-colors',
-                  period === p.days ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent')}>
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Nutrition"
+        title="Питание"
+        description="Контроль калорий, БЖУ и целей в одном месте. Ручные цели дополняют данные из FatSecret и задают контекст для UI и AI."
+        badges={[
+          { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
+          { label: enabledNutritionIntegrations.length > 0 ? `${enabledNutritionIntegrations.length} активных источника питания` : 'Источник питания не подключён', tone: enabledNutritionIntegrations.length > 0 ? 'success' : 'warning' },
+          { label: `Период: ${period} дней`, tone: 'muted' },
+        ]}
+        actions={(
+          <>
+            <PageSyncButton
+              label={nutritionSyncLabel}
+              syncCaption={nutritionSyncCaption}
+              syncing={syncing}
+              disabled={enabledNutritionIntegrations.length === 0}
+              onClick={handleSyncNutrition}
+            />
+            <div className="flex gap-1 rounded-2xl border bg-card/90 p-1 shadow-sm">
+              {PERIODS.map(p => (
+                <button key={p.days} onClick={() => setPeriod(p.days)}
+                  className={cn('px-3 py-1.5 text-xs rounded-xl transition-colors',
+                    period === p.days ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      />
 
-      <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+      <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-4">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Цели питания</h2>
@@ -487,7 +492,7 @@ export function Nutrition() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
           { label: 'Сегодня', value: summary ? `${summary.today_kcal.toFixed(0)}` : '—', unit: 'ккал', color: 'bg-orange-500' },
           { label: `Ср. ккал/${period}д`, value: avgCalories.toFixed(0), unit: 'ккал', color: 'bg-amber-500' },
@@ -495,7 +500,7 @@ export function Nutrition() {
           { label: 'Ср. жиры', value: avgFat.toFixed(0), unit: 'г', color: 'bg-orange-500' },
           { label: 'Ср. углеводы', value: avgCarbs.toFixed(0), unit: 'г', color: 'bg-emerald-500' },
         ].map(card => (
-          <div key={card.label} className="rounded-xl border bg-card p-4 flex flex-col gap-1">
+          <div key={card.label} className="rounded-2xl border bg-card/90 p-4 shadow-sm flex flex-col gap-1">
             <span className="text-[10px] text-muted-foreground">{card.label}</span>
             {loading ? <div className="h-6 w-12 bg-muted rounded animate-pulse" /> : (
               <div className="text-lg font-bold text-foreground">{card.value} <span className="text-xs font-normal text-muted-foreground">{card.unit}</span></div>
@@ -507,7 +512,7 @@ export function Nutrition() {
       {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Calorie chart */}
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Калории</h2>
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : chartData.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
@@ -534,7 +539,7 @@ export function Nutrition() {
         </div>
 
         {/* Macros trend */}
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">БЖУ тренд</h2>
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : chartData.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
@@ -562,7 +567,7 @@ export function Nutrition() {
       {/* Pie charts row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {/* Macro distribution */}
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Распределение БЖУ (ккал)</h2>
           {loading || macroPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
             <div className="flex items-center gap-6">
@@ -588,7 +593,7 @@ export function Nutrition() {
         </div>
 
         {/* Meal distribution */}
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Калории по приёмам пищи</h2>
           {loading || mealPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
             <div className="flex items-center gap-6">
@@ -616,7 +621,7 @@ export function Nutrition() {
       </div>
 
       {/* Daily log */}
-      <div className="rounded-xl border bg-card overflow-hidden">
+      <div className="rounded-2xl border bg-card/90 overflow-hidden shadow-sm">
         <div className="px-5 py-4 border-b flex items-center justify-between">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Дневник питания</h2>
           <div className="flex gap-1">

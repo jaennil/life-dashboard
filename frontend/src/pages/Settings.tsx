@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
+import { PageHeader } from '@/components/PageHeader'
 import { cn, formatLastSyncAt } from '@/lib/utils'
 import { api, type HealthAPIKeyInfo, type Integration } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
@@ -154,7 +155,7 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
 
   return (
     <div className={cn(
-      'rounded-xl border bg-card p-5 flex flex-col gap-4 transition-opacity',
+      'rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-4 transition-opacity',
       !integration.configured && 'opacity-60'
     )}>
       <div className="flex items-start justify-between gap-3">
@@ -417,7 +418,7 @@ function TOTPSection() {
 
   if (phase === 'setup') {
     return (
-      <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+      <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-4">
         <p className="text-sm font-semibold text-foreground">Настройка двухфакторной аутентификации</p>
         <p className="text-xs text-muted-foreground">Отсканируй QR-код в Google Authenticator или Aegis, затем введи 6-значный код для подтверждения.</p>
         {qr && <img src={qr} alt="TOTP QR" className="w-40 h-40 rounded-lg border self-start" />}
@@ -459,7 +460,7 @@ function TOTPSection() {
 
   if (phase === 'disable') {
     return (
-      <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+      <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-4">
         <p className="text-sm font-semibold text-foreground">Отключить двухфакторную аутентификацию</p>
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-foreground">Код из приложения</label>
@@ -593,7 +594,7 @@ function AppleHealthSection({ onChanged, reloadKey }: { onChanged: () => void; r
   return (
     <div>
       <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Apple Health</h2>
-      <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+      <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-xl shrink-0">❤️</div>
           <div>
@@ -778,10 +779,16 @@ export function Settings() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Настройки</h1>
-        <p className="text-sm text-muted-foreground mt-1">Управление интеграциями и источниками данных</p>
-      </div>
+      <PageHeader
+        eyebrow="Control center"
+        title="Настройки"
+        description="Управление интеграциями, вебхуками, ключами доступа и безопасностью аккаунта. Здесь видно, какие источники реально подключены и когда обновлялись."
+        badges={[
+          { label: `${integrations.filter(integration => integration.enabled).length} активных интеграций`, tone: 'primary' },
+          { label: `${integrations.filter(integration => integration.has_credentials).length} подключено с доступом`, tone: 'muted' },
+          { label: pendingSync ? `Сейчас синхронизируется: ${pendingSync.name}` : 'Нет активной синхронизации', tone: pendingSync ? 'success' : 'muted' },
+        ]}
+      />
 
       <div>
         <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Аккаунт</h2>
@@ -795,7 +802,7 @@ export function Settings() {
         {loading ? (
           <div className="flex flex-col gap-3">
             {[1, 2, 3].map(i => (
-              <div key={i} className="rounded-xl border bg-card p-5 h-28 animate-pulse bg-muted/30" />
+              <div key={i} className="rounded-2xl border bg-card/90 p-5 h-28 animate-pulse bg-muted/30 shadow-sm" />
             ))}
           </div>
         ) : (

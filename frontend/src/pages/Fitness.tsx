@@ -7,6 +7,7 @@ import {
 import type { TooltipContentProps } from 'recharts/types/component/Tooltip'
 import { Route, Dumbbell, Flame, Heart, ChevronDown, ChevronUp, Timer } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
+import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type FitnessSummary, type WeekStat, type Activity, type Workout, type Integration } from '@/lib/api'
 
@@ -92,7 +93,7 @@ function StatCard({
   color: string
 }) {
   return (
-    <div className="rounded-xl border bg-card p-4 flex flex-col gap-1">
+    <div className="rounded-2xl border bg-card/90 p-4 shadow-sm flex flex-col gap-1">
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground">{label}</span>
         <div className={cn('flex items-center justify-center w-6 h-6 rounded-md', color)}>
@@ -337,21 +338,25 @@ export function Fitness() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Фитнес</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
-            </p>
-          </div>
-          <PageSyncButton
-            label={`Синхронизировать ${sourceTab === 'strava' ? 'Strava' : 'Hevy'}`}
-            syncCaption={fitnessSyncCaption}
-            syncing={syncing}
-            disabled={!activeIntegration?.enabled}
-            onClick={handleSyncFitness}
-          />
-        </div>
+        <PageHeader
+          eyebrow="Movement"
+          title="Фитнес"
+          description="Strava отвечает за активности, Hevy за силовые тренировки. Переключай источник, чтобы смотреть именно тот тип нагрузки, который сейчас анализируешь."
+          badges={[
+            { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
+            { label: activeIntegration?.enabled ? `${activeIntegration.display_name} подключён` : 'Источник не подключён', tone: activeIntegration?.enabled ? 'success' : 'warning' },
+            { label: sourceTab === 'strava' ? `${stravaTotal} активностей` : `${hevyTotal} тренировок`, tone: 'muted' },
+          ]}
+          actions={(
+            <PageSyncButton
+              label={`Синхронизировать ${sourceTab === 'strava' ? 'Strava' : 'Hevy'}`}
+              syncCaption={fitnessSyncCaption}
+              syncing={syncing}
+              disabled={!activeIntegration?.enabled}
+              onClick={handleSyncFitness}
+            />
+          )}
+        />
 
         <div className="flex flex-wrap gap-2">
           {[
@@ -362,8 +367,8 @@ export function Fitness() {
               key={tab.key}
               onClick={() => setSourceTab(tab.key)}
               className={cn(
-                'rounded-xl border px-4 py-3 text-left transition-colors min-w-[180px]',
-                sourceTab === tab.key ? 'border-primary bg-primary/10' : 'bg-card hover:bg-muted/40',
+                'rounded-2xl border px-4 py-3 text-left transition-colors min-w-[180px] shadow-sm',
+                sourceTab === tab.key ? 'border-primary/30 bg-primary/10' : 'bg-card/90 hover:bg-muted/40',
               )}
             >
               <div className="flex items-center justify-between gap-4">
@@ -392,7 +397,7 @@ export function Fitness() {
       {sourceTab === 'strava' ? (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="rounded-xl border bg-card p-5">
+            <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Strava по неделям</h2>
               {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : stravaWeekly.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
@@ -420,7 +425,7 @@ export function Fitness() {
               )}
             </div>
 
-            <div className="rounded-xl border bg-card p-5">
+            <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Типы активностей</h2>
               {loading || activityTypePie.length === 0 ? <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
                 <div className="flex items-center gap-6">
@@ -452,7 +457,7 @@ export function Fitness() {
             </div>
           </div>
 
-          <div className="rounded-xl border bg-card overflow-hidden">
+          <div className="rounded-2xl border bg-card/90 overflow-hidden shadow-sm">
             <div className="px-5 py-4 border-b flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Лента Strava</h2>
@@ -512,7 +517,7 @@ export function Fitness() {
       ) : (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="rounded-xl border bg-card p-5">
+            <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Hevy по неделям</h2>
               {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : hevyWeekly.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
@@ -533,7 +538,7 @@ export function Fitness() {
               )}
             </div>
 
-            <div className="rounded-xl border bg-card p-5">
+            <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Категории упражнений</h2>
               {loading || workoutCategoryPie.length === 0 ? <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
                 <div className="flex items-center gap-6">
@@ -559,7 +564,7 @@ export function Fitness() {
             </div>
           </div>
 
-          <div className="rounded-xl border bg-card overflow-hidden">
+          <div className="rounded-2xl border bg-card/90 overflow-hidden shadow-sm">
             <div className="px-5 py-4 border-b">
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Лента Hevy</h2>
               <p className="text-xs text-muted-foreground mt-1">Последние тренировки{hevyTotal > workouts.length ? ' (показываем 30 последних)' : ''}</p>

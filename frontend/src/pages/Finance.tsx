@@ -16,6 +16,7 @@ import {
 import type { EChartsCoreOption } from 'echarts/core'
 import { EChart } from '@/components/EChart'
 import { PageSyncButton } from '@/components/PageSyncButton'
+import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import {
   api,
@@ -105,6 +106,16 @@ function dateOffset(days: number) {
   const d = new Date()
   d.setDate(d.getDate() - days)
   return d.toISOString().split('T')[0]
+}
+
+function formatRangeLabel(from: string, to?: string) {
+  const end = to || new Date().toISOString().split('T')[0]
+  return `${fmtDate(from)} — ${fmtDate(end)}`
+}
+
+function formatPercent(part: number, total: number) {
+  if (total <= 0) return '0%'
+  return `${Math.round((part / total) * 100)}%`
 }
 
 function formatAccountCount(count: number) {
@@ -618,6 +629,22 @@ export function Finance() {
   const excludedBalance = excludedAccounts
     .filter(a => a.currency === 'RUB')
     .reduce((sum, a) => sum + a.balance, 0)
+  const currentNet = currentMonth ? currentMonth.income - currentMonth.spending : 0
+  const hasCustomRange = Boolean(customFrom || customTo)
+  const rangeLabel = formatRangeLabel(from, to)
+  const activePeriodLabel = hasCustomRange
+    ? 'Произвольный диапазон'
+    : PERIODS.find(item => item.days === period)?.label ?? 'Месяц'
+  const totalCategorySpend = categories.reduce((sum, category) => sum + category.amount, 0)
+  const topCategory = categories[0]
+  const totalDailySpending = daily.reduce((sum, day) => sum + day.spending, 0)
+  const avgDailySpending = daily.length > 0 ? totalDailySpending / daily.length : 0
+  const peakExpenseDay = daily.reduce<DailyTotal | null>((peak, day) => {
+    if (!peak || day.spending > peak.spending) return day
+    return peak
+  }, null)
+  const topPayee = topExpenses[0]
+  const activeTransactionFilters = [filter, search, catFilter, sort].filter(Boolean).length
 
   async function handleSyncFinance() {
     if (!zenmoneyIntegration?.enabled) return
@@ -634,107 +661,151 @@ export function Finance() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Финансы</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-          <PageSyncButton
-            label="Синхронизировать ZenMoney"
-            syncCaption={financeSyncCaption}
-            syncing={syncing}
-            disabled={!zenmoneyIntegration?.enabled}
-            onClick={handleSyncFinance}
-          />
-          <div className="flex gap-1 items-center flex-wrap">
-            {PERIODS.map(p => (
-              <button
-                key={p.days}
-                onClick={() => { setPeriod(p.days); setCustomFrom(''); setCustomTo('') }}
-                className={cn(
-                  'px-3 py-1 text-xs rounded-lg transition-colors',
-                  period === p.days && !customFrom
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted text-muted-foreground hover:bg-accent'
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
-            <span className="text-xs text-muted-foreground mx-1">|</span>
-            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-              className="text-xs rounded-lg border bg-background px-2 py-1 outline-none" />
-            <span className="text-xs text-muted-foreground">—</span>
-            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-              className="text-xs rounded-lg border bg-background px-2 py-1 outline-none" />
+      <div className="flex flex-col gap-4">
+        <PageHeader
+          eyebrow="Finance"
+          title="Финансы"
+          description="Баланс, cashflow, структура расходов и крупнейшие получатели в одном срезе. Фильтры ниже меняют все графики и список транзакций сразу."
+          badges={[
+            { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
+            { label: zenmoneyIntegration?.enabled ? 'ZenMoney подключён' : 'ZenMoney не подключён', tone: zenmoneyIntegration?.enabled ? 'success' : 'warning' },
+            { label: formatAccountCount(includedAccounts.length), tone: 'muted' },
+            ...(topCategory ? [{ label: `Топ: ${topCategory.category} · ${formatPercent(topCategory.amount, totalCategorySpend)}`, tone: 'muted' as const }] : []),
+          ]}
+          actions={(
+            <PageSyncButton
+              label="Синхронизировать ZenMoney"
+              syncCaption={financeSyncCaption}
+              syncing={syncing}
+              disabled={!zenmoneyIntegration?.enabled}
+              onClick={handleSyncFinance}
+            />
+          )}
+        />
+
+        <div className="rounded-2xl border bg-card/80 p-4 shadow-sm">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-primary">
+                  {activePeriodLabel}
+                </span>
+                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                  {rangeLabel}
+                </span>
+                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                  {formatAccountCount(includedAccounts.length)} в балансе
+                </span>
+                {topCategory ? (
+                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                    Топ категория: {topCategory.category} · {formatPercent(topCategory.amount, totalCategorySpend)}
+                  </span>
+                ) : null}
+              </div>
+              <p className="text-sm text-foreground">
+                {hasCustomRange
+                  ? 'Показываем произвольный диапазон без усреднений по календарным периодам.'
+                  : `Быстрый срез за ${activePeriodLabel.toLowerCase()} с фокусом на реальный cashflow и структуру трат.`}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-wrap gap-1 rounded-xl border bg-background/60 p-1">
+                {PERIODS.map(p => (
+                  <button
+                    key={p.days}
+                    onClick={() => { setPeriod(p.days); setCustomFrom(''); setCustomTo('') }}
+                    className={cn(
+                      'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                      period === p.days && !customFrom
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[auto_auto_auto]">
+                <label className="flex min-w-[128px] flex-col gap-1">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">С даты</span>
+                  <input
+                    type="date"
+                    value={customFrom}
+                    onChange={e => setCustomFrom(e.target.value)}
+                    className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary"
+                  />
+                </label>
+                <label className="flex min-w-[128px] flex-col gap-1">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">По дату</span>
+                  <input
+                    type="date"
+                    value={customTo}
+                    onChange={e => setCustomTo(e.target.value)}
+                    className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary"
+                  />
+                </label>
+                {hasCustomRange ? (
+                  <button
+                    onClick={() => { setCustomFrom(''); setCustomTo('') }}
+                    className="self-end rounded-lg border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    Сбросить
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className="rounded-xl border bg-card p-5 flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Баланс</span>
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500">
-              <Wallet className="w-4 h-4 text-white" />
-            </div>
-          </div>
-          {loading
-            ? <div className="h-8 w-32 bg-muted rounded animate-pulse" />
-            : <div className="text-2xl font-bold text-foreground">{fmt(totalBalance)}</div>}
-          <span className="text-xs text-muted-foreground">
-            {loading ? 'загрузка...' : `${formatAccountCount(includedAccounts.length)} в балансе`}
-          </span>
-        </div>
+        <FinanceSummaryCard
+          title="Баланс"
+          icon={Wallet}
+          iconClassName="bg-blue-500"
+          loading={loading}
+          value={fmt(totalBalance)}
+          caption={`${formatAccountCount(includedAccounts.length)} в балансе`}
+          hint={currentNet >= 0 ? `Результат месяца: +${fmt(currentNet)}` : `Результат месяца: ${fmt(currentNet)}`}
+        />
 
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Вне баланса</span>
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-500">
-              <EyeOff className="w-4 h-4 text-white" />
-            </div>
-          </div>
-          {loading
-            ? <div className="h-8 w-32 bg-muted rounded animate-pulse" />
-            : <div className="text-2xl font-bold text-foreground">{fmt(excludedBalance)}</div>}
-          <span className="text-xs text-muted-foreground">
-            {loading ? 'загрузка...' : `${formatAccountCount(excludedAccounts.length)} исключено из общего баланса`}
-          </span>
-        </div>
+        <FinanceSummaryCard
+          title="Вне баланса"
+          icon={EyeOff}
+          iconClassName="bg-amber-500"
+          panelClassName="border-amber-500/20 bg-amber-500/5"
+          loading={loading}
+          value={fmt(excludedBalance)}
+          caption={`${formatAccountCount(excludedAccounts.length)} исключено из общего баланса`}
+          hint="Не участвуют в общей карточке баланса"
+        />
 
-        <div className="rounded-xl border bg-card p-5 flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Расходы</span>
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-rose-500">
-              <TrendingDown className="w-4 h-4 text-white" />
-            </div>
-          </div>
-          {loading
-            ? <div className="h-8 w-32 bg-muted rounded animate-pulse" />
-            : <div className="text-2xl font-bold text-foreground">{currentMonth ? fmt(currentMonth.spending) : '—'}</div>}
-          <span className="text-xs text-muted-foreground">текущий месяц</span>
-        </div>
+        <FinanceSummaryCard
+          title="Расходы"
+          icon={TrendingDown}
+          iconClassName="bg-rose-500"
+          loading={loading}
+          value={currentMonth ? fmt(currentMonth.spending) : '—'}
+          caption="текущий месяц"
+          hint={peakExpenseDay ? `Пиковый день: ${fmtDate(peakExpenseDay.date)} · ${fmt(peakExpenseDay.spending)}` : 'Пиковый день появится после загрузки данных'}
+        />
 
-        <div className="rounded-xl border bg-card p-5 flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Доходы</span>
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500">
-              <TrendingUp className="w-4 h-4 text-white" />
-            </div>
-          </div>
-          {loading
-            ? <div className="h-8 w-32 bg-muted rounded animate-pulse" />
-            : <div className="text-2xl font-bold text-foreground">{currentMonth ? fmt(currentMonth.income) : '—'}</div>}
-          <span className="text-xs text-muted-foreground">текущий месяц</span>
-        </div>
+        <FinanceSummaryCard
+          title="Доходы"
+          icon={TrendingUp}
+          iconClassName="bg-emerald-500"
+          loading={loading}
+          value={currentMonth ? fmt(currentMonth.income) : '—'}
+          caption="текущий месяц"
+          hint={avgDailySpending > 0 ? `Средний расход/день: ${fmt(avgDailySpending)}` : 'Средний расход появится после загрузки данных'}
+        />
       </div>
 
       {!loading && excludedAccounts.length > 0 ? (
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-5 py-4">
+        <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-5 py-4">
           <p className="text-sm font-medium text-foreground">Часть счетов исключена из общего баланса</p>
           <p className="text-sm text-muted-foreground mt-1">
             ZenMoney помечает {formatAccountCount(excludedAccounts.length)} как не участвующие в общем балансе.
@@ -747,16 +818,45 @@ export function Finance() {
       {/* Charts row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Monthly income vs expenses */}
-        <div className="rounded-xl border bg-card p-5">
-          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Доходы и расходы</h2>
+        <div className="rounded-2xl border bg-card p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Доходы и расходы</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Тренд по месяцам с фокусом на разрыв между поступлениями и тратами.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
+                Доходы: {currentMonth ? fmt(currentMonth.income) : '—'}
+              </span>
+              <span className="rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 text-[11px] font-medium text-rose-300">
+                Расходы: {currentMonth ? fmt(currentMonth.spending) : '—'}
+              </span>
+            </div>
+          </div>
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : (
             <EChart option={buildMonthlyOption(monthly)} height={220} />
           )}
         </div>
 
         {/* Daily spending trend */}
-        <div className="rounded-xl border bg-card p-5">
-          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Расходы по дням</h2>
+        <div className="rounded-2xl border bg-card p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Расходы по дням</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Помогает увидеть всплески трат и редкие доходные дни.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {peakExpenseDay ? (
+                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                  Пик расходов: {fmtDate(peakExpenseDay.date)} · {fmt(peakExpenseDay.spending)}
+                </span>
+              ) : null}
+            </div>
+          </div>
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : (
             <EChart option={buildDailyOption(daily)} height={220} />
           )}
@@ -766,21 +866,68 @@ export function Finance() {
       {/* Charts row 2 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Categories pie */}
-        <div className="rounded-xl border bg-card p-5">
-          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Расходы по категориям</h2>
+        <div className="rounded-2xl border bg-card p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Расходы по категориям</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Легенда справа кликабельна: можно быстро отфильтровать транзакции по категории.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {topCategory ? (
+                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                  Лидер: {topCategory.category} · {formatPercent(topCategory.amount, totalCategorySpend)}
+                </span>
+              ) : null}
+              {catFilter ? (
+                <button
+                  onClick={() => setCatFilter('')}
+                  className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/15"
+                >
+                  Фильтр: {catFilter} ×
+                </button>
+              ) : null}
+            </div>
+          </div>
           {loading ? <div className="h-56 bg-muted rounded animate-pulse" /> : categories.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
-            <div className="flex flex-col lg:flex-row gap-6 items-start">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
               <EChart option={buildCategoriesOption(categories)} height={200} className="w-[200px] shrink-0" />
-              <div className="flex flex-col gap-1.5 flex-1 min-w-0 py-1">
+              <div className="flex max-h-[280px] flex-1 min-w-0 flex-col gap-2 overflow-y-auto py-1 pr-1">
                 {categories.map((c, i) => (
-                  <div key={c.category} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-accent/50 rounded px-1 py-0.5 transition-colors"
-                    onClick={() => setCatFilter(catFilter === c.category ? '' : c.category)}>
-                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }} />
-                    <span className={cn('flex-1 truncate', catFilter === c.category && 'text-primary font-medium')}>{c.category}</span>
-                    <span className="text-muted-foreground tabular-nums shrink-0">{fmt(c.amount)}</span>
-                  </div>
+                  <button
+                    key={c.category}
+                    onClick={() => setCatFilter(catFilter === c.category ? '' : c.category)}
+                    className={cn(
+                      'rounded-xl border border-transparent bg-background/45 px-3 py-2 text-left transition-colors hover:border-border hover:bg-accent/40',
+                      catFilter === c.category && 'border-primary/30 bg-primary/10'
+                    )}
+                  >
+                    <div className="flex items-center gap-3 text-xs">
+                      <div
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
+                      />
+                      <span className={cn('min-w-0 flex-1 truncate text-sm', catFilter === c.category && 'font-medium text-primary')}>
+                        {c.category}
+                      </span>
+                      <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                        {formatPercent(c.amount, totalCategorySpend)}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-sm text-foreground">{fmt(c.amount)}</span>
+                    </div>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted/70">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: formatPercent(c.amount, totalCategorySpend),
+                          backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+                        }}
+                      />
+                    </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -788,12 +935,36 @@ export function Finance() {
         </div>
 
         {/* Top expenses */}
-        <div className="rounded-xl border bg-card p-5">
-          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Топ расходов</h2>
+        <div className="rounded-2xl border bg-card p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Топ расходов</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Группировка по payee из транзакций, чтобы быстро увидеть главные утечки.
+              </p>
+            </div>
+            {topPayee ? (
+              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                Лидер: {truncateLabel(topPayee.payee, 18)} · {fmt(topPayee.amount)}
+              </span>
+            ) : null}
+          </div>
           {loading ? <div className="h-56 bg-muted rounded animate-pulse" /> : topExpenses.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
-            <EChart option={buildTopExpensesOption(topExpenses)} height={Math.max(220, topExpenses.length * 32)} />
+            <div className="space-y-4">
+              <EChart option={buildTopExpensesOption(topExpenses)} height={Math.max(220, topExpenses.length * 32)} />
+              <div className="grid gap-2 sm:grid-cols-3">
+                {topExpenses.slice(0, 3).map((expense, index) => (
+                  <div key={expense.payee} className="rounded-xl border bg-background/50 px-3 py-2">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">#{index + 1}</p>
+                    <p className="mt-1 truncate text-sm font-medium text-foreground">{expense.payee}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{expense.count} операций</p>
+                    <p className="mt-2 text-sm font-semibold tabular-nums text-foreground">{fmt(expense.amount)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -801,9 +972,28 @@ export function Finance() {
       {/* Accounts + Transactions */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Accounts */}
-        <div className="rounded-xl border bg-card overflow-hidden">
-          <div className="px-5 py-4 border-b">
-            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Счета</h2>
+        <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+          <div className="border-b px-5 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Счета</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Быстрый обзор всех кошельков, карт и счетов из ZenMoney.
+                </p>
+              </div>
+              {!loading ? (
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                    В балансе: {fmt(totalBalance)}
+                  </span>
+                  {excludedAccounts.length > 0 ? (
+                    <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-200">
+                      Вне баланса: {fmt(excludedBalance)}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
             {!loading ? (
               <p className="mt-1 text-xs text-muted-foreground">
                 {formatAccountCount(includedAccounts.length)} в балансе
@@ -855,39 +1045,72 @@ export function Finance() {
         </div>
 
         {/* Transactions */}
-        <div className="lg:col-span-2 rounded-xl border bg-card overflow-hidden">
-          <div className="px-5 py-4 border-b flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Транзакции</h2>
+        <div className="overflow-hidden rounded-2xl border bg-card shadow-sm lg:col-span-2">
+          <div className="border-b px-5 py-4">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Транзакции</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Живой список операций за выбранный период. Поиск и фильтры применяются сразу.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                    Показано: {txs.length}
+                  </span>
+                  {activeTransactionFilters > 0 ? (
+                    <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+                      Активных фильтров: {activeTransactionFilters}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
               <div className="flex gap-1">
                 {(['', 'income', 'expense'] as FilterType[]).map(f => (
                   <button key={f} onClick={() => setFilter(f)}
-                    className={cn('px-3 py-1 text-xs rounded-lg transition-colors',
-                      filter === f ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent')}>
+                    className={cn(
+                      'rounded-lg px-3 py-1 text-xs font-medium transition-colors',
+                      filter === f ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'
+                    )}
+                  >
                     {f === '' ? 'Все' : f === 'income' ? 'Доходы' : 'Расходы'}
                   </button>
                 ))}
               </div>
-            </div>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-                  placeholder="Поиск..." className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border bg-background outline-none focus:ring-2 focus:ring-ring" />
+
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_160px]">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="Поиск по payee или комментарию..."
+                    className="w-full rounded-lg border bg-background pl-8 pr-3 py-2 text-xs outline-none transition-colors focus:border-primary"
+                  />
+                </div>
+                <select
+                  value={catFilter}
+                  onChange={e => setCatFilter(e.target.value)}
+                  className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary"
+                >
+                  <option value="">Все категории</option>
+                  {categoryList.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <select
+                  value={sort}
+                  onChange={e => setSort(e.target.value as SortType)}
+                  className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary"
+                >
+                  <option value="">По дате ↓</option>
+                  <option value="date_asc">По дате ↑</option>
+                  <option value="amount">По сумме ↓</option>
+                  <option value="amount_asc">По сумме ↑</option>
+                  <option value="category">По категории</option>
+                </select>
               </div>
-              <select value={catFilter} onChange={e => setCatFilter(e.target.value)}
-                className="text-xs rounded-lg border bg-background px-2 py-1.5 outline-none">
-                <option value="">Все категории</option>
-                {categoryList.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <select value={sort} onChange={e => setSort(e.target.value as SortType)}
-                className="text-xs rounded-lg border bg-background px-2 py-1.5 outline-none">
-                <option value="">По дате ↓</option>
-                <option value="date_asc">По дате ↑</option>
-                <option value="amount">По сумме ↓</option>
-                <option value="amount_asc">По сумме ↑</option>
-                <option value="category">По категории</option>
-              </select>
             </div>
           </div>
 
@@ -896,11 +1119,11 @@ export function Finance() {
               <div className="px-5 py-4 text-sm text-muted-foreground text-center">Нет транзакций</div>
             ) : (
               txs.map(tx => (
-                <div key={tx.id} className="px-5 py-3 flex items-center gap-3">
+                <div key={tx.id} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-accent/30">
                   <span className="text-xs text-muted-foreground w-16 shrink-0">{fmtDate(tx.occurred_at)}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-foreground truncate">{tx.payee || tx.comment || '—'}</p>
-                    {tx.category && <p className="text-[10px] text-muted-foreground/60">{tx.category}</p>}
+                    {tx.category && <p className="text-[10px] text-muted-foreground/70">{tx.category}</p>}
                   </div>
                   <span className={cn('text-sm font-medium tabular-nums shrink-0', tx.amount > 0 ? 'text-emerald-500' : 'text-rose-500')}>
                     {tx.amount > 0 ? '+' : ''}{fmt(tx.amount, tx.currency)}
@@ -957,6 +1180,50 @@ function AccountRow({ account, muted = false }: { account: Account; muted?: bool
       <span className={cn('text-sm font-medium tabular-nums shrink-0', account.balance >= 0 ? 'text-foreground' : 'text-rose-500')}>
         {fmt(account.balance, account.currency)}
       </span>
+    </div>
+  )
+}
+
+function FinanceSummaryCard({
+  title,
+  value,
+  caption,
+  hint,
+  icon: Icon,
+  iconClassName,
+  loading,
+  panelClassName,
+}: {
+  title: string
+  value: string
+  caption: string
+  hint?: string
+  icon: LucideIcon
+  iconClassName: string
+  loading: boolean
+  panelClassName?: string
+}) {
+  return (
+    <div className={cn('rounded-2xl border bg-card/90 p-5 shadow-sm', panelClassName)}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-muted-foreground">{title}</p>
+          {loading ? (
+            <div className="h-8 w-28 animate-pulse rounded bg-muted" />
+          ) : (
+            <p className="text-3xl font-semibold tracking-tight text-foreground">{value}</p>
+          )}
+        </div>
+        <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-sm', iconClassName)}>
+          <Icon className="h-5 w-5" />
+        </div>
+      </div>
+      <div className="mt-4 space-y-1">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{caption}</p>
+        {hint ? (
+          <p className="text-sm leading-5 text-muted-foreground">{hint}</p>
+        ) : null}
+      </div>
     </div>
   )
 }

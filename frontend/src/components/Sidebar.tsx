@@ -69,15 +69,26 @@ export function Sidebar() {
         </div>
       </header>
 
-      <aside className="hidden h-screen w-56 shrink-0 flex-col border-r bg-card fixed top-0 left-0 lg:flex">
-        <div className="flex items-center gap-3 px-4 h-16 border-b">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary">
-            <Activity className="w-4 h-4 text-primary-foreground" />
+      <aside className="fixed left-0 top-0 hidden h-screen w-56 shrink-0 flex-col border-r bg-card/95 backdrop-blur lg:flex">
+        <div className="border-b px-4 py-4">
+          <div className="flex items-center gap-3 rounded-2xl border bg-background/70 px-3 py-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary shadow-[0_10px_30px_rgba(59,130,246,0.35)]">
+              <Activity className="h-4 w-4 text-primary-foreground" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-foreground">Life Dashboard</p>
+              <p className="truncate text-[11px] text-muted-foreground">personal operating system</p>
+            </div>
           </div>
-          <span className="font-semibold text-sm text-foreground">Life Dashboard</span>
         </div>
 
-        <nav className="flex flex-col gap-1 p-2 flex-1">
+        <div className="px-4 pt-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+            Навигация
+          </p>
+        </div>
+
+        <nav className="flex flex-1 flex-col gap-1 p-3 pt-3">
           {nav.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
@@ -85,52 +96,61 @@ export function Sidebar() {
               end={to === '/'}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                  'flex items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium transition-all',
                   isActive
-                    ? 'bg-accent text-accent-foreground'
+                    ? 'bg-primary/10 text-primary shadow-[inset_0_0_0_1px_rgba(59,130,246,0.12)]'
                     : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                 )
               }
             >
-              <Icon className="w-4 h-4 shrink-0" />
+              <span className={cn(
+                'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
+                'bg-background/80'
+              )}>
+                <Icon className="h-4 w-4 shrink-0" />
+              </span>
               <span>{label}</span>
             </NavLink>
           ))}
         </nav>
 
-        <div className="flex flex-col gap-1 p-2 border-t">
-          <button
-            onClick={toggle}
-            className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          >
-            {theme === 'dark'
-              ? <Sun className="w-4 h-4 shrink-0" />
-              : <Moon className="w-4 h-4 shrink-0" />}
-            <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
-          </button>
-          <NavLink
-            to="/settings"
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-              )
-            }
-          >
-            <Settings className="w-4 h-4 shrink-0" />
-            <span>Settings</span>
-          </NavLink>
-          <NavLink
-            to="/settings"
-            className="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          >
-            <div className="w-4 h-4 shrink-0 rounded-full bg-muted flex items-center justify-center">
-              <User className="w-3 h-3" />
+        <div className="border-t p-3">
+          <div className="rounded-2xl border bg-background/70 p-3">
+            <div className="mb-3 flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-muted">
+                <User className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{user?.username ?? 'Аккаунт'}</p>
+                <p className="truncate text-[11px] text-muted-foreground">Личный workspace</p>
+              </div>
             </div>
-            <span className="text-xs truncate">{user?.username}</span>
-          </NavLink>
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={toggle}
+                className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                {theme === 'dark'
+                  ? <Sun className="h-4 w-4 shrink-0" />
+                  : <Moon className="h-4 w-4 shrink-0" />}
+                <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+              </button>
+              <NavLink
+                to="/settings"
+                className={({ isActive }) =>
+                  cn(
+                    'flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors',
+                    isActive
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                  )
+                }
+              >
+                <Settings className="h-4 w-4 shrink-0" />
+                <span>Settings</span>
+              </NavLink>
+            </div>
+          </div>
         </div>
       </aside>
 

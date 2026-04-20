@@ -18,7 +18,9 @@ function Layout({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <InstallPrompt />
       <main className="app-shell-main flex-1 lg:ml-56">
-        {children}
+        <div className="page-shell">
+          {children}
+        </div>
       </main>
     </div>
   )

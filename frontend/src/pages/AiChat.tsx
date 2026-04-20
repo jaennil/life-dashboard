@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, type ComponentProps } from 'react'
 import { Send, Bot, User, Loader2, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { PageHeader } from '@/components/PageHeader'
 import { api, type AIHistoryMessage, type AILatestCheckup } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -350,28 +351,33 @@ export function AiChat() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)]">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">AI Chat</h1>
-          <p className="text-sm text-muted-foreground mt-1">Задавай вопросы о своих данных</p>
-        </div>
-        <button
-          onClick={clearHistory}
-          disabled={historyLoading || loading || messages.length === 0}
-          className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Trash2 className="h-4 w-4" />
-          Очистить
-        </button>
-      </div>
+      <PageHeader
+        eyebrow="AI"
+        title="AI Chat"
+        description="Вопросы к твоим данным без ручного свода. Финансы, тренировки, питание, задачи и checkup живут в одном контексте."
+        badges={[
+          { label: messages.length > 0 ? `${messages.length} сообщений в истории` : 'История пока пустая', tone: messages.length > 0 ? 'muted' : 'warning' },
+          { label: latestCheckup?.has_report ? `Последний checkup: ${latestCheckup.period_label ?? 'есть отчёт'}` : 'Checkup ещё не запускался', tone: latestCheckup?.has_report ? 'primary' : 'muted' },
+        ]}
+        actions={(
+          <button
+            onClick={clearHistory}
+            disabled={historyLoading || loading || messages.length === 0}
+            className="inline-flex items-center gap-2 rounded-2xl border bg-card/85 px-4 py-3 text-sm text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Trash2 className="h-4 w-4" />
+            Очистить
+          </button>
+        )}
+      />
 
       {historyError ? (
-        <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+        <div className="mb-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
           {historyError}
         </div>
       ) : null}
 
-      <div className="mb-3 rounded-xl border bg-card/70 p-3">
+      <div className="mb-3 rounded-2xl border bg-card/80 p-4 shadow-sm">
         <div className="mb-2">
           <p className="text-sm font-medium text-foreground">Checkup</p>
           <p className="text-xs text-muted-foreground">Быстрый AI-отчёт по всем сферам за нужный период</p>
@@ -385,7 +391,7 @@ export function AiChat() {
               key={action.period}
               onClick={() => sendCheckup(action)}
               disabled={loading || historyLoading}
-              className="shrink-0 rounded-lg border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 rounded-xl border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
               {action.label}
             </button>
@@ -394,7 +400,7 @@ export function AiChat() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto rounded-xl border bg-card p-4 flex flex-col gap-4 min-h-0">
+      <div className="flex-1 overflow-y-auto rounded-[24px] border bg-card/90 p-4 shadow-sm flex flex-col gap-4 min-h-0">
         {historyLoading ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground gap-2">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -433,7 +439,7 @@ export function AiChat() {
                   : <Bot className="w-4 h-4 text-muted-foreground" />}
               </div>
               <div className={cn(
-                'max-w-[75%] rounded-2xl px-4 py-2.5 text-sm',
+                'max-w-[75%] rounded-[22px] px-4 py-3 text-sm shadow-sm',
                 msg.role === 'user'
                   ? 'bg-primary text-primary-foreground rounded-tr-sm'
                   : 'bg-muted text-foreground rounded-tl-sm'
@@ -466,13 +472,13 @@ export function AiChat() {
           placeholder="Напиши вопрос... (Enter — отправить, Shift+Enter — перенос)"
           rows={1}
           disabled={loading || historyLoading}
-          className="flex-1 resize-none rounded-xl border bg-card px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+          className="flex-1 resize-none rounded-[20px] border bg-card/90 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
           style={{ minHeight: '48px', maxHeight: '120px' }}
         />
         <button
           onClick={() => send(input)}
           disabled={!input.trim() || loading || historyLoading}
-          className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] bg-primary text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </button>

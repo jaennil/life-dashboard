@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { AuthLayout } from '@/components/AuthLayout'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 
@@ -29,60 +30,55 @@ export function Register() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="w-full max-w-sm">
-        <div className="rounded-2xl border bg-card p-8 flex flex-col gap-6">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Регистрация</h1>
-            <p className="text-sm text-muted-foreground mt-1">Life Dashboard</p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-foreground">Логин</label>
-              <input
-                type="text"
-                autoFocus
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                required
-                minLength={3}
-                className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                placeholder="username"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-foreground">Пароль</label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                minLength={6}
-                className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                placeholder="мин. 6 символов"
-              />
-            </div>
-
-            {error && <p className="text-sm text-red-500">{error}</p>}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
-              {loading ? 'Загрузка...' : 'Создать аккаунт'}
-            </button>
-          </form>
-
-          <p className="text-sm text-center text-muted-foreground">
-            Уже есть аккаунт?{' '}
-            <Link to="/login" className="text-primary hover:underline">
-              Войти
-            </Link>
-          </p>
+    <AuthLayout
+      title="Создать аккаунт"
+      description="Новый workspace для интеграций, личных данных и AI-анализов. После регистрации вход выполнится автоматически."
+      footer={(
+        <p className="text-center">
+          Уже есть аккаунт?{' '}
+          <Link to="/login" className="font-medium text-primary hover:underline">
+            Войти
+          </Link>
+        </p>
+      )}
+    >
+      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-foreground">Логин</label>
+          <input
+            type="text"
+            autoFocus
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            required
+            minLength={3}
+            className="rounded-xl border bg-background px-3.5 py-3 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30"
+            placeholder="username"
+          />
         </div>
-      </div>
-    </div>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-foreground">Пароль</label>
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            required
+            minLength={6}
+            className="rounded-xl border bg-background px-3.5 py-3 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30"
+            placeholder="мин. 6 символов"
+          />
+        </div>
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+        >
+          {loading ? 'Загрузка...' : 'Создать аккаунт'}
+        </button>
+      </form>
+    </AuthLayout>
   )
 }

@@ -60,19 +60,84 @@ body,
 body {
   margin: 0;
   background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.08), transparent 26%),
+    radial-gradient(circle at 85% 12%, rgba(16, 185, 129, 0.06), transparent 18%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 12%);
   color: hsl(var(--foreground));
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: "SF Pro Display", "SF Pro Text", Inter, ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   text-rendering: optimizeLegibility;
 }
 
 .app-shell-main {
+  position: relative;
   padding: calc(5rem + env(safe-area-inset-top)) 1rem calc(6.75rem + env(safe-area-inset-bottom));
+}
+
+.dark body {
+  background-image:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 28%),
+    radial-gradient(circle at 85% 10%, rgba(16, 185, 129, 0.08), transparent 20%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 12%);
+}
+
+.app-shell-main::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 320px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(59, 130, 246, 0.12), transparent 32%),
+    radial-gradient(circle at 90% 0%, rgba(236, 72, 153, 0.08), transparent 26%);
+  opacity: 0.8;
+}
+
+.page-shell {
+  position: relative;
+  z-index: 1;
+  margin: 0 auto;
+  width: min(100%, 1560px);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.page-header-panel {
+  border: 1px solid hsl(var(--border));
+  border-radius: 1.5rem;
+  padding: 1.5rem;
+  background:
+    linear-gradient(180deg, rgba(59, 130, 246, 0.08), transparent 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 16%),
+    hsl(var(--card));
+  box-shadow: 0 20px 48px rgba(2, 6, 23, 0.14);
+}
+
+::selection {
+  background: rgba(59, 130, 246, 0.28);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 @media (min-width: 1024px) {
   .app-shell-main {
-    padding: 1.5rem;
+    padding: 1.75rem;
   }
 }
