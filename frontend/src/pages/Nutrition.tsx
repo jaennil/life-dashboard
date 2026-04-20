@@ -11,8 +11,17 @@ const MEAL_LABELS: Record<string, string> = {
   breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', snacks: 'Перекус', other: 'Прочее',
 }
 
+const MEAL_COLORS: Record<string, string> = {
+  breakfast: '#f97316',
+  lunch: '#10b981',
+  dinner: '#3b82f6',
+  snacks: '#8b5cf6',
+  other: '#f43f5e',
+}
+
+const MEAL_ORDER = ['breakfast', 'lunch', 'dinner', 'snacks', 'other'] as const
+
 const MACRO_COLORS = { protein: '#3b82f6', fat: '#f97316', carbs: '#10b981', fiber: '#8b5cf6' }
-const MEAL_COLORS = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#f43f5e']
 const CHART_TEXT = '#e5eefc'
 const CHART_MUTED = 'rgba(148, 163, 184, 0.85)'
 const CHART_GRID = 'rgba(148, 163, 184, 0.12)'
@@ -276,6 +285,76 @@ function buildNutritionDonutOption(data: Array<{ name: string; value: number; co
   }
 }
 
+function buildMealsTimelineOption(
+  data: NutritionDay[],
+  mealStats: Array<{ key: string; name: string; color: string }>,
+): EChartsCoreOption {
+  return {
+    color: mealStats.map(stat => stat.color),
+    animationDuration: 450,
+    legend: {
+      top: 0,
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: CHART_MUTED, fontSize: 12 },
+      data: mealStats.map(stat => stat.name),
+    },
+    grid: { top: 40, right: 12, bottom: 12, left: 12, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (params: unknown) => {
+        const points = toTooltipList(params)
+          .map(item => {
+            if (!isRecord(item)) return null
+            return {
+              marker: readString(item.marker) ?? '',
+              seriesName: readString(item.seriesName) ?? '',
+              value: toNumber(readScalar(item.value)),
+              axisValue: readString(item.axisValue) ?? '',
+            }
+          })
+          .filter(point => point && point.value > 0)
+
+        const total = points.reduce((sum, point) => sum + point!.value, 0)
+        const lines = points.map(point => `${point!.marker}${point!.seriesName}: ${point!.value.toFixed(0)} ккал`)
+        return [
+          `<div>${fmtDate(points[0]?.axisValue ?? '')}</div>`,
+          ...lines,
+          `<div style="margin-top:6px;font-weight:600">Итого: ${total.toFixed(0)} ккал</div>`,
+        ].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'category',
+      data: data.map(point => point.date),
+      axisLabel: { color: CHART_MUTED, formatter: (value: string) => fmtShort(value) },
+      axisLine: { lineStyle: { color: CHART_GRID } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: CHART_MUTED },
+      splitLine: { lineStyle: { color: CHART_GRID } },
+    },
+    series: mealStats.map(stat => ({
+      name: stat.name,
+      type: 'bar',
+      stack: 'meals',
+      barMaxWidth: 24,
+      emphasis: { focus: 'series' },
+      itemStyle: { borderRadius: [4, 4, 0, 0] },
+      data: data.map(day => {
+        const meal = day.meals.find(entry => entry.meal_type === stat.key)
+        return meal ? meal.items.reduce((sum, item) => sum + item.calories, 0) : 0
+      }),
+    })),
+  }
+}
+
 function DayRow({ day, calorieReference, calorieTarget }: { day: NutritionDay; calorieReference: number; calorieTarget?: number }) {
   const [open, setOpen] = useState(false)
   const hasMeals = day.meals.some(m => m.items.length > 0)
@@ -427,18 +506,31 @@ export function Nutrition() {
     { name: 'Углеводы', value: avgCarbs * 4, color: MACRO_COLORS.carbs },
   ].filter(m => m.value > 0)
 
-  // Meal distribution
-  const mealTotals: Record<string, number> = {}
-  chartData.forEach(d => d.meals.forEach(m => {
-    const cal = m.items.reduce((s, i) => s + i.calories, 0)
-    mealTotals[m.meal_type] = (mealTotals[m.meal_type] || 0) + cal
-  }))
-  const mealPie = Object.entries(mealTotals).map(([name, value]) => ({
-    key: name,
-    name: MEAL_LABELS[name] || name,
-    value: Math.round(value),
-    color: MEAL_COLORS[Object.keys(mealTotals).indexOf(name) % MEAL_COLORS.length],
-  })).sort((a, b) => b.value - a.value)
+  const mealStats = MEAL_ORDER.map((mealType) => {
+    let totalCalories = 0
+    let daysPresent = 0
+
+    chartData.forEach(day => {
+      const meal = day.meals.find(entry => entry.meal_type === mealType)
+      if (!meal) return
+
+      const mealCalories = meal.items.reduce((sum, item) => sum + item.calories, 0)
+      if (mealCalories <= 0) return
+
+      totalCalories += mealCalories
+      daysPresent += 1
+    })
+
+    return {
+      key: mealType,
+      name: MEAL_LABELS[mealType],
+      color: MEAL_COLORS[mealType],
+      totalCalories: Math.round(totalCalories),
+      daysPresent,
+      avgCaloriesWhenPresent: daysPresent > 0 ? Math.round(totalCalories / daysPresent) : 0,
+      avgCaloriesPerTrackedDay: chartData.length > 0 ? Math.round(totalCalories / chartData.length) : 0,
+    }
+  }).filter(stat => stat.totalCalories > 0)
   const targets = summary?.targets
   const calorieTarget = targets?.target_calories
   const calorieReference = Math.max(
@@ -758,28 +850,42 @@ export function Nutrition() {
           )}
         </div>
 
-        {/* Meal distribution */}
+        {/* Meal structure */}
         <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Калории по приёмам пищи</h2>
-          {loading || mealPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
-            <div className="flex flex-col gap-5 md:flex-row md:items-start">
-              <EChart option={buildNutritionDonutOption(mealPie, 'Всего', ' ккал')} height={160} width={160} className="mx-auto shrink-0 md:mx-0" />
-              <div className="flex max-h-[180px] min-w-0 flex-1 flex-col gap-2 overflow-y-auto py-1 pr-1">
-                {mealPie.map((m) => (
-                  <button key={m.name} onClick={() => setMealFilter(mealFilter === m.key ? '' : m.key)}
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-1">Структура приёмов пищи</h2>
+          <p className="mb-4 text-xs text-muted-foreground">
+            Не просто сумма за период, а расклад по дням: видно, когда завтрак/обед/ужин реально присутствуют и какой приём пищи тащит калории.
+          </p>
+          {loading || mealStats.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
+            <div className="flex flex-col gap-5">
+              <EChart option={buildMealsTimelineOption(chartData, mealStats)} height={220} />
+              <div className="grid gap-2 md:grid-cols-2">
+                {mealStats.map((stat) => (
+                  <button key={stat.key} onClick={() => setMealFilter(mealFilter === stat.key ? '' : stat.key)}
                     className={cn(
                       'rounded-xl border bg-background/45 px-3 py-2 text-left transition-colors hover:border-border hover:bg-accent/40',
-                      mealFilter === m.key && 'border-primary/30 bg-primary/10'
+                      mealFilter === stat.key && 'border-primary/30 bg-primary/10'
                     )}>
-                    <div className="flex items-center gap-3 text-xs">
-                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
-                      <span className={cn('min-w-0 flex-1 text-sm text-foreground', mealFilter === m.key && 'font-medium text-primary')}>
-                        {m.name}
+                    <div className="flex items-center gap-3">
+                      <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: stat.color }} />
+                      <span className={cn('min-w-0 flex-1 text-sm text-foreground', mealFilter === stat.key && 'font-medium text-primary')}>
+                        {stat.name}
                       </span>
-                      <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
-                        {((m.value / mealPie.reduce((s, x) => s + x.value, 0)) * 100).toFixed(0)}%
-                      </span>
-                      <span className="shrink-0 text-sm font-medium text-foreground">{m.value} ккал</span>
+                      <span className="shrink-0 text-sm font-semibold text-foreground">{stat.totalCalories} ккал</span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-muted-foreground">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Дней</p>
+                        <p className="mt-1 text-sm text-foreground">{stat.daysPresent}/{chartData.length}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Ср. когда был</p>
+                        <p className="mt-1 text-sm text-foreground">{stat.avgCaloriesWhenPresent} ккал</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Ср. в день</p>
+                        <p className="mt-1 text-sm text-foreground">{stat.avgCaloriesPerTrackedDay} ккал</p>
+                      </div>
                     </div>
                   </button>
                 ))}
