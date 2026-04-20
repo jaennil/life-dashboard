@@ -1,9 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
-  PieChart, Pie, Cell, AreaChart, Area,
-} from 'recharts'
-import {
   BadgeRussianRuble,
   CreditCard,
   EyeOff,
@@ -17,6 +13,8 @@ import {
   WalletCards,
   type LucideIcon,
 } from 'lucide-react'
+import type { EChartsCoreOption } from 'echarts/core'
+import { EChart } from '@/components/EChart'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import {
@@ -43,6 +41,40 @@ const PERIODS = [
   { label: 'Год', days: 365 },
 ]
 
+const CHART_TEXT = '#e5eefc'
+const CHART_MUTED = 'rgba(148, 163, 184, 0.85)'
+const CHART_GRID = 'rgba(148, 163, 184, 0.12)'
+const CHART_TOOLTIP = 'rgba(15, 23, 42, 0.96)'
+
+type TooltipScalar = number | string | null | undefined
+
+type AxisTooltipPoint = {
+  axisValue?: string
+  marker?: string
+  seriesName?: string
+  value?: TooltipScalar
+}
+
+type PieTooltipPoint = {
+  marker?: string
+  name?: string
+  percent?: TooltipScalar
+  value?: TooltipScalar
+}
+
+type TopExpenseTooltipData = {
+  count?: number
+  fullLabel?: string
+  value?: TooltipScalar
+}
+
+type TopExpenseTooltipPoint = {
+  data?: TopExpenseTooltipData
+  marker?: string
+  name?: string
+  value?: TooltipScalar
+}
+
 function fmt(amount: number, currency = 'RUB') {
   return new Intl.NumberFormat('ru-RU', {
     style: 'currency', currency, maximumFractionDigits: 0,
@@ -57,6 +89,11 @@ function fmtShort(value: number) {
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+}
+
+function fmtDayMonth(iso: string) {
+  const date = new Date(iso)
+  return `${date.getDate()} ${MONTH_LABELS[String(date.getMonth() + 1).padStart(2, '0')] ?? ''}`.trim()
 }
 
 function formatMonth(ym: string) {
@@ -146,17 +183,7 @@ function getAccountTypeLabel(type: string) {
   }
 }
 
-type TooltipDatum = {
-  name?: string
-  value?: number | string
-  color?: string
-  fill?: string
-  payload?: {
-    count?: number
-  }
-}
-
-function toTooltipNumber(value: number | string | undefined) {
+function toTooltipNumber(value: number | string | null | undefined) {
   if (typeof value === 'number') return value
   if (typeof value === 'string') {
     const parsed = Number(value)
@@ -165,28 +192,330 @@ function toTooltipNumber(value: number | string | undefined) {
   return 0
 }
 
-const ChartTooltip = ({
-  active,
-  payload,
-  label,
-  formatter,
-}: {
-  active?: boolean
-  payload?: TooltipDatum[]
-  label?: string | number
-  formatter?: (point: TooltipDatum) => string
-}) => {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
-      <p className="font-medium text-foreground mb-1">{typeof label === 'string' && label.includes('-') ? fmtDate(label) : label}</p>
-      {payload.map((point, index) => (
-        <p key={`${point.name ?? 'series'}-${index}`} style={{ color: point.color ?? point.fill }}>
-          {formatter ? formatter(point) : `${point.name}: ${fmt(toTooltipNumber(point.value))}`}
-        </p>
-      ))}
-    </div>
-  )
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
+function truncateLabel(value: string, limit = 20) {
+  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readTooltipScalar(value: unknown): TooltipScalar {
+  if (typeof value === 'number' || typeof value === 'string' || value == null) return value
+  return undefined
+}
+
+function readTooltipString(value: unknown) {
+  return typeof value === 'string' ? value : undefined
+}
+
+function readTooltipNumber(value: unknown) {
+  return typeof value === 'number' ? value : undefined
+}
+
+function toTooltipArray(params: unknown) {
+  return Array.isArray(params) ? params : [params]
+}
+
+function readAxisTooltipPoints(params: unknown): AxisTooltipPoint[] {
+  return toTooltipArray(params).flatMap((item): AxisTooltipPoint[] => {
+    if (!isRecord(item)) return []
+    return [{
+      axisValue: readTooltipString(item.axisValue),
+      marker: readTooltipString(item.marker),
+      seriesName: readTooltipString(item.seriesName),
+      value: readTooltipScalar(item.value),
+    }]
+  })
+}
+
+function readPieTooltipPoint(param: unknown): PieTooltipPoint | null {
+  if (!isRecord(param)) return null
+  return {
+    marker: readTooltipString(param.marker),
+    name: readTooltipString(param.name),
+    percent: readTooltipScalar(param.percent),
+    value: readTooltipScalar(param.value),
+  }
+}
+
+function readTopExpenseTooltipPoint(params: unknown): TopExpenseTooltipPoint | null {
+  const point = toTooltipArray(params)[0]
+  if (!isRecord(point)) return null
+
+  let data: TopExpenseTooltipData | undefined
+  if (isRecord(point.data)) {
+    data = {
+      count: readTooltipNumber(point.data.count),
+      fullLabel: readTooltipString(point.data.fullLabel),
+      value: readTooltipScalar(point.data.value),
+    }
+  }
+
+  return {
+    data,
+    marker: readTooltipString(point.marker),
+    name: readTooltipString(point.name),
+    value: readTooltipScalar(point.value),
+  }
+}
+
+function buildMonthlyOption(monthly: MonthStat[]): EChartsCoreOption {
+  return {
+    color: ['#10b981', '#f43f5e'],
+    animationDuration: 400,
+    grid: { top: 44, right: 12, bottom: 12, left: 12, containLabel: true },
+    legend: {
+      top: 0,
+      textStyle: { color: CHART_MUTED, fontSize: 12 },
+      itemWidth: 10,
+      itemHeight: 10,
+      data: ['Доходы', 'Расходы'],
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (params: unknown) => {
+        const points = readAxisTooltipPoints(params)
+        const lines = points.map(point => {
+          const name = point.seriesName === 'Расходы' ? 'Расходы' : 'Доходы'
+          return `${point.marker ?? ''}${name}: ${fmt(toTooltipNumber(point.value))}`
+        })
+        return [`<div>${escapeHtml(formatMonth(points[0]?.axisValue ?? ''))}</div>`, ...lines].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'category',
+      data: monthly.map(point => point.month),
+      axisLabel: {
+        color: CHART_MUTED,
+        formatter: (value: string) => formatMonth(value),
+      },
+      axisLine: { lineStyle: { color: CHART_GRID } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: {
+        color: CHART_MUTED,
+        formatter: (value: number) => fmtShort(value),
+      },
+      splitLine: { lineStyle: { color: CHART_GRID } },
+    },
+    series: [
+      {
+        name: 'Доходы',
+        type: 'bar',
+        barMaxWidth: 28,
+        borderRadius: [6, 6, 0, 0],
+        data: monthly.map(point => point.income),
+      },
+      {
+        name: 'Расходы',
+        type: 'bar',
+        barMaxWidth: 28,
+        borderRadius: [6, 6, 0, 0],
+        data: monthly.map(point => point.spending),
+      },
+    ],
+  }
+}
+
+function buildDailyOption(daily: DailyTotal[]): EChartsCoreOption {
+  return {
+    color: ['#10b981', '#f43f5e'],
+    animationDuration: 450,
+    grid: { top: 18, right: 12, bottom: 12, left: 12, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (params: unknown) => {
+        const points = readAxisTooltipPoints(params)
+        const lines = points.map(point => `${point.marker ?? ''}${point.seriesName ?? ''}: ${fmt(toTooltipNumber(point.value))}`)
+        return [`<div>${escapeHtml(fmtDate(points[0]?.axisValue ?? ''))}</div>`, ...lines].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: daily.map(point => point.date),
+      axisLabel: {
+        color: CHART_MUTED,
+        formatter: (value: string) => fmtDayMonth(value),
+      },
+      axisLine: { lineStyle: { color: CHART_GRID } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: {
+        color: CHART_MUTED,
+        formatter: (value: number) => fmtShort(value),
+      },
+      splitLine: { lineStyle: { color: CHART_GRID } },
+    },
+    series: [
+      {
+        name: 'Доходы',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        areaStyle: { color: 'rgba(16, 185, 129, 0.14)' },
+        data: daily.map(point => point.income),
+      },
+      {
+        name: 'Расходы',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2.5 },
+        areaStyle: { color: 'rgba(244, 63, 94, 0.18)' },
+        data: daily.map(point => point.spending),
+      },
+    ],
+  }
+}
+
+function buildCategoriesOption(categories: CategoryStat[]): EChartsCoreOption {
+  const total = categories.reduce((sum, point) => sum + point.amount, 0)
+  return {
+    color: CATEGORY_COLORS,
+    animationDuration: 450,
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (param: unknown) => {
+        const point = readPieTooltipPoint(param)
+        const amount = toTooltipNumber(point?.value)
+        const percent = Number(point?.percent ?? 0)
+        return `${point?.marker ?? ''}${escapeHtml(point?.name ?? '')}: ${fmt(amount)} (${percent.toFixed(0)}%)`
+      },
+    },
+    graphic: [
+      {
+        type: 'text',
+        left: 'center',
+        top: '42%',
+        style: {
+          text: 'Всего',
+          textAlign: 'center',
+          fill: CHART_MUTED,
+          fontSize: 12,
+        },
+      },
+      {
+        type: 'text',
+        left: 'center',
+        top: '52%',
+        style: {
+          text: fmt(total),
+          textAlign: 'center',
+          fill: CHART_TEXT,
+          fontSize: 14,
+          fontWeight: 700,
+        },
+      },
+    ],
+    series: [
+      {
+        type: 'pie',
+        radius: ['56%', '84%'],
+        center: ['50%', '50%'],
+        startAngle: 90,
+        avoidLabelOverlap: true,
+        label: { show: false },
+        labelLine: { show: false },
+        itemStyle: {
+          borderColor: '#162033',
+          borderWidth: 2,
+        },
+        emphasis: {
+          scale: true,
+          scaleSize: 6,
+        },
+        data: categories.map(point => ({
+          name: point.category,
+          value: point.amount,
+        })),
+      },
+    ],
+  }
+}
+
+function buildTopExpensesOption(topExpenses: TopExpense[]): EChartsCoreOption {
+  return {
+    color: ['#f97316'],
+    animationDuration: 450,
+    grid: { top: 6, right: 12, bottom: 8, left: 12, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (params: unknown) => {
+        const point = readTopExpenseTooltipPoint(params)
+        const data = point?.data
+        return [
+          `<div>${escapeHtml(data?.fullLabel ?? point?.name ?? '')}</div>`,
+          `${point?.marker ?? ''}${fmt(toTooltipNumber(point?.value))} (${data?.count ?? 0} операций)`,
+        ].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'value',
+      axisLabel: {
+        color: CHART_MUTED,
+        formatter: (value: number) => fmtShort(value),
+      },
+      splitLine: { lineStyle: { color: CHART_GRID } },
+    },
+    yAxis: {
+      type: 'category',
+      inverse: true,
+      data: topExpenses.map(point => truncateLabel(point.payee)),
+      axisLabel: {
+        color: CHART_MUTED,
+        width: 132,
+        overflow: 'truncate',
+      },
+      axisLine: { show: false },
+      axisTick: { show: false },
+    },
+    series: [
+      {
+        type: 'bar',
+        barMaxWidth: 18,
+        roundCap: true,
+        itemStyle: {
+          borderRadius: [0, 6, 6, 0],
+        },
+        data: topExpenses.map(point => ({
+          value: point.amount,
+          count: point.count,
+          fullLabel: point.payee,
+        })),
+      },
+    ],
+  }
 }
 
 type FilterType = '' | 'income' | 'expense'
@@ -421,16 +750,7 @@ export function Finance() {
         <div className="rounded-xl border bg-card p-5">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Доходы и расходы</h2>
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : (
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={monthly} barCategoryGap="30%" barGap={4}>
-                <XAxis dataKey="month" tickFormatter={formatMonth} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={fmtShort} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} width={36} />
-                <Tooltip content={<ChartTooltip formatter={(point) => `${point.name === 'spending' ? 'Расходы' : 'Доходы'}: ${fmt(toTooltipNumber(point.value))}`} />} cursor={{ opacity: 0.1 }} />
-                <Legend formatter={v => v === 'spending' ? 'Расходы' : 'Доходы'} wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="spending" fill="#f43f5e" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <EChart option={buildMonthlyOption(monthly)} height={220} />
           )}
         </div>
 
@@ -438,15 +758,7 @@ export function Finance() {
         <div className="rounded-xl border bg-card p-5">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Расходы по дням</h2>
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : (
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={daily}>
-                <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tickFormatter={fmtShort} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} width={36} />
-                <Tooltip content={<ChartTooltip formatter={(point) => `${point.name === 'spending' ? 'Расходы' : 'Доходы'}: ${fmt(toTooltipNumber(point.value))}`} />} />
-                <Area type="monotone" dataKey="spending" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.15} strokeWidth={2} />
-                <Area type="monotone" dataKey="income" stroke="#10b981" fill="#10b981" fillOpacity={0.1} strokeWidth={1.5} />
-              </AreaChart>
-            </ResponsiveContainer>
+            <EChart option={buildDailyOption(daily)} height={220} />
           )}
         </div>
       </div>
@@ -460,14 +772,7 @@ export function Finance() {
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
             <div className="flex flex-col lg:flex-row gap-6 items-start">
-              <div style={{ width: 200, height: 200, flexShrink: 0 }}>
-                <PieChart width={200} height={200}>
-                  <Pie data={categories} dataKey="amount" nameKey="category" cx={100} cy={100} innerRadius={55} outerRadius={90} paddingAngle={2}>
-                    {categories.map((_, i) => <Cell key={i} fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip content={<ChartTooltip formatter={(point) => fmt(toTooltipNumber(point.value))} />} />
-                </PieChart>
-              </div>
+              <EChart option={buildCategoriesOption(categories)} height={200} className="w-[200px] shrink-0" />
               <div className="flex flex-col gap-1.5 flex-1 min-w-0 py-1">
                 {categories.map((c, i) => (
                   <div key={c.category} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-accent/50 rounded px-1 py-0.5 transition-colors"
@@ -488,14 +793,7 @@ export function Finance() {
           {loading ? <div className="h-56 bg-muted rounded animate-pulse" /> : topExpenses.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
-            <ResponsiveContainer width="100%" height={Math.max(200, topExpenses.length * 32)}>
-              <BarChart data={topExpenses} layout="vertical" margin={{ left: 0, right: 10 }}>
-                <XAxis type="number" tickFormatter={fmtShort} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="payee" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={120} />
-                <Tooltip content={<ChartTooltip formatter={(point) => `${fmt(toTooltipNumber(point.value))} (${point.payload?.count ?? 0} операций)`} />} cursor={{ opacity: 0.1 }} />
-                <Bar dataKey="amount" fill="#f97316" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <EChart option={buildTopExpensesOption(topExpenses)} height={Math.max(220, topExpenses.length * 32)} />
           )}
         </div>
       </div>
