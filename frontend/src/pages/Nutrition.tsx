@@ -739,7 +739,7 @@ export function Nutrition() {
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Распределение БЖУ (ккал)</h2>
           {loading || macroPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
             <div className="flex flex-col gap-5 md:flex-row md:items-start">
-              <EChart option={buildNutritionDonutOption(macroPie, 'Всего', ' ккал')} height={160} className="mx-auto w-[160px] shrink-0 md:mx-0" />
+              <EChart option={buildNutritionDonutOption(macroPie, 'Всего', ' ккал')} height={160} width={160} className="mx-auto shrink-0 md:mx-0" />
               <div className="flex min-w-0 flex-1 flex-col gap-2">
                 {macroPie.map(m => (
                   <div key={m.name} className="rounded-xl border bg-background/45 px-3 py-2">
@@ -763,7 +763,7 @@ export function Nutrition() {
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Калории по приёмам пищи</h2>
           {loading || mealPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
             <div className="flex flex-col gap-5 md:flex-row md:items-start">
-              <EChart option={buildNutritionDonutOption(mealPie, 'Всего', ' ккал')} height={160} className="mx-auto w-[160px] shrink-0 md:mx-0" />
+              <EChart option={buildNutritionDonutOption(mealPie, 'Всего', ' ккал')} height={160} width={160} className="mx-auto shrink-0 md:mx-0" />
               <div className="flex max-h-[180px] min-w-0 flex-1 flex-col gap-2 overflow-y-auto py-1 pr-1">
                 {mealPie.map((m) => (
                   <button key={m.name} onClick={() => setMealFilter(mealFilter === m.key ? '' : m.key)}

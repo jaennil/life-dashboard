@@ -31,11 +31,12 @@ registerECharts([
 type EChartProps = {
   option: EChartsCoreOption
   height: number | string
+  width?: number | string
   className?: string
   settings?: SetOptionOpts
 }
 
-export function EChart({ option, height, className, settings }: EChartProps) {
+export function EChart({ option, height, width = '100%', className, settings }: EChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<ECharts | null>(null)
 
@@ -68,7 +69,7 @@ export function EChart({ option, height, className, settings }: EChartProps) {
     <div
       ref={containerRef}
       className={className}
-      style={{ width: '100%', height }}
+      style={{ width, height }}
     />
   )
 }

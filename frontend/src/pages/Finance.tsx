@@ -894,7 +894,7 @@ export function Finance() {
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-              <EChart option={buildCategoriesOption(categories)} height={200} className="w-[200px] shrink-0" />
+              <EChart option={buildCategoriesOption(categories)} height={200} width={200} className="shrink-0" />
               <div className="flex max-h-[280px] flex-1 min-w-0 flex-col gap-2 overflow-y-auto py-1 pr-1">
                 {categories.map((c, i) => (
                   <button

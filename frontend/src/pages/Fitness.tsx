@@ -610,7 +610,7 @@ export function Fitness() {
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Типы активностей</h2>
               {loading || activityTypePie.length === 0 ? <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
                 <div className="flex items-start gap-6">
-                  <EChart option={buildDonutOption(activityTypePie, 'Всего', ' активностей')} height={180} className="w-[180px] shrink-0" />
+                  <EChart option={buildDonutOption(activityTypePie, 'Всего', ' активностей')} height={180} width={180} className="shrink-0" />
                   <div className="flex max-h-[220px] min-w-0 flex-1 flex-col gap-2 overflow-y-auto py-1 pr-1">
                     {activityTypePie.map(segment => (
                       <button
@@ -704,7 +704,7 @@ export function Fitness() {
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Категории упражнений</h2>
               {loading || workoutCategoryPie.length === 0 ? <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
                 <div className="flex items-start gap-6">
-                  <EChart option={buildDonutOption(workoutCategoryPie, 'Всего', ' упражнений')} height={180} className="w-[180px] shrink-0" />
+                  <EChart option={buildDonutOption(workoutCategoryPie, 'Всего', ' упражнений')} height={180} width={180} className="shrink-0" />
                   <div className="flex max-h-[220px] min-w-0 flex-1 flex-col gap-2 overflow-y-auto py-1 pr-1">
                     {workoutCategoryPie.map(segment => (
                       <div key={segment.name} className="flex items-center gap-2 text-xs px-1 py-0.5">
