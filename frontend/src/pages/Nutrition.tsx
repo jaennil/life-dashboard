@@ -355,6 +355,39 @@ function buildMealsTimelineOption(
   }
 }
 
+function filterNutritionDayByMeal(day: NutritionDay, mealType: string): NutritionDay | null {
+  if (!mealType) return day
+
+  const meals = day.meals.filter(meal => meal.meal_type === mealType)
+  if (meals.length === 0) return null
+
+  let calories = 0
+  let protein = 0
+  let carbs = 0
+  let fat = 0
+  let fiber = 0
+
+  meals.forEach(meal => {
+    meal.items.forEach(item => {
+      calories += item.calories
+      protein += item.macros?.protein ?? 0
+      carbs += item.macros?.carbs ?? 0
+      fat += item.macros?.fat ?? 0
+      fiber += item.macros?.fiber ?? 0
+    })
+  })
+
+  return {
+    ...day,
+    calories,
+    protein,
+    carbs,
+    fat,
+    fiber,
+    meals,
+  }
+}
+
 function DayRow({ day, calorieReference, calorieTarget }: { day: NutritionDay; calorieReference: number; calorieTarget?: number }) {
   const [open, setOpen] = useState(false)
   const hasMeals = day.meals.some(m => m.items.length > 0)
@@ -533,16 +566,17 @@ export function Nutrition() {
   }).filter(stat => stat.totalCalories > 0)
   const targets = summary?.targets
   const calorieTarget = targets?.target_calories
+  const filteredDaily = mealFilter
+    ? daily
+      .map(day => filterNutritionDayByMeal(day, mealFilter))
+      .filter((day): day is NutritionDay => day !== null)
+    : daily
+
   const calorieReference = Math.max(
     calorieTarget ?? 0,
-    ...daily.map(day => day.calories),
+    ...filteredDaily.map(day => day.calories),
     1,
   )
-
-  // Filtered daily
-  const filteredDaily = mealFilter
-    ? daily.map(d => ({ ...d, meals: d.meals.filter(m => m.meal_type === mealFilter) }))
-    : daily
 
   async function handleSyncNutrition() {
     if (enabledNutritionIntegrations.length === 0) return
