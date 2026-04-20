@@ -596,7 +596,7 @@ export function Fitness() {
 
       {sourceTab === 'strava' ? (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Strava по неделям</h2>
               {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : stravaWeekly.length === 0 ? (
@@ -609,9 +609,9 @@ export function Fitness() {
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Типы активностей</h2>
               {loading || activityTypePie.length === 0 ? <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
-                <div className="flex items-center gap-6">
+                <div className="flex items-start gap-6">
                   <EChart option={buildDonutOption(activityTypePie, 'Всего', ' активностей')} height={180} className="w-[180px] shrink-0" />
-                  <div className="flex flex-col gap-2">
+                  <div className="flex max-h-[220px] min-w-0 flex-1 flex-col gap-2 overflow-y-auto py-1 pr-1">
                     {activityTypePie.map(segment => (
                       <button
                         key={segment.name}
@@ -690,7 +690,7 @@ export function Fitness() {
         </>
       ) : (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Hevy по неделям</h2>
               {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : hevyWeekly.length === 0 ? (
@@ -703,9 +703,9 @@ export function Fitness() {
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Категории упражнений</h2>
               {loading || workoutCategoryPie.length === 0 ? <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
-                <div className="flex items-center gap-6">
+                <div className="flex items-start gap-6">
                   <EChart option={buildDonutOption(workoutCategoryPie, 'Всего', ' упражнений')} height={180} className="w-[180px] shrink-0" />
-                  <div className="flex flex-col gap-2">
+                  <div className="flex max-h-[220px] min-w-0 flex-1 flex-col gap-2 overflow-y-auto py-1 pr-1">
                     {workoutCategoryPie.map(segment => (
                       <div key={segment.name} className="flex items-center gap-2 text-xs px-1 py-0.5">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: segment.color }} />
