@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
-  AreaChart, Area, Legend, PieChart, Pie, ReferenceLine,
-  type TooltipValueType,
-} from 'recharts'
-import type { TooltipContentProps } from 'recharts/types/component/Tooltip'
+import type { EChartsCoreOption } from 'echarts/core'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { EChart } from '@/components/EChart'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
@@ -16,6 +12,11 @@ const MEAL_LABELS: Record<string, string> = {
 }
 
 const MACRO_COLORS = { protein: '#3b82f6', fat: '#f97316', carbs: '#10b981', fiber: '#8b5cf6' }
+const MEAL_COLORS = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#f43f5e']
+const CHART_TEXT = '#e5eefc'
+const CHART_MUTED = 'rgba(148, 163, 184, 0.85)'
+const CHART_GRID = 'rgba(148, 163, 184, 0.12)'
+const CHART_TOOLTIP = 'rgba(15, 23, 42, 0.96)'
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
@@ -24,16 +25,6 @@ function fmtDate(iso: string) {
 function fmtShort(iso: string) {
   const d = new Date(iso)
   return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
-function tooltipNumber(value: TooltipValueType | undefined) {
-  const scalar = Array.isArray(value) ? value[0] : value
-  if (typeof scalar === 'number') return scalar
-  if (typeof scalar === 'string') {
-    const parsed = Number(scalar)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return 0
 }
 
 const PERIODS = [
@@ -75,6 +66,214 @@ function parseRequiredDecimalOrNull(label: string, value: string) {
     throw new Error(`Некорректное значение для поля «${label}»`)
   }
   return parsed
+}
+
+function toNumber(value: number | string | null | undefined) {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readString(value: unknown) {
+  return typeof value === 'string' ? value : undefined
+}
+
+function readScalar(value: unknown) {
+  if (typeof value === 'number' || typeof value === 'string' || value == null) return value
+  return undefined
+}
+
+function toTooltipList(params: unknown) {
+  return Array.isArray(params) ? params : [params]
+}
+
+function buildCaloriesOption(data: NutritionDay[], calorieTarget?: number): EChartsCoreOption {
+  return {
+    color: ['#f97316'],
+    animationDuration: 450,
+    grid: { top: 24, right: 12, bottom: 12, left: 12, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (params: unknown) => {
+        const point = toTooltipList(params)[0]
+        if (!isRecord(point)) return ''
+        return [
+          `<div>${fmtDate(readString(point.axisValue) ?? '')}</div>`,
+          `${readString(point.marker) ?? ''}${toNumber(readScalar(point.value)).toFixed(0)} ккал`,
+        ].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'category',
+      data: data.map(point => point.date),
+      axisLabel: { color: CHART_MUTED, formatter: (value: string) => fmtShort(value) },
+      axisLine: { lineStyle: { color: CHART_GRID } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: CHART_MUTED },
+      splitLine: { lineStyle: { color: CHART_GRID } },
+    },
+    series: [
+      {
+        type: 'bar',
+        barMaxWidth: 26,
+        itemStyle: {
+          borderRadius: [6, 6, 0, 0],
+          color: (params: { dataIndex: number }) => {
+            const item = data[params.dataIndex]
+            return typeof calorieTarget === 'number' && item.calories > calorieTarget ? '#f87171' : '#f97316'
+          },
+        },
+        markLine: typeof calorieTarget === 'number' ? {
+          symbol: 'none',
+          lineStyle: { color: '#fbbf24', type: 'dashed', width: 1.5 },
+          label: { color: '#fbbf24', formatter: `Цель ${calorieTarget.toFixed(0)} ккал` },
+          data: [{ yAxis: calorieTarget }],
+        } : undefined,
+        data: data.map(point => point.calories),
+      },
+    ],
+  }
+}
+
+function buildMacrosTrendOption(data: NutritionDay[]): EChartsCoreOption {
+  return {
+    color: [MACRO_COLORS.protein, MACRO_COLORS.fat, MACRO_COLORS.carbs],
+    animationDuration: 450,
+    legend: {
+      top: 0,
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: CHART_MUTED, fontSize: 12 },
+      data: ['Белки', 'Жиры', 'Углеводы'],
+    },
+    grid: { top: 40, right: 12, bottom: 12, left: 12, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (params: unknown) => {
+        const points = toTooltipList(params)
+          .map(item => {
+            if (!isRecord(item)) return null
+            return {
+              marker: readString(item.marker) ?? '',
+              seriesName: readString(item.seriesName) ?? '',
+              value: readScalar(item.value),
+              axisValue: readString(item.axisValue) ?? '',
+            }
+          })
+          .filter(Boolean)
+
+        const lines = points.map(point => `${point!.marker}${point!.seriesName}: ${toNumber(point!.value).toFixed(0)} г`)
+        return [`<div>${fmtDate(points[0]?.axisValue ?? '')}</div>`, ...lines].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: data.map(point => point.date),
+      axisLabel: { color: CHART_MUTED, formatter: (value: string) => fmtShort(value) },
+      axisLine: { lineStyle: { color: CHART_GRID } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: CHART_MUTED },
+      splitLine: { lineStyle: { color: CHART_GRID } },
+    },
+    series: [
+      {
+        name: 'Белки',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        areaStyle: { color: 'rgba(59, 130, 246, 0.12)' },
+        data: data.map(point => point.protein),
+      },
+      {
+        name: 'Жиры',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        areaStyle: { color: 'rgba(249, 115, 22, 0.10)' },
+        data: data.map(point => point.fat),
+      },
+      {
+        name: 'Углеводы',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        areaStyle: { color: 'rgba(16, 185, 129, 0.10)' },
+        data: data.map(point => point.carbs),
+      },
+    ],
+  }
+}
+
+function buildNutritionDonutOption(data: Array<{ name: string; value: number; color: string }>, centerLabel: string, suffix: string): EChartsCoreOption {
+  const total = data.reduce((sum, point) => sum + point.value, 0)
+  return {
+    color: data.map(point => point.color),
+    animationDuration: 450,
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (param: unknown) => {
+        if (!isRecord(param)) return ''
+        const name = readString(param.name) ?? ''
+        const value = toNumber(readScalar(param.value))
+        const percent = toNumber(readScalar(param.percent))
+        return `${name}: ${value.toFixed(0)}${suffix} (${percent.toFixed(0)}%)`
+      },
+    },
+    graphic: [
+      {
+        type: 'text',
+        left: 'center',
+        top: '42%',
+        style: { text: centerLabel, textAlign: 'center', fill: CHART_MUTED, fontSize: 12 },
+      },
+      {
+        type: 'text',
+        left: 'center',
+        top: '52%',
+        style: { text: `${Math.round(total)}`, textAlign: 'center', fill: CHART_TEXT, fontSize: 16, fontWeight: 700 },
+      },
+    ],
+    series: [
+      {
+        type: 'pie',
+        radius: ['56%', '84%'],
+        center: ['50%', '50%'],
+        label: { show: false },
+        labelLine: { show: false },
+        itemStyle: { borderColor: '#162033', borderWidth: 2 },
+        emphasis: { scale: true, scaleSize: 5 },
+        data: data.map(point => ({ name: point.name, value: point.value })),
+      },
+    ],
+  }
 }
 
 function DayRow({ day, calorieReference, calorieTarget }: { day: NutritionDay; calorieReference: number; calorieTarget?: number }) {
@@ -235,10 +434,11 @@ export function Nutrition() {
     mealTotals[m.meal_type] = (mealTotals[m.meal_type] || 0) + cal
   }))
   const mealPie = Object.entries(mealTotals).map(([name, value]) => ({
-    name: MEAL_LABELS[name] || name, value: Math.round(value),
+    key: name,
+    name: MEAL_LABELS[name] || name,
+    value: Math.round(value),
+    color: MEAL_COLORS[Object.keys(mealTotals).indexOf(name) % MEAL_COLORS.length],
   })).sort((a, b) => b.value - a.value)
-
-  const mealColors = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#f43f5e']
   const targets = summary?.targets
   const calorieTarget = targets?.target_calories
   const calorieReference = Math.max(
@@ -517,24 +717,7 @@ export function Nutrition() {
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : chartData.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={chartData} barCategoryGap="25%">
-                <XAxis dataKey="date" tickFormatter={fmtShort} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={36} />
-                <Tooltip content={({ active, payload, label }: TooltipContentProps<TooltipValueType, string | number>) => active && payload?.length ? (
-                  <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
-                    <p className="font-medium text-foreground mb-1">{typeof label === 'string' ? fmtDate(label) : String(label ?? '')}</p>
-                    <p className="text-orange-400">{tooltipNumber(payload[0]?.value).toFixed(0)} ккал</p>
-                  </div>
-                ) : null} cursor={{ opacity: 0.1 }} />
-                <Bar dataKey="calories" radius={[4, 4, 0, 0]}>
-                  {chartData.map((d, i) => <Cell key={i} fill={typeof calorieTarget === 'number' && d.calories > calorieTarget ? '#f87171' : '#f97316'} />)}
-                </Bar>
-                {typeof calorieTarget === 'number' && (
-                  <ReferenceLine y={calorieTarget} stroke="#fbbf24" strokeDasharray="4 4" ifOverflow="extendDomain" />
-                )}
-              </BarChart>
-            </ResponsiveContainer>
+            <EChart option={buildCaloriesOption(chartData, calorieTarget)} height={200} />
           )}
         </div>
 
@@ -544,22 +727,7 @@ export function Nutrition() {
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : chartData.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={chartData}>
-                <XAxis dataKey="date" tickFormatter={fmtShort} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={30} />
-                <Tooltip content={({ active, payload, label }: TooltipContentProps<TooltipValueType, string | number>) => active && payload?.length ? (
-                  <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
-                    <p className="font-medium text-foreground mb-1">{typeof label === 'string' ? fmtDate(label) : String(label ?? '')}</p>
-                    {payload.map((point, index) => <p key={`${point.name ?? 'series'}-${index}`} style={{ color: point.color }}>{point.name === 'protein' ? 'Белки' : point.name === 'fat' ? 'Жиры' : point.name === 'carbs' ? 'Углеводы' : 'Клетчатка'}: {tooltipNumber(point.value).toFixed(0)}г</p>)}
-                  </div>
-                ) : null} />
-                <Legend formatter={v => v === 'protein' ? 'Белки' : v === 'fat' ? 'Жиры' : v === 'carbs' ? 'Углеводы' : 'Клетчатка'} wrapperStyle={{ fontSize: 11 }} />
-                <Area type="monotone" dataKey="protein" stroke={MACRO_COLORS.protein} fill={MACRO_COLORS.protein} fillOpacity={0.1} strokeWidth={2} />
-                <Area type="monotone" dataKey="fat" stroke={MACRO_COLORS.fat} fill={MACRO_COLORS.fat} fillOpacity={0.1} strokeWidth={2} />
-                <Area type="monotone" dataKey="carbs" stroke={MACRO_COLORS.carbs} fill={MACRO_COLORS.carbs} fillOpacity={0.1} strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
+            <EChart option={buildMacrosTrendOption(chartData)} height={200} />
           )}
         </div>
       </div>
@@ -571,14 +739,7 @@ export function Nutrition() {
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Распределение БЖУ (ккал)</h2>
           {loading || macroPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
             <div className="flex items-center gap-6">
-              <div style={{ width: 160, height: 160, flexShrink: 0 }}>
-                <PieChart width={160} height={160}>
-                  <Pie data={macroPie} dataKey="value" cx={80} cy={80} innerRadius={45} outerRadius={72} paddingAngle={3}>
-                    {macroPie.map((m, i) => <Cell key={i} fill={m.color} />)}
-                  </Pie>
-                  <Tooltip formatter={(value) => `${tooltipNumber(value).toFixed(0)} ккал`} />
-                </PieChart>
-              </div>
+              <EChart option={buildNutritionDonutOption(macroPie, 'Всего', ' ккал')} height={160} className="w-[160px] shrink-0" />
               <div className="flex flex-col gap-2">
                 {macroPie.map(m => (
                   <div key={m.name} className="flex items-center gap-2 text-xs">
@@ -597,19 +758,12 @@ export function Nutrition() {
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Калории по приёмам пищи</h2>
           {loading || mealPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
             <div className="flex items-center gap-6">
-              <div style={{ width: 160, height: 160, flexShrink: 0 }}>
-                <PieChart width={160} height={160}>
-                  <Pie data={mealPie} dataKey="value" cx={80} cy={80} innerRadius={45} outerRadius={72} paddingAngle={3}>
-                    {mealPie.map((_, i) => <Cell key={i} fill={mealColors[i % mealColors.length]} />)}
-                  </Pie>
-                  <Tooltip formatter={(value) => `${tooltipNumber(value)} ккал`} />
-                </PieChart>
-              </div>
+              <EChart option={buildNutritionDonutOption(mealPie, 'Всего', ' ккал')} height={160} className="w-[160px] shrink-0" />
               <div className="flex flex-col gap-2">
-                {mealPie.map((m, i) => (
-                  <button key={m.name} onClick={() => setMealFilter(mealFilter === Object.keys(MEAL_LABELS).find(k => MEAL_LABELS[k] === m.name) ? '' : Object.keys(MEAL_LABELS).find(k => MEAL_LABELS[k] === m.name) || '')}
+                {mealPie.map((m) => (
+                  <button key={m.name} onClick={() => setMealFilter(mealFilter === m.key ? '' : m.key)}
                     className="flex items-center gap-2 text-xs hover:bg-accent/50 rounded px-1 py-0.5 transition-colors">
-                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: mealColors[i % mealColors.length] }} />
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: m.color }} />
                     <span className="text-foreground">{m.name}</span>
                     <span className="text-muted-foreground">{m.value} ккал</span>
                   </button>

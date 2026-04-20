@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  XAxis, YAxis, Tooltip, ResponsiveContainer,
-  AreaChart, Area, Legend, PieChart, Pie, Cell,
-  type TooltipValueType,
-} from 'recharts'
-import type { TooltipContentProps } from 'recharts/types/component/Tooltip'
+import type { EChartsCoreOption } from 'echarts/core'
 import { Route, Dumbbell, Flame, Heart, ChevronDown, ChevronUp, Timer } from 'lucide-react'
+import { EChart } from '@/components/EChart'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
@@ -23,20 +19,14 @@ const TYPE_COLORS: Record<string, string> = {
 
 const FALLBACK_COLORS = ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#3b82f6', '#10b981', '#eab308', '#f43f5e']
 const DECIMAL_FORMATTER = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
+const CHART_TEXT = '#e5eefc'
+const CHART_MUTED = 'rgba(148, 163, 184, 0.85)'
+const CHART_GRID = 'rgba(148, 163, 184, 0.12)'
+const CHART_TOOLTIP = 'rgba(15, 23, 42, 0.96)'
 
 type FitnessSource = 'strava' | 'hevy'
 
 function activityIcon(type: string) { return ACTIVITY_ICONS[type] ?? '⚡' }
-
-function tooltipNumber(value: TooltipValueType | undefined) {
-  const scalar = Array.isArray(value) ? value[0] : value
-  if (typeof scalar === 'number') return scalar
-  if (typeof scalar === 'string') {
-    const parsed = Number(scalar)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return 0
-}
 
 function fmtDuration(seconds: number | null) {
   if (!seconds) return '—'
@@ -77,6 +67,216 @@ function fmtWorkoutDistance(meters: number | null) {
   if (meters == null) return null
   if (meters >= 1000) return `${DECIMAL_FORMATTER.format(meters / 1000)} км`
   return `${Math.round(meters)} м`
+}
+
+function toNumber(value: number | string | null | undefined) {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readString(value: unknown) {
+  return typeof value === 'string' ? value : undefined
+}
+
+function readScalar(value: unknown) {
+  if (typeof value === 'number' || typeof value === 'string' || value == null) return value
+  return undefined
+}
+
+function toTooltipList(params: unknown) {
+  return Array.isArray(params) ? params : [params]
+}
+
+function buildStravaWeeklyOption(data: Array<{ week: string; activities: number; km: number }>): EChartsCoreOption {
+  return {
+    color: ['#f97316', '#3b82f6'],
+    animationDuration: 450,
+    legend: {
+      top: 0,
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: CHART_MUTED, fontSize: 12 },
+      data: ['Активности', 'Км'],
+    },
+    grid: { top: 40, right: 12, bottom: 12, left: 12, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (params: unknown) => {
+        const points = toTooltipList(params)
+          .map(item => {
+            if (!isRecord(item)) return null
+            return {
+              marker: readString(item.marker) ?? '',
+              seriesName: readString(item.seriesName) ?? '',
+              value: readScalar(item.value),
+              axisValue: readString(item.axisValue) ?? '',
+            }
+          })
+          .filter(Boolean)
+
+        const axisValue = points[0]?.axisValue ?? ''
+        const lines = points.map(point =>
+          `${point!.marker}${point!.seriesName}: ${point!.seriesName === 'Км'
+            ? DECIMAL_FORMATTER.format(toNumber(point!.value))
+            : toNumber(point!.value)}`
+        )
+
+        return [`<div>Неделя с ${fmtWeek(axisValue)}</div>`, ...lines].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: data.map(point => point.week),
+      axisLabel: { color: CHART_MUTED, formatter: (value: string) => fmtWeek(value) },
+      axisLine: { lineStyle: { color: CHART_GRID } },
+      axisTick: { show: false },
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: 'Активности',
+        nameTextStyle: { color: CHART_MUTED, fontSize: 11, padding: [0, 0, 0, 8] },
+        axisLabel: { color: CHART_MUTED },
+        splitLine: { lineStyle: { color: CHART_GRID } },
+      },
+      {
+        type: 'value',
+        name: 'Км',
+        nameTextStyle: { color: CHART_MUTED, fontSize: 11, padding: [0, 0, 0, 8] },
+        axisLabel: { color: CHART_MUTED, formatter: (value: number) => DECIMAL_FORMATTER.format(value) },
+        splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: 'Активности',
+        type: 'line',
+        yAxisIndex: 0,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        areaStyle: { color: 'rgba(249, 115, 22, 0.16)' },
+        data: data.map(point => point.activities),
+      },
+      {
+        name: 'Км',
+        type: 'line',
+        yAxisIndex: 1,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        areaStyle: { color: 'rgba(59, 130, 246, 0.12)' },
+        data: data.map(point => point.km),
+      },
+    ],
+  }
+}
+
+function buildSimpleWeeklyOption(data: Array<{ week: string; workouts: number }>): EChartsCoreOption {
+  return {
+    color: ['#8b5cf6'],
+    animationDuration: 450,
+    grid: { top: 18, right: 12, bottom: 12, left: 12, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (params: unknown) => {
+        const point = toTooltipList(params)[0]
+        if (!isRecord(point)) return ''
+        return [
+          `<div>Неделя с ${fmtWeek(readString(point.axisValue) ?? '')}</div>`,
+          `${readString(point.marker) ?? ''}Тренировок: ${toNumber(readScalar(point.value))}`,
+        ].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: data.map(point => point.week),
+      axisLabel: { color: CHART_MUTED, formatter: (value: string) => fmtWeek(value) },
+      axisLine: { lineStyle: { color: CHART_GRID } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: CHART_MUTED },
+      splitLine: { lineStyle: { color: CHART_GRID } },
+    },
+    series: [
+      {
+        name: 'Тренировки',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2.5 },
+        areaStyle: { color: 'rgba(139, 92, 246, 0.18)' },
+        data: data.map(point => point.workouts),
+      },
+    ],
+  }
+}
+
+function buildDonutOption(data: Array<{ name: string; value: number; color: string }>, totalLabel: string, valueSuffix: string): EChartsCoreOption {
+  const total = data.reduce((sum, point) => sum + point.value, 0)
+  return {
+    color: data.map(point => point.color),
+    animationDuration: 450,
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (param: unknown) => {
+        if (!isRecord(param)) return ''
+        const name = readString(param.name) ?? ''
+        const value = toNumber(readScalar(param.value))
+        const percent = toNumber(readScalar(param.percent))
+        return `${name}: ${value}${valueSuffix} (${percent.toFixed(0)}%)`
+      },
+    },
+    graphic: [
+      {
+        type: 'text',
+        left: 'center',
+        top: '42%',
+        style: { text: totalLabel, textAlign: 'center', fill: CHART_MUTED, fontSize: 12 },
+      },
+      {
+        type: 'text',
+        left: 'center',
+        top: '52%',
+        style: { text: `${total}`, textAlign: 'center', fill: CHART_TEXT, fontSize: 16, fontWeight: 700 },
+      },
+    ],
+    series: [
+      {
+        type: 'pie',
+        radius: ['56%', '84%'],
+        center: ['50%', '50%'],
+        label: { show: false },
+        labelLine: { show: false },
+        itemStyle: { borderColor: '#162033', borderWidth: 2 },
+        emphasis: { scale: true, scaleSize: 5 },
+        data: data.map(point => ({ name: point.name, value: point.value })),
+      },
+    ],
+  }
 }
 
 function StatCard({
@@ -402,26 +602,7 @@ export function Fitness() {
               {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : stravaWeekly.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
               ) : (
-                <ResponsiveContainer width="100%" height={200}>
-                  <AreaChart data={stravaWeekly}>
-                    <XAxis dataKey="week" tickFormatter={fmtWeek} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis yAxisId="activities" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={24} />
-                    <YAxis yAxisId="km" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={30} />
-                    <Tooltip content={({ active, payload, label }: TooltipContentProps<TooltipValueType, string | number>) => active && payload?.length ? (
-                      <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
-                        <p className="font-medium text-foreground mb-1">Нед. с {typeof label === 'string' ? fmtWeek(label) : String(label ?? '')}</p>
-                        {payload.map((point, index) => (
-                          <p key={`${point.name ?? 'series'}-${index}`} style={{ color: point.color }}>
-                            {point.name === 'activities' ? 'Активностей' : 'Км'}: {point.name === 'km' ? tooltipNumber(point.value).toFixed(1) : tooltipNumber(point.value)}
-                          </p>
-                        ))}
-                      </div>
-                    ) : null} />
-                    <Legend formatter={value => value === 'activities' ? 'Активности' : 'Км'} wrapperStyle={{ fontSize: 11 }} />
-                    <Area yAxisId="activities" type="monotone" dataKey="activities" stroke="#f97316" fill="#f97316" fillOpacity={0.15} strokeWidth={2} />
-                    <Area yAxisId="km" type="monotone" dataKey="km" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <EChart option={buildStravaWeeklyOption(stravaWeekly)} height={200} />
               )}
             </div>
 
@@ -429,14 +610,7 @@ export function Fitness() {
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Типы активностей</h2>
               {loading || activityTypePie.length === 0 ? <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
                 <div className="flex items-center gap-6">
-                  <div style={{ width: 180, height: 180, flexShrink: 0 }}>
-                    <PieChart width={180} height={180}>
-                      <Pie data={activityTypePie} dataKey="value" cx={90} cy={90} innerRadius={50} outerRadius={80} paddingAngle={3}>
-                        {activityTypePie.map((segment, index) => <Cell key={index} fill={segment.color} />)}
-                      </Pie>
-                      <Tooltip formatter={(value) => `${tooltipNumber(value)} активностей`} />
-                    </PieChart>
-                  </div>
+                  <EChart option={buildDonutOption(activityTypePie, 'Всего', ' активностей')} height={180} className="w-[180px] shrink-0" />
                   <div className="flex flex-col gap-2">
                     {activityTypePie.map(segment => (
                       <button
@@ -522,19 +696,7 @@ export function Fitness() {
               {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : hevyWeekly.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
               ) : (
-                <ResponsiveContainer width="100%" height={200}>
-                  <AreaChart data={hevyWeekly}>
-                    <XAxis dataKey="week" tickFormatter={fmtWeek} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={24} />
-                    <Tooltip content={({ active, payload, label }: TooltipContentProps<TooltipValueType, string | number>) => active && payload?.length ? (
-                      <div className="rounded-xl border bg-card px-4 py-3 text-sm shadow-lg">
-                        <p className="font-medium text-foreground mb-1">Нед. с {typeof label === 'string' ? fmtWeek(label) : String(label ?? '')}</p>
-                        <p style={{ color: payload[0].color }}>Тренировок: {tooltipNumber(payload[0].value)}</p>
-                      </div>
-                    ) : null} />
-                    <Area type="monotone" dataKey="workouts" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.18} strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <EChart option={buildSimpleWeeklyOption(hevyWeekly)} height={200} />
               )}
             </div>
 
@@ -542,14 +704,7 @@ export function Fitness() {
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Категории упражнений</h2>
               {loading || workoutCategoryPie.length === 0 ? <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
                 <div className="flex items-center gap-6">
-                  <div style={{ width: 180, height: 180, flexShrink: 0 }}>
-                    <PieChart width={180} height={180}>
-                      <Pie data={workoutCategoryPie} dataKey="value" cx={90} cy={90} innerRadius={50} outerRadius={80} paddingAngle={3}>
-                        {workoutCategoryPie.map((segment, index) => <Cell key={index} fill={segment.color} />)}
-                      </Pie>
-                      <Tooltip formatter={(value) => `${tooltipNumber(value)} упражнений`} />
-                    </PieChart>
-                  </div>
+                  <EChart option={buildDonutOption(workoutCategoryPie, 'Всего', ' упражнений')} height={180} className="w-[180px] shrink-0" />
                   <div className="flex flex-col gap-2">
                     {workoutCategoryPie.map(segment => (
                       <div key={segment.name} className="flex items-center gap-2 text-xs px-1 py-0.5">
