@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'life-dashboard-v1'
+const CACHE_VERSION = 'life-dashboard-v2'
 const APP_SHELL_CACHE = `app-shell-${CACHE_VERSION}`
 const RUNTIME_CACHE = `runtime-${CACHE_VERSION}`
 const APP_SHELL_FILES = [
@@ -42,14 +42,8 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
-        .then((response) => {
-          const copy = response.clone()
-          void caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, copy))
-          return response
-        })
+        .then((response) => response)
         .catch(async () => {
-          const cachedPage = await caches.match(request)
-          if (cachedPage) return cachedPage
           return caches.match('/offline.html')
         })
     )
