@@ -526,6 +526,9 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 			sb.WriteString("\n")
 		}
 		sb.WriteString("=== ПИТАНИЕ ===\n")
+		if targets, err := loadNutritionTargets(ctx, h.db, userID); err == nil {
+			sb.WriteString(renderNutritionTargetsForAI(targets))
+		}
 		nutritionRows, err := h.db.Query(ctx, `
 			SELECT date, calories_total, protein_g, carbs_g, fat_g, fiber_g
 			FROM nutrition_daily

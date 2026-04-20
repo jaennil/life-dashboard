@@ -20,12 +20,13 @@ func NewNutrition(db *pgxpool.Pool, logger zerolog.Logger) *NutritionHandler {
 }
 
 type NutritionSummary struct {
-	AvgCalories float64 `json:"avg_calories"`
-	AvgProtein  float64 `json:"avg_protein"`
-	AvgCarbs    float64 `json:"avg_carbs"`
-	AvgFat      float64 `json:"avg_fat"`
-	DaysTracked int     `json:"days_tracked"`
-	TodayKcal   float64 `json:"today_kcal"`
+	AvgCalories float64           `json:"avg_calories"`
+	AvgProtein  float64           `json:"avg_protein"`
+	AvgCarbs    float64           `json:"avg_carbs"`
+	AvgFat      float64           `json:"avg_fat"`
+	DaysTracked int               `json:"days_tracked"`
+	TodayKcal   float64           `json:"today_kcal"`
+	Targets     *NutritionTargets `json:"targets,omitempty"`
 }
 
 type NutritionMealItem struct {
@@ -72,6 +73,13 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	h.db.QueryRow(ctx, `
 		SELECT COALESCE(calories_total, 0) FROM nutrition_daily WHERE date = $1 AND user_id = $2
 	`, today, userID).Scan(&s.TodayKcal)
+
+	targets, err := loadNutritionTargets(ctx, h.db, userID)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load nutrition targets")
+	} else {
+		s.Targets = targets
+	}
 
 	h.logger.Debug().Interface("summary", s).Msg("nutrition summary")
 

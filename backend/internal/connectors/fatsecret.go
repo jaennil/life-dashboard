@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -227,6 +228,10 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 		return err
 	}
 
+	if err := c.syncProfile(ctx, userID, token, secret); err != nil {
+		c.logger.Warn().Err(err).Msg("failed to sync profile")
+	}
+
 	today := time.Now().Truncate(24 * time.Hour)
 	for i := 0; i < 14; i++ {
 		date := today.AddDate(0, 0, -i)
@@ -275,11 +280,71 @@ type fsFoodEntry struct {
 	Iron                   string `json:"iron"`
 }
 
+type fsProfile struct {
+	LastWeightKg        string `json:"last_weight_kg"`
+	LastWeightDateInt   string `json:"last_weight_date_int"`
+	LastWeightComment   string `json:"last_weight_comment"`
+	GoalWeightKg        string `json:"goal_weight_kg"`
+	HeightCm            string `json:"height_cm"`
+	WeightMeasure       string `json:"weight_measure"`
+	HeightMeasure       string `json:"height_measure"`
+	PreferredFoods      string `json:"preferred_foods"`
+	ExerciseLevel       string `json:"exercise_level"`
+	FoodDiaryPrivacy    string `json:"food_diary_privacy"`
+	WeightDiaryPrivacy  string `json:"weight_diary_privacy"`
+	CalendarSharingURL  string `json:"calendar_sharing_url"`
+}
+
 var fsMealNames = map[string]string{
 	"0": "breakfast",
 	"1": "lunch",
 	"2": "dinner",
 	"3": "snacks",
+}
+
+func (c *FatSecretConnector) syncProfile(ctx context.Context, userID, token, secret string) error {
+	params := c.oauth1BaseParams(token)
+	params.Set("method", "profile.get")
+	params.Set("format", "json")
+
+	sig := c.oauth1Sign("GET", fsAPIBase, params, secret)
+	params.Set("oauth_signature", sig)
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fsAPIBase+"?"+params.Encode(), nil)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("profile request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("profile status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Profile json.RawMessage `json:"profile"`
+		Error   *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("decode profile: %w", err)
+	}
+	if result.Error != nil {
+		return fmt.Errorf("profile api error: %s", result.Error.Message)
+	}
+	if len(result.Profile) == 0 || string(result.Profile) == "null" {
+		return nil
+	}
+
+	var profile fsProfile
+	if err := json.Unmarshal(result.Profile, &profile); err != nil {
+		return fmt.Errorf("decode profile body: %w", err)
+	}
+
+	return c.storeProfile(ctx, userID, profile, result.Profile)
 }
 
 func (c *FatSecretConnector) syncDay(ctx context.Context, userID, token, secret string, date time.Time) error {
@@ -350,6 +415,72 @@ func parseFloat(s string) float64 {
 	var f float64
 	fmt.Sscanf(s, "%f", &f)
 	return f
+}
+
+func parseOptionalFloat(s string) *float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	value, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil
+	}
+	return &value
+}
+
+func dateFromDaysSinceEpochPtr(s string) *time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	days, err := strconv.Atoi(s)
+	if err != nil {
+		return nil
+	}
+	date := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, days)
+	return &date
+}
+
+func (c *FatSecretConnector) storeProfile(ctx context.Context, userID string, profile fsProfile, raw json.RawMessage) error {
+	_, err := c.db.Exec(ctx, `
+		INSERT INTO nutrition_targets (
+			user_id, source, current_weight_kg, current_weight_date, current_weight_comment,
+			target_weight_kg, height_cm, weight_measure, height_measure, raw_payload,
+			synced_at, updated_at
+		)
+		VALUES ($1, 'fatsecret', $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+		ON CONFLICT (user_id, source) DO UPDATE SET
+			current_weight_kg = EXCLUDED.current_weight_kg,
+			current_weight_date = EXCLUDED.current_weight_date,
+			current_weight_comment = EXCLUDED.current_weight_comment,
+			target_weight_kg = EXCLUDED.target_weight_kg,
+			height_cm = EXCLUDED.height_cm,
+			weight_measure = EXCLUDED.weight_measure,
+			height_measure = EXCLUDED.height_measure,
+			raw_payload = EXCLUDED.raw_payload,
+			synced_at = NOW(),
+			updated_at = NOW()
+	`, userID,
+		parseOptionalFloat(profile.LastWeightKg),
+		dateFromDaysSinceEpochPtr(profile.LastWeightDateInt),
+		nullIfEmpty(profile.LastWeightComment),
+		parseOptionalFloat(profile.GoalWeightKg),
+		parseOptionalFloat(profile.HeightCm),
+		nullIfEmpty(profile.WeightMeasure),
+		nullIfEmpty(profile.HeightMeasure),
+		raw,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert profile targets: %w", err)
+	}
+
+	c.logger.Info().
+		Str("user_id", userID).
+		Str("current_weight_kg", profile.LastWeightKg).
+		Str("goal_weight_kg", profile.GoalWeightKg).
+		Msg("synced profile")
+	return nil
 }
 
 func (c *FatSecretConnector) storeEntries(ctx context.Context, userID string, date time.Time, entries []fsFoodEntry) error {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
-  AreaChart, Area, Legend, PieChart, Pie,
+  AreaChart, Area, Legend, PieChart, Pie, ReferenceLine,
   type TooltipValueType,
 } from 'recharts'
 import type { TooltipContentProps } from 'recharts/types/component/Tooltip'
@@ -35,8 +35,6 @@ function tooltipNumber(value: TooltipValueType | undefined) {
   return 0
 }
 
-const CALORIE_TARGET = 2000
-
 const PERIODS = [
   { label: '7д', days: 7 },
   { label: '14д', days: 14 },
@@ -44,11 +42,31 @@ const PERIODS = [
   { label: '90д', days: 90 },
 ]
 
-function DayRow({ day }: { day: NutritionDay }) {
+function fmtWeight(value?: number) {
+  return typeof value === 'number' ? `${value.toFixed(1)} кг` : '—'
+}
+
+function fmtTargetDelta(current?: number, target?: number) {
+  if (typeof current !== 'number' || typeof target !== 'number') return '—'
+  const delta = current - target
+  if (Math.abs(delta) < 0.05) return 'цель достигнута'
+  return delta > 0 ? `сбросить ${delta.toFixed(1)} кг` : `набрать ${Math.abs(delta).toFixed(1)} кг`
+}
+
+function fmtSyncTime(value?: string) {
+  if (!value) return '—'
+  return new Date(value).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
+
+function fmtOptionalNumber(value?: number, unit = '') {
+  return typeof value === 'number' ? `${value.toFixed(0)}${unit}` : '—'
+}
+
+function DayRow({ day, calorieReference, calorieTarget }: { day: NutritionDay; calorieReference: number; calorieTarget?: number }) {
   const [open, setOpen] = useState(false)
   const hasMeals = day.meals.some(m => m.items.length > 0)
-  const pct = Math.min((day.calories / CALORIE_TARGET) * 100, 100)
-  const overTarget = day.calories > CALORIE_TARGET
+  const pct = calorieReference > 0 ? Math.min((day.calories / calorieReference) * 100, 100) : 0
+  const overTarget = typeof calorieTarget === 'number' && day.calories > calorieTarget
 
   return (
     <div>
@@ -185,6 +203,13 @@ export function Nutrition() {
   })).sort((a, b) => b.value - a.value)
 
   const mealColors = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#f43f5e']
+  const targets = summary?.targets
+  const calorieTarget = targets?.target_calories
+  const calorieReference = Math.max(
+    calorieTarget ?? 0,
+    ...daily.map(day => day.calories),
+    1,
+  )
 
   // Filtered daily
   const filteredDaily = mealFilter
@@ -235,6 +260,61 @@ export function Nutrition() {
         </div>
       </div>
 
+      {targets && (
+        <div className="rounded-xl border bg-card p-5 flex flex-col gap-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Цели FatSecret</h2>
+              <p className="text-xs text-muted-foreground mt-1">Синхронизация профиля: {fmtSyncTime(targets.synced_at)}</p>
+            </div>
+            {targets.source && <span className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted rounded-lg px-2 py-1">{targets.source}</span>}
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="rounded-xl bg-muted/40 p-3">
+              <p className="text-[10px] text-muted-foreground">Текущий вес</p>
+              <p className="text-lg font-bold text-foreground mt-1">{fmtWeight(targets.current_weight_kg)}</p>
+              {targets.current_weight_date && <p className="text-[10px] text-muted-foreground mt-1">{fmtDate(targets.current_weight_date)}</p>}
+            </div>
+            <div className="rounded-xl bg-muted/40 p-3">
+              <p className="text-[10px] text-muted-foreground">Целевой вес</p>
+              <p className="text-lg font-bold text-foreground mt-1">{fmtWeight(targets.target_weight_kg)}</p>
+            </div>
+            <div className="rounded-xl bg-muted/40 p-3">
+              <p className="text-[10px] text-muted-foreground">До цели</p>
+              <p className="text-lg font-bold text-foreground mt-1">{fmtTargetDelta(targets.current_weight_kg, targets.target_weight_kg)}</p>
+            </div>
+            <div className="rounded-xl bg-muted/40 p-3">
+              <p className="text-[10px] text-muted-foreground">Рост</p>
+              <p className="text-lg font-bold text-foreground mt-1">{fmtOptionalNumber(targets.height_cm, ' см')}</p>
+            </div>
+            <div className="rounded-xl bg-muted/40 p-3">
+              <p className="text-[10px] text-muted-foreground">Цель ккал</p>
+              <p className="text-lg font-bold text-foreground mt-1">{fmtOptionalNumber(targets.target_calories, ' ккал')}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-xl bg-blue-500/10 p-3">
+              <p className="text-[10px] text-blue-300">Белки</p>
+              <p className="text-base font-bold text-blue-200 mt-1">{fmtOptionalNumber(targets.target_protein_g, ' г')}</p>
+            </div>
+            <div className="rounded-xl bg-orange-500/10 p-3">
+              <p className="text-[10px] text-orange-300">Жиры</p>
+              <p className="text-base font-bold text-orange-200 mt-1">{fmtOptionalNumber(targets.target_fat_g, ' г')}</p>
+            </div>
+            <div className="rounded-xl bg-emerald-500/10 p-3">
+              <p className="text-[10px] text-emerald-300">Углеводы</p>
+              <p className="text-base font-bold text-emerald-200 mt-1">{fmtOptionalNumber(targets.target_carbs_g, ' г')}</p>
+            </div>
+          </div>
+
+          {targets.api_notes?.map(note => (
+            <p key={note} className="text-xs text-muted-foreground border border-dashed rounded-xl px-3 py-2">{note}</p>
+          ))}
+        </div>
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
@@ -272,8 +352,11 @@ export function Nutrition() {
                   </div>
                 ) : null} cursor={{ opacity: 0.1 }} />
                 <Bar dataKey="calories" radius={[4, 4, 0, 0]}>
-                  {chartData.map((d, i) => <Cell key={i} fill={d.calories > CALORIE_TARGET ? '#f87171' : '#f97316'} />)}
+                  {chartData.map((d, i) => <Cell key={i} fill={typeof calorieTarget === 'number' && d.calories > calorieTarget ? '#f87171' : '#f97316'} />)}
                 </Bar>
+                {typeof calorieTarget === 'number' && (
+                  <ReferenceLine y={calorieTarget} stroke="#fbbf24" strokeDasharray="4 4" ifOverflow="extendDomain" />
+                )}
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -394,7 +477,7 @@ export function Nutrition() {
           <div className="px-5 py-8 text-sm text-muted-foreground text-center">Нет данных. Подключи FatSecret в настройках.</div>
         ) : (
           <div className="divide-y">
-            {filteredDaily.map(day => <DayRow key={day.date} day={day} />)}
+            {filteredDaily.map(day => <DayRow key={day.date} day={day} calorieReference={calorieReference} calorieTarget={calorieTarget} />)}
           </div>
         )}
       </div>

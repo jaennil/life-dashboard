@@ -635,6 +635,9 @@ func (h *AIHandler) appendCheckupWorkoutContext(ctx context.Context, sb *strings
 func (h *AIHandler) appendCheckupNutritionContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
 	sb.WriteString("\n=== ПИТАНИЕ ===\n")
 	sb.WriteString("Это только залогированные приёмы пищи из трекера. Отсутствие ужина/перекуса в логах не означает, что их не было.\n")
+	if targets, err := loadNutritionTargets(ctx, h.db, userID); err == nil {
+		sb.WriteString(renderNutritionTargetsForAI(targets))
+	}
 
 	var trackedDays int
 	var avgCalories, avgProtein, avgCarbs, avgFat, minCalories, maxCalories float64

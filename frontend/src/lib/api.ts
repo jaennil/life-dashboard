@@ -178,6 +178,24 @@ export interface NutritionSummary {
   avg_fat: number
   days_tracked: number
   today_kcal: number
+  targets?: NutritionTargets
+}
+
+export interface NutritionTargets {
+  source: string
+  current_weight_kg?: number
+  current_weight_date?: string
+  current_weight_comment?: string
+  target_weight_kg?: number
+  height_cm?: number
+  target_calories?: number
+  target_protein_g?: number
+  target_carbs_g?: number
+  target_fat_g?: number
+  weight_measure?: string
+  height_measure?: string
+  api_notes?: string[]
+  synced_at?: string
 }
 
 export interface NutritionMealItem {

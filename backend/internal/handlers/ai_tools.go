@@ -581,13 +581,36 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 				},
 			})
 		case aiToolNutritionOverview:
+			var cached *AINutritionOverviewData
+			load := func() (AINutritionOverviewData, error) {
+				if cached != nil {
+					return *cached, nil
+				}
+				data, err := h.buildNutritionOverviewData(ctx, userID, call.Days)
+				if err != nil {
+					return AINutritionOverviewData{}, err
+				}
+				cached = &data
+				return data, nil
+			}
 			executions = append(executions, aiToolExecution{
 				Name:    call.Name,
 				Section: "питание",
 				Days:    call.Days,
 				Run: func(sb *strings.Builder) error {
-					h.appendNutritionOverviewTool(ctx, sb, userID, call.Days)
+					data, err := load()
+					if err != nil {
+						return err
+					}
+					sb.WriteString(renderNutritionOverviewText(fmt.Sprintf("=== ПИТАНИЕ (%d дней) ===", call.Days), data))
 					return nil
+				},
+				Data: func() (any, error) {
+					data, err := load()
+					if err != nil {
+						return nil, err
+					}
+					return data, nil
 				},
 			})
 		case aiToolJournalOverview:
@@ -765,48 +788,12 @@ func (h *AIHandler) appendHabitOverviewTool(ctx context.Context, sb *strings.Bui
 }
 
 func (h *AIHandler) appendNutritionOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days int) {
-	since := time.Now().AddDate(0, 0, -days)
-	sb.WriteString(fmt.Sprintf("=== ПИТАНИЕ (%d дней) ===\n", days))
-	sb.WriteString("Только залогированные приёмы пищи. Неполный лог не означает, что других приёмов пищи не было.\n")
-
-	var trackedDays int
-	var avgCalories, avgProtein, avgCarbs, avgFat float64
-	h.db.QueryRow(ctx, `
-		SELECT
-			COUNT(*),
-			COALESCE(AVG(calories_total), 0),
-			COALESCE(AVG(protein_g), 0),
-			COALESCE(AVG(carbs_g), 0),
-			COALESCE(AVG(fat_g), 0)
-		FROM nutrition_daily
-		WHERE user_id = $1
-			AND date >= $2::date
-	`, userID, since).Scan(&trackedDays, &avgCalories, &avgProtein, &avgCarbs, &avgFat)
-	sb.WriteString(fmt.Sprintf("Дней с логами: %d, среднее %.0f ккал | Б %.0f г | Ж %.0f г | У %.0f г\n", trackedDays, avgCalories, avgProtein, avgFat, avgCarbs))
-
-	rows, err := h.db.Query(ctx, `
-		SELECT date, calories_total, protein_g, carbs_g, fat_g
-		FROM nutrition_daily
-		WHERE user_id = $1
-			AND date >= $2::date
-		ORDER BY date DESC
-		LIMIT 5
-	`, userID, since)
-	if err == nil {
-		defer rows.Close()
-		hasRows := false
-		for rows.Next() {
-			hasRows = true
-			var date time.Time
-			var calories, protein, carbs, fat float64
-			if rows.Scan(&date, &calories, &protein, &carbs, &fat) == nil {
-				sb.WriteString(fmt.Sprintf("  %s: %.0f ккал | Б %.0f г | Ж %.0f г | У %.0f г\n", date.Format("02.01"), calories, protein, fat, carbs))
-			}
-		}
-		if !hasRows {
-			sb.WriteString("  Нет логов питания за период\n")
-		}
+	data, err := h.buildNutritionOverviewData(ctx, userID, days)
+	if err != nil {
+		sb.WriteString(fmt.Sprintf("=== ПИТАНИЕ (%d дней) ===\nДанные питания временно недоступны.\n", days))
+		return
 	}
+	sb.WriteString(renderNutritionOverviewText(fmt.Sprintf("=== ПИТАНИЕ (%d дней) ===", days), data))
 }
 
 func (h *AIHandler) appendJournalOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days, limit int) {
