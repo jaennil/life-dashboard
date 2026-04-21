@@ -74,6 +74,15 @@ type aiContextScope struct {
 	weather      bool
 }
 
+type aiJournalEntry struct {
+	Date    time.Time
+	Title   string
+	Content string
+	Tags    []string
+	Mood    *int
+	Source  string
+}
+
 const (
 	aiUpstreamDialTimeout     = 5 * time.Second
 	aiUpstreamHeaderTimeout   = 150 * time.Second
@@ -597,44 +606,25 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 
 	// === ДНЕВНИК ===
 	if scope.journal {
-		journalRows, err := h.db.Query(ctx, `
-			SELECT date, title, content, tags, mood
-			FROM journal_entries
-			WHERE user_id = $1 AND date >= NOW() - INTERVAL '30 days'
-			ORDER BY date DESC LIMIT 20
-		`, userID)
+		recentEntries, err := h.loadAIJournalEntries(ctx, userID, 30, 20)
 		if err == nil {
-			var journalEntries []string
-			for journalRows.Next() {
-				var date time.Time
-				var title, content string
-				var tags []string
-				var mood *int
-				if journalRows.Scan(&date, &title, &content, &tags, &mood) == nil {
-					entry := fmt.Sprintf("  %s: %s", date.Format("02.01"), title)
-					if mood != nil {
-						entry += fmt.Sprintf(" (настроение: %d/10)", *mood)
-					}
-					if len(tags) > 0 {
-						entry += " [" + strings.Join(tags, ", ") + "]"
-					}
-					if len(content) > 300 {
-						content = content[:300] + "..."
-					}
-					if content != "" {
-						entry += "\n    " + strings.ReplaceAll(content, "\n", "\n    ")
-					}
-					journalEntries = append(journalEntries, entry)
-				}
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
 			}
-			journalRows.Close()
-			if len(journalEntries) > 0 {
-				if sb.Len() > 0 {
-					sb.WriteString("\n")
-				}
-				sb.WriteString("=== ДНЕВНИК (последние 30 дней) ===\n")
-				for _, e := range journalEntries {
-					sb.WriteString(e + "\n")
+			sb.WriteString("=== ДНЕВНИК / NOTION ===\n")
+			sb.WriteString("Это заметки и записи из Notion. Если свежих записей нет, ниже показываются последние доступные.\n")
+
+			if len(recentEntries) > 0 {
+				sb.WriteString("Свежие записи за последние 30 дней:\n")
+				writeAIJournalEntries(&sb, recentEntries)
+			} else {
+				sb.WriteString("За последние 30 дней новых записей нет.\n")
+				latestEntries, latestErr := h.loadAILatestJournalEntries(ctx, userID, 10)
+				if latestErr == nil && len(latestEntries) > 0 {
+					sb.WriteString("Последние доступные записи:\n")
+					writeAIJournalEntries(&sb, latestEntries)
+				} else {
+					sb.WriteString("В Notion-заметках записей не найдено.\n")
 				}
 			}
 		}
@@ -921,6 +911,82 @@ func formatAIWorkoutContext(workout Workout) string {
 	}
 
 	return sb.String()
+}
+
+func formatAIJournalEntry(entry aiJournalEntry) string {
+	line := fmt.Sprintf("  %s: %s", entry.Date.Format("02.01.2006"), strings.TrimSpace(entry.Title))
+	if strings.TrimSpace(entry.Title) == "" {
+		line = fmt.Sprintf("  %s: (без названия)", entry.Date.Format("02.01.2006"))
+	}
+	if entry.Mood != nil {
+		line += fmt.Sprintf(" (настроение: %d/10)", *entry.Mood)
+	}
+	if len(entry.Tags) > 0 {
+		line += " [" + strings.Join(entry.Tags, ", ") + "]"
+	}
+	content := strings.TrimSpace(entry.Content)
+	if len(content) > 300 {
+		content = content[:300] + "..."
+	}
+	if content != "" {
+		line += "\n    " + strings.ReplaceAll(content, "\n", "\n    ")
+	}
+	return line
+}
+
+func writeAIJournalEntries(sb *strings.Builder, entries []aiJournalEntry) {
+	for _, entry := range entries {
+		sb.WriteString(formatAIJournalEntry(entry))
+		sb.WriteString("\n")
+	}
+}
+
+func (h *AIHandler) loadAIJournalEntries(ctx context.Context, userID string, days, limit int) ([]aiJournalEntry, error) {
+	since := aiNow().AddDate(0, 0, -days)
+	rows, err := h.db.Query(ctx, `
+		SELECT date, title, content, tags, mood, COALESCE(source, '')
+		FROM journal_entries
+		WHERE user_id = $1
+			AND date >= $2
+		ORDER BY date DESC, updated_at DESC
+		LIMIT $3
+	`, userID, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []aiJournalEntry
+	for rows.Next() {
+		var entry aiJournalEntry
+		if rows.Scan(&entry.Date, &entry.Title, &entry.Content, &entry.Tags, &entry.Mood, &entry.Source) == nil {
+			entries = append(entries, entry)
+		}
+	}
+	return entries, rows.Err()
+}
+
+func (h *AIHandler) loadAILatestJournalEntries(ctx context.Context, userID string, limit int) ([]aiJournalEntry, error) {
+	rows, err := h.db.Query(ctx, `
+		SELECT date, title, content, tags, mood, COALESCE(source, '')
+		FROM journal_entries
+		WHERE user_id = $1
+		ORDER BY date DESC, updated_at DESC
+		LIMIT $2
+	`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []aiJournalEntry
+	for rows.Next() {
+		var entry aiJournalEntry
+		if rows.Scan(&entry.Date, &entry.Title, &entry.Content, &entry.Tags, &entry.Mood, &entry.Source) == nil {
+			entries = append(entries, entry)
+		}
+	}
+	return entries, rows.Err()
 }
 
 func truncateAIText(value string, maxLen int) string {

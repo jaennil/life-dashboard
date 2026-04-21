@@ -62,6 +62,23 @@ func TestFormatAICalendarEventUsesMoscowTimezone(t *testing.T) {
 	}
 }
 
+func TestFormatAIJournalEntryUntitled(t *testing.T) {
+	entry := aiJournalEntry{
+		Date:    time.Date(2025, 4, 10, 0, 0, 0, 0, time.UTC),
+		Title:   "   ",
+		Content: "купить носки",
+	}
+
+	got := formatAIJournalEntry(entry)
+
+	if !strings.Contains(got, "10.04.2025: (без названия)") {
+		t.Fatalf("expected untitled fallback, got %q", got)
+	}
+	if !strings.Contains(got, "купить носки") {
+		t.Fatalf("expected content in formatted journal entry, got %q", got)
+	}
+}
+
 func TestSelectAIContextScopePrefersWorkoutContextForEquipmentQuestions(t *testing.T) {
 	scope := selectAIContextScope("купил гантельные грифы и блины, какие блины докупить под мои рабочие веса?", nil)
 

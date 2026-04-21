@@ -125,7 +125,7 @@ func buildAIToolPlannerPrompt(message, recentHistory string) string {
 	sb.WriteString("- routine_overview: Hevy routines/шаблоны с плановыми упражнениями и весами; args: limit\n")
 	sb.WriteString("- habit_overview: привычки и рутины (Life Dashboard / Habitify / Todoist) с дневными статусами за период; args: days\n")
 	sb.WriteString("- nutrition_overview: калории и макросы за период; args: days\n")
-	sb.WriteString("- journal_overview: недавние записи дневника; args: days, limit\n")
+	sb.WriteString("- journal_overview: заметки и записи из Notion/дневника; args: days, limit\n")
 	sb.WriteString("- calendar_overview: недавние и будущие события календаря; args: past_days, future_days, limit\n")
 	sb.WriteString("- weather_overview: текущая погода и краткий прогноз; args: none\n")
 	sb.WriteString("Правила:\n")
@@ -139,6 +139,7 @@ func buildAIToolPlannerPrompt(message, recentHistory string) string {
 	sb.WriteString("- Для бега, дистанции, активности и шагов используй activity_overview и при необходимости recent_activities.\n")
 	sb.WriteString("- Для вопросов про сон, пульс, HRV, вес, Apple Health, Zepp и шаги за день используй health_overview. Шаги из health_overview приоритетнее календаря и Strava.\n")
 	sb.WriteString("- Для питания используй nutrition_overview.\n")
+	sb.WriteString("- Для вопросов про Notion, заметки, записи, рефлексию и дневник используй journal_overview.\n")
 	sb.WriteString("- Если вопрос общий, но не checkup, всё равно выбирай только реально нужные domains.\n")
 	sb.WriteString("- Если вопрос не требует погоды, не выбирай weather_overview.\n")
 	sb.WriteString("- Если вопрос не требует дневника или календаря, не выбирай их.\n")
@@ -797,47 +798,33 @@ func (h *AIHandler) appendNutritionOverviewTool(ctx context.Context, sb *strings
 }
 
 func (h *AIHandler) appendJournalOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days, limit int) {
-	since := time.Now().AddDate(0, 0, -days)
-	sb.WriteString(fmt.Sprintf("=== ДНЕВНИК (%d дней, %d записей) ===\n", days, limit))
+	sb.WriteString(fmt.Sprintf("=== ЗАМЕТКИ ИЗ NOTION (%d дней, %d записей) ===\n", days, limit))
+	sb.WriteString("Это записи из Notion journal_entries. Если в текущем окне новых записей нет, ниже выводятся последние доступные заметки.\n")
 
-	rows, err := h.db.Query(ctx, `
-		SELECT date, title, content, tags, mood
-		FROM journal_entries
-		WHERE user_id = $1
-			AND date >= $2
-		ORDER BY date DESC
-		LIMIT $3
-	`, userID, since, limit)
+	entries, err := h.loadAIJournalEntries(ctx, userID, days, limit)
 	if err != nil {
-		sb.WriteString("Данные дневника временно недоступны.\n")
+		sb.WriteString("Данные Notion-дневника временно недоступны.\n")
 		return
 	}
-	defer rows.Close()
 
-	hasRows := false
-	for rows.Next() {
-		hasRows = true
-		var date time.Time
-		var title, content string
-		var tags []string
-		var mood *int
-		if rows.Scan(&date, &title, &content, &tags, &mood) == nil {
-			entry := fmt.Sprintf("  %s: %s", date.Format("02.01"), title)
-			if mood != nil {
-				entry += fmt.Sprintf(" (настроение %d/10)", *mood)
-			}
-			if len(tags) > 0 {
-				entry += " [" + strings.Join(tags, ", ") + "]"
-			}
-			sb.WriteString(entry + "\n")
-			if strings.TrimSpace(content) != "" {
-				sb.WriteString("    " + truncateAIText(content, 180) + "\n")
-			}
-		}
+	if len(entries) > 0 {
+		sb.WriteString("Свежие записи:\n")
+		writeAIJournalEntries(sb, entries)
+		return
 	}
-	if !hasRows {
-		sb.WriteString("  Нет записей за период\n")
+
+	sb.WriteString(fmt.Sprintf("За последние %d дней новых записей нет.\n", days))
+	latestEntries, err := h.loadAILatestJournalEntries(ctx, userID, limit)
+	if err != nil {
+		sb.WriteString("Последние заметки сейчас недоступны.\n")
+		return
 	}
+	if len(latestEntries) == 0 {
+		sb.WriteString("В Notion-заметках записей вообще не найдено.\n")
+		return
+	}
+	sb.WriteString("Последние доступные записи:\n")
+	writeAIJournalEntries(sb, latestEntries)
 }
 
 func (h *AIHandler) appendCalendarOverviewTool(ctx context.Context, sb *strings.Builder, userID string, pastDays, futureDays, limit int) {
