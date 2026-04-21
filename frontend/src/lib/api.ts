@@ -23,6 +23,22 @@ export interface DashboardSummary {
     workouts_this_week: number
     total_distance_km: number
   }
+  nutrition: {
+    today_kcal: number
+    avg_calories: number
+    days_tracked: number
+    target_calories?: number
+  }
+  productivity: {
+    active_total: number
+    overdue_total: number
+    due_today_total: number
+    completed_today_total: number
+    habits_total: number
+    habits_completed_today: number
+    habits_pending_today: number
+  }
+  checkup: AILatestCheckup
 }
 
 export interface Transaction {

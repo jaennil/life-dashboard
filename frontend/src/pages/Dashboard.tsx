@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Wallet, Dumbbell, TrendingUp, TrendingDown, Zap, Route, Droplets, Wind, MapPin, LocateFixed, Search, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Wallet, Dumbbell, TrendingUp, TrendingDown, Zap, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
@@ -253,6 +254,82 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 
+function fmtDateTime(iso?: string) {
+  if (!iso) return '—'
+  const parsed = new Date(iso)
+  if (Number.isNaN(parsed.getTime())) return iso
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(parsed)
+}
+
+function OverviewSectionCard({
+  to,
+  title,
+  summary,
+  icon: Icon,
+  iconClassName,
+  metrics,
+  note,
+  loading,
+}: {
+  to: string
+  title: string
+  summary: string
+  icon: React.ElementType
+  iconClassName: string
+  metrics: Array<{ label: string; value: string }>
+  note?: string
+  loading?: boolean
+}) {
+  return (
+    <Link
+      to={to}
+      className="group rounded-2xl border bg-card/90 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/20 hover:bg-card"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', iconClassName)}>
+            <Icon className="h-4 w-4 text-white" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">{title}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{summary}</p>
+          </div>
+        </div>
+        <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+      </div>
+
+      {loading ? (
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="rounded-xl border bg-background/40 px-3 py-2">
+              <div className="h-3 w-16 rounded bg-muted animate-pulse" />
+              <div className="mt-2 h-5 w-20 rounded bg-muted animate-pulse" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {metrics.map((metric) => (
+            <div key={metric.label} className="rounded-xl border bg-background/40 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground/80">{metric.label}</p>
+              <p className="mt-1 text-sm font-semibold text-foreground">{metric.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {note ? (
+        <p className="mt-4 text-xs text-muted-foreground">{note}</p>
+      ) : null}
+    </Link>
+  )
+}
+
 export function Dashboard() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [txs, setTxs] = useState<Transaction[]>([])
@@ -349,10 +426,116 @@ export function Dashboard() {
     if (summary.fitness.total_distance_km > 0) {
       insights.push({ type: 'good', text: `За эту неделю пройдено ${summary.fitness.total_distance_km.toFixed(1)} км.` })
     }
+    if (summary.productivity.overdue_total > 0) {
+      insights.push({ type: 'warn', text: `Есть overdue задачи: ${summary.productivity.overdue_total}. Лучше разобрать их до новых задач.` })
+    }
+    if (summary.productivity.habits_total > 0 && summary.productivity.habits_pending_today > 0) {
+      insights.push({ type: 'info', text: `По рутинам на сегодня осталось ${summary.productivity.habits_pending_today} незакрытых пунктов.` })
+    }
+    if (summary.nutrition.days_tracked === 0) {
+      insights.push({ type: 'warn', text: 'По питанию за последние дни нет данных. Дневник питания сейчас слепой.' })
+    } else if (summary.nutrition.target_calories && summary.nutrition.avg_calories > 0) {
+      if (summary.nutrition.avg_calories < summary.nutrition.target_calories * 0.8) {
+        insights.push({ type: 'warn', text: `Средние калории за 7 дней (${Math.round(summary.nutrition.avg_calories)}) заметно ниже цели (${Math.round(summary.nutrition.target_calories)}).` })
+      } else if (summary.nutrition.avg_calories > summary.nutrition.target_calories * 1.15) {
+        insights.push({ type: 'warn', text: `Средние калории за 7 дней (${Math.round(summary.nutrition.avg_calories)}) выше цели (${Math.round(summary.nutrition.target_calories)}).` })
+      }
+    }
+    if (!summary.checkup.has_report) {
+      insights.push({ type: 'info', text: 'AI-checkup ещё не запускался. Имеет смысл сделать первый обзор по всем сферам.' })
+    } else if (summary.checkup.generated_at) {
+      const ageDays = (Date.now() - new Date(summary.checkup.generated_at).getTime()) / (1000 * 60 * 60 * 24)
+      if (ageDays >= 7) {
+        insights.push({ type: 'info', text: `Последний AI-checkup был ${fmtDateTime(summary.checkup.generated_at)}. Пора обновить обзор.` })
+      }
+    }
   }
   if (insights.length === 0) {
     insights.push({ type: 'info', text: 'Подключи больше источников данных чтобы получать персональные инсайты.' })
   }
+
+  const sectionCards = summary ? [
+    {
+      to: '/finance',
+      title: 'Финансы',
+      summary: 'Баланс, cashflow и текущий денежный темп.',
+      icon: Wallet,
+      iconClassName: 'bg-blue-500',
+      metrics: [
+        { label: 'Баланс', value: fmt(summary.finance.total_balance, 'RUB') },
+        { label: 'Расходы', value: fmt(summary.finance.monthly_spending, 'RUB') },
+        { label: 'Доходы', value: fmt(summary.finance.monthly_income, 'RUB') },
+        { label: 'Результат', value: fmt(summary.finance.monthly_income - summary.finance.monthly_spending, 'RUB') },
+      ],
+      note: summary.finance.monthly_income > 0 && summary.finance.monthly_spending > summary.finance.monthly_income
+        ? 'В этом месяце траты уже выше доходов.'
+        : 'Финансовый поток под контролем.',
+    },
+    {
+      to: '/fitness',
+      title: 'Фитнес',
+      summary: 'Активности и силовые тренировки за текущую неделю.',
+      icon: Dumbbell,
+      iconClassName: 'bg-violet-500',
+      metrics: [
+        { label: 'Активности', value: String(summary.fitness.activities_this_week) },
+        { label: 'Тренировки', value: String(summary.fitness.workouts_this_week) },
+        { label: 'Км', value: `${summary.fitness.total_distance_km.toFixed(1)} км` },
+        { label: 'Статус', value: summary.fitness.activities_this_week + summary.fitness.workouts_this_week > 0 ? 'Есть движение' : 'Пустая неделя' },
+      ],
+      note: summary.fitness.activities_this_week + summary.fitness.workouts_this_week > 0
+        ? 'Можно быстро понять, где есть движение: кардио или силовые.'
+        : 'Неделя пока пустая по нагрузке.',
+    },
+    {
+      to: '/nutrition',
+      title: 'Питание',
+      summary: 'Сегодняшние калории, среднее за неделю и попадание в цель.',
+      icon: UtensilsCrossed,
+      iconClassName: 'bg-emerald-500',
+      metrics: [
+        { label: 'Сегодня', value: `${Math.round(summary.nutrition.today_kcal)} ккал` },
+        { label: 'Ср. 7д', value: `${Math.round(summary.nutrition.avg_calories)} ккал` },
+        { label: 'Цель', value: summary.nutrition.target_calories ? `${Math.round(summary.nutrition.target_calories)} ккал` : 'не задана' },
+        { label: 'Дней', value: `${summary.nutrition.days_tracked} из 7` },
+      ],
+      note: summary.nutrition.days_tracked > 0
+        ? 'Достаточно, чтобы быстро увидеть, не поплыл ли режим питания.'
+        : 'Пока нет свежих данных по дневнику питания.',
+    },
+    {
+      to: '/productivity',
+      title: 'Продуктивность',
+      summary: 'Overdue, задачи на сегодня и ежедневные рутины в одном месте.',
+      icon: ListTodo,
+      iconClassName: 'bg-amber-500',
+      metrics: [
+        { label: 'Overdue', value: String(summary.productivity.overdue_total) },
+        { label: 'Сегодня', value: String(summary.productivity.due_today_total) },
+        { label: 'Рутины', value: `${summary.productivity.habits_completed_today}/${summary.productivity.habits_total}` },
+        { label: 'Закрыто', value: String(summary.productivity.completed_today_total) },
+      ],
+      note: summary.productivity.habits_total > 0
+        ? `По рутинам осталось ${summary.productivity.habits_pending_today}.`
+        : 'Доска показывает и задачи, и повседневные рутины.',
+    },
+    {
+      to: '/ai',
+      title: 'AI Checkup',
+      summary: 'Последний обзор по всем сферам и точка входа в AI Chat.',
+      icon: Bot,
+      iconClassName: 'bg-cyan-500',
+      metrics: [
+        { label: 'Статус', value: summary.checkup.has_report ? 'Есть отчёт' : 'Не запускался' },
+        { label: 'Период', value: summary.checkup.period_label || '—' },
+        { label: 'Обновлён', value: summary.checkup.generated_at ? fmtDateTime(summary.checkup.generated_at) : '—' },
+        { label: 'Действие', value: summary.checkup.has_report ? 'Открыть чат' : 'Запустить checkup' },
+      ],
+      note: summary.checkup.has_report
+        ? 'Быстрый переход к последнему AI-контексту.'
+        : 'Сделай первый checkup, чтобы получить сводку по всем разделам.',
+    },
+  ] : []
 
   return (
       <div className="flex flex-col gap-6">
@@ -382,7 +565,7 @@ export function Dashboard() {
         <div className="min-w-0 lg:col-span-1">
           <WeatherCard weather={weather} loading={weatherLoading} onPickLocation={() => setShowPicker(true)} />
         </div>
-        <div className="grid min-w-0 grid-cols-1 gap-4 content-start sm:grid-cols-2 lg:col-span-2">
+        <div className="grid min-w-0 grid-cols-1 content-start gap-4 sm:grid-cols-2 xl:grid-cols-3 lg:col-span-2">
           <StatCard
             title="Баланс"
             value={summary ? fmt(summary.finance.total_balance, 'RUB') : '—'}
@@ -419,14 +602,49 @@ export function Dashboard() {
             color="bg-violet-500"
             loading={loading}
           />
+          <StatCard
+            title="Питание сегодня"
+            value={summary ? `${Math.round(summary.nutrition.today_kcal)} ккал` : '—'}
+            sub={summary?.nutrition.target_calories
+              ? `цель: ${Math.round(summary.nutrition.target_calories)} ккал`
+              : 'цель не задана'}
+            icon={UtensilsCrossed}
+            color="bg-emerald-500"
+            loading={loading}
+          />
+          <StatCard
+            title="Overdue"
+            value={summary ? String(summary.productivity.overdue_total) : '—'}
+            sub={summary ? `сегодня: ${summary.productivity.due_today_total}` : 'нет данных'}
+            icon={ListTodo}
+            color="bg-amber-500"
+            loading={loading}
+          />
+        </div>
+      </div>
+
+      {/* Section overview */}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Срез по разделам</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Самое важное по финансам, фитнесу, питанию, задачам и AI без перехода по вкладкам.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+          {sectionCards.map(card => (
+            <OverviewSectionCard key={card.title} {...card} loading={loading} />
+          ))}
         </div>
       </div>
 
       {/* AI Insights */}
       <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">AI Инсайты</h2>
+        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Что требует внимания</h2>
         <div className="flex flex-col gap-2">
-          {insights.map((ins, i) => <InsightCard key={i} {...ins} />)}
+          {insights.slice(0, 5).map((ins, i) => <InsightCard key={i} {...ins} />)}
         </div>
       </div>
 
