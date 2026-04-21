@@ -380,30 +380,32 @@ export function AiChat() {
         </div>
       ) : null}
 
-      <div className="rounded-2xl border bg-card/80 p-4 shadow-sm">
-        <div className="mb-3 flex flex-col gap-1.5 sm:mb-2">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-medium text-foreground">Checkup</p>
-            <span className="rounded-full border border-border/80 bg-background/70 px-2 py-1 text-[10px] font-medium text-muted-foreground sm:hidden">
-              AI-отчёт
-            </span>
+      <div className="sticky top-3 z-20 -mx-1 rounded-[24px] border border-white/5 bg-background/88 px-1 py-1 backdrop-blur sm:top-4 sm:mx-0 sm:rounded-2xl sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
+        <div className="rounded-2xl border bg-card/88 p-4 shadow-sm">
+          <div className="mb-3 flex flex-col gap-1.5 sm:mb-2">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-foreground">Checkup</p>
+              <span className="rounded-full border border-border/80 bg-background/70 px-2 py-1 text-[10px] font-medium text-muted-foreground sm:hidden">
+                AI-отчёт
+              </span>
+            </div>
+            <p className="hidden text-xs text-muted-foreground sm:block">Быстрый AI-отчёт по всем сферам за нужный период</p>
+            <p className="text-xs leading-5 text-muted-foreground">
+              {formatLatestCheckup(latestCheckup)}
+            </p>
           </div>
-          <p className="hidden text-xs text-muted-foreground sm:block">Быстрый AI-отчёт по всем сферам за нужный период</p>
-          <p className="text-xs leading-5 text-muted-foreground">
-            {formatLatestCheckup(latestCheckup)}
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-          {CHECKUP_ACTIONS.map(action => (
-            <button
-              key={action.period}
-              onClick={() => sendCheckup(action)}
-              disabled={loading || historyLoading}
-              className="rounded-xl border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {action.label}
-            </button>
-          ))}
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+            {CHECKUP_ACTIONS.map(action => (
+              <button
+                key={action.period}
+                onClick={() => sendCheckup(action)}
+                disabled={loading || historyLoading}
+                className="rounded-xl border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
