@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import type { EChartsCoreOption } from 'echarts/core'
 import { EChart } from '@/components/EChart'
+import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
@@ -547,6 +548,7 @@ export function Finance() {
   const [period, setPeriod] = useState(30)
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
+  const [showRangePanel, setShowRangePanel] = useState(false)
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
@@ -646,6 +648,10 @@ export function Finance() {
   const topPayee = topExpenses[0]
   const activeTransactionFilters = [filter, search, catFilter, sort].filter(Boolean).length
 
+  useEffect(() => {
+    if (hasCustomRange) setShowRangePanel(true)
+  }, [hasCustomRange])
+
   async function handleSyncFinance() {
     if (!zenmoneyIntegration?.enabled) return
     setSyncing(true)
@@ -665,7 +671,7 @@ export function Finance() {
         <PageHeader
           eyebrow="Finance"
           title="Финансы"
-          description="Баланс, cashflow, структура расходов и крупнейшие получатели в одном срезе. Фильтры ниже меняют все графики и список транзакций сразу."
+          description="Баланс, cashflow и структура расходов в одном рабочем срезе. Детальные диапазоны и календарные фильтры раскрываются только когда нужны."
           badges={[
             { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
             { label: zenmoneyIntegration?.enabled ? 'ZenMoney подключён' : 'ZenMoney не подключён', tone: zenmoneyIntegration?.enabled ? 'success' : 'warning' },
@@ -683,31 +689,36 @@ export function Finance() {
           )}
         />
 
-        <div className="rounded-2xl border bg-card/80 p-4 shadow-sm">
+        <ExpandablePanel
+          title="Период и диапазон"
+          description="Меняй быстрый период или выставляй произвольные даты только когда реально нужно копнуть глубже."
+          open={showRangePanel}
+          onToggle={() => setShowRangePanel(current => !current)}
+          summary={(
+            <>
+              <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 font-medium uppercase tracking-wide text-primary">
+                {activePeriodLabel}
+              </span>
+              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                {rangeLabel}
+              </span>
+              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                {formatAccountCount(includedAccounts.length)} в балансе
+              </span>
+              {topCategory ? (
+                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                  Топ категория: {topCategory.category} · {formatPercent(topCategory.amount, totalCategorySpend)}
+                </span>
+              ) : null}
+            </>
+          )}
+        >
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-primary">
-                  {activePeriodLabel}
-                </span>
-                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                  {rangeLabel}
-                </span>
-                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                  {formatAccountCount(includedAccounts.length)} в балансе
-                </span>
-                {topCategory ? (
-                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                    Топ категория: {topCategory.category} · {formatPercent(topCategory.amount, totalCategorySpend)}
-                  </span>
-                ) : null}
-              </div>
-              <p className="text-sm text-foreground">
-                {hasCustomRange
-                  ? 'Показываем произвольный диапазон без усреднений по календарным периодам.'
-                  : `Быстрый срез за ${activePeriodLabel.toLowerCase()} с фокусом на реальный cashflow и структуру трат.`}
-              </p>
-            </div>
+            <p className="max-w-2xl text-sm text-foreground">
+              {hasCustomRange
+                ? 'Показываем произвольный диапазон без усреднений по календарным периодам.'
+                : `Быстрый срез за ${activePeriodLabel.toLowerCase()} с фокусом на реальный cashflow и структуру трат.`}
+            </p>
 
             <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-wrap gap-1 rounded-xl border bg-background/60 p-1">
@@ -757,7 +768,7 @@ export function Finance() {
               </div>
             </div>
           </div>
-        </div>
+        </ExpandablePanel>
       </div>
 
       {/* Summary cards */}

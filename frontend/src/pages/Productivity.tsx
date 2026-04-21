@@ -14,6 +14,7 @@ import {
   Sun,
   Trash2,
 } from 'lucide-react'
+import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import {
@@ -243,6 +244,7 @@ export function Productivity() {
   const [habitFormError, setHabitFormError] = useState('')
   const [filter, setFilter] = useState<TaskFilter>('overdue')
   const [editingHabitID, setEditingHabitID] = useState<string | null>(null)
+  const [showHabitComposer, setShowHabitComposer] = useState(false)
   const [habitForm, setHabitForm] = useState<ProductivityHabitInput>({
     name: '',
     routine: 'morning',
@@ -319,6 +321,7 @@ export function Productivity() {
         await api.createProductivityHabit(habitForm)
       }
       setEditingHabitID(null)
+      setShowHabitComposer(false)
       setHabitForm({ name: '', routine: 'morning', area_name: '' })
       await loadHabits()
     } catch (error) {
@@ -345,6 +348,7 @@ export function Productivity() {
     try {
       if (editingHabitID === habit.id) {
         setEditingHabitID(null)
+        setShowHabitComposer(false)
         setHabitForm({ name: '', routine: 'morning', area_name: '' })
       }
       await api.deleteProductivityHabit(habit.id)
@@ -358,6 +362,7 @@ export function Productivity() {
 
   function startEditingHabit(habit: ProductivityHabit) {
     setEditingHabitID(habit.id)
+    setShowHabitComposer(true)
     setHabitForm({
       name: habit.name,
       routine: habit.routine,
@@ -376,7 +381,7 @@ export function Productivity() {
       <PageHeader
         eyebrow="Productivity"
         title="Productivity"
-        description="Todoist остаётся слоем задач, а встроенные рутины закрывают повседневный уход и привычки: зубы, душ, умывание, кремы и всё, что важно отмечать фактами."
+        description="Todoist отвечает за задачи, а встроенные рутины закрывают ежедневный уход и привычки без лишнего шума на экране."
         badges={[
           { label: todoistIntegration?.enabled ? 'Todoist подключён' : 'Todoist не подключён', tone: todoistIntegration?.enabled ? 'success' : 'warning' },
           ...(habitsData ? [{ label: `${habitsData.summary.total} локальных привычек`, tone: 'primary' as const }] : []),
@@ -401,12 +406,28 @@ export function Productivity() {
               Свои ежедневные чеклисты внутри Life Dashboard. Отмечай факт выполнения, а AI увидит утренние и вечерние привычки как отдельный источник.
             </p>
           </div>
-          {habitsData && (
-            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-              <span className="rounded-full border px-3 py-1">сделано сегодня {habitsData.summary.completed_today}/{habitsData.summary.total}</span>
-              <span className="rounded-full border px-3 py-1">completion rate 7д {habitsData.summary.completion_rate_7_days.toFixed(0)}%</span>
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {habitsData ? (
+              <>
+                <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">сделано сегодня {habitsData.summary.completed_today}/{habitsData.summary.total}</span>
+                <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">completion rate 7д {habitsData.summary.completion_rate_7_days.toFixed(0)}%</span>
+              </>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                if (showHabitComposer && editingHabitID) {
+                  setEditingHabitID(null)
+                  setHabitForm({ name: '', routine: 'morning', area_name: '' })
+                  setHabitFormError('')
+                }
+                setShowHabitComposer(current => !current)
+              }}
+              className="rounded-xl border bg-background/70 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              {showHabitComposer ? 'Скрыть редактор' : 'Новая привычка'}
+            </button>
+          </div>
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-5">
@@ -447,72 +468,6 @@ export function Productivity() {
           />
         </div>
 
-        <div className="mt-5 rounded-2xl border border-dashed bg-background/30 p-4">
-          <div className="flex flex-col gap-3 lg:flex-row">
-            <label className="flex-1">
-              <span className="mb-1 block text-[11px] text-muted-foreground">Привычка</span>
-              <input
-                type="text"
-                value={habitForm.name}
-                onChange={(event) => setHabitForm(current => ({ ...current, name: event.target.value }))}
-                placeholder="Например: чистка зубов, крем CeraVe, душ"
-                className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
-              />
-            </label>
-            <label className="w-full lg:w-48">
-              <span className="mb-1 block text-[11px] text-muted-foreground">Когда</span>
-              <select
-                value={habitForm.routine}
-                onChange={(event) => setHabitForm(current => ({ ...current, routine: event.target.value as HabitRoutine }))}
-                className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
-              >
-                {ROUTINES.map(routine => (
-                  <option key={routine.key} value={routine.key}>{routine.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="w-full lg:w-56">
-              <span className="mb-1 block text-[11px] text-muted-foreground">Группа</span>
-              <input
-                type="text"
-                value={habitForm.area_name ?? ''}
-                onChange={(event) => setHabitForm(current => ({ ...current, area_name: event.target.value }))}
-                placeholder="Опционально: уход, гигиена"
-                className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
-              />
-            </label>
-          </div>
-
-          {habitFormError && (
-            <p className="mt-3 text-sm text-rose-400">{habitFormError}</p>
-          )}
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void handleSaveHabit()}
-              disabled={habitFormSaving}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
-            >
-              <Plus className="h-4 w-4" />
-              {habitFormSaving ? 'Сохраняю...' : editingHabitID ? 'Сохранить привычку' : 'Добавить привычку'}
-            </button>
-            {editingHabitID && (
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingHabitID(null)
-                  setHabitForm({ name: '', routine: 'morning', area_name: '' })
-                  setHabitFormError('')
-                }}
-                className="rounded-xl border px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted/50"
-              >
-                Отменить редактирование
-              </button>
-            )}
-          </div>
-        </div>
-
         <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
           <HabitColumn
             title="Утренний блок"
@@ -549,6 +504,95 @@ export function Productivity() {
           />
         </div>
       </div>
+
+      <ExpandablePanel
+        title={editingHabitID ? 'Редактирование привычки' : 'Новая привычка'}
+        description="Редактор нужен редко, поэтому живёт отдельно от самой доски рутин и не мешает ежедневным отметкам."
+        open={showHabitComposer}
+        onToggle={() => {
+          if (showHabitComposer && editingHabitID) {
+            setEditingHabitID(null)
+            setHabitForm({ name: '', routine: 'morning', area_name: '' })
+            setHabitFormError('')
+          }
+          setShowHabitComposer(current => !current)
+        }}
+        summary={(
+          <>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              {editingHabitID ? 'Режим: редактирование' : 'Режим: создание'}
+            </span>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              Утро {morningHabits.length} · Вечер {eveningHabits.length} · День {anytimeHabits.length}
+            </span>
+          </>
+        )}
+      >
+        <div className="flex flex-col gap-3 lg:flex-row">
+          <label className="flex-1">
+            <span className="mb-1 block text-[11px] text-muted-foreground">Привычка</span>
+            <input
+              type="text"
+              value={habitForm.name}
+              onChange={(event) => setHabitForm(current => ({ ...current, name: event.target.value }))}
+              placeholder="Например: чистка зубов, крем CeraVe, душ"
+              className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+            />
+          </label>
+          <label className="w-full lg:w-48">
+            <span className="mb-1 block text-[11px] text-muted-foreground">Когда</span>
+            <select
+              value={habitForm.routine}
+              onChange={(event) => setHabitForm(current => ({ ...current, routine: event.target.value as HabitRoutine }))}
+              className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+            >
+              {ROUTINES.map(routine => (
+                <option key={routine.key} value={routine.key}>{routine.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="w-full lg:w-56">
+            <span className="mb-1 block text-[11px] text-muted-foreground">Группа</span>
+            <input
+              type="text"
+              value={habitForm.area_name ?? ''}
+              onChange={(event) => setHabitForm(current => ({ ...current, area_name: event.target.value }))}
+              placeholder="Опционально: уход, гигиена"
+              className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+            />
+          </label>
+        </div>
+
+        {habitFormError ? (
+          <p className="mt-3 text-sm text-rose-400">{habitFormError}</p>
+        ) : null}
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void handleSaveHabit()}
+            disabled={habitFormSaving}
+            className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+          >
+            <Plus className="h-4 w-4" />
+            {habitFormSaving ? 'Сохраняю...' : editingHabitID ? 'Сохранить привычку' : 'Добавить привычку'}
+          </button>
+          {editingHabitID ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingHabitID(null)
+                setShowHabitComposer(false)
+                setHabitForm({ name: '', routine: 'morning', area_name: '' })
+                setHabitFormError('')
+              }}
+              className="rounded-xl border px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted/50"
+            >
+              Отменить редактирование
+            </button>
+          ) : null}
+        </div>
+      </ExpandablePanel>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard

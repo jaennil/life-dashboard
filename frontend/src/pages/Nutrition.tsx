@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { EChartsCoreOption } from 'echarts/core'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { EChart } from '@/components/EChart'
+import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
@@ -469,6 +470,7 @@ export function Nutrition() {
   const [savingTargets, setSavingTargets] = useState(false)
   const [targetsError, setTargetsError] = useState('')
   const [targetsNotice, setTargetsNotice] = useState('')
+  const [showTargetsPanel, setShowTargetsPanel] = useState(false)
   const [targetsForm, setTargetsForm] = useState({
     targetWeightKg: '',
     targetCalories: '',
@@ -640,7 +642,7 @@ export function Nutrition() {
       <PageHeader
         eyebrow="Nutrition"
         title="Питание"
-        description="Контроль калорий, БЖУ и целей в одном месте. Ручные цели дополняют данные из FatSecret и задают контекст для UI и AI."
+        description="Калории, БЖУ и дневник питания без ручной рутины. Цели остаются рядом, но не мешают ежедневному просмотру данных."
         badges={[
           { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
           { label: enabledNutritionIntegrations.length > 0 ? `${enabledNutritionIntegrations.length} активных источника питания` : 'Источник питания не подключён', tone: enabledNutritionIntegrations.length > 0 ? 'success' : 'warning' },
@@ -667,155 +669,6 @@ export function Nutrition() {
           </>
         )}
       />
-
-      <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-4">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Цели питания</h2>
-            <p className="text-xs text-muted-foreground mt-1">
-              Итоговые цели для UI и AI. Ручные значения имеют приоритет над FatSecret.
-            </p>
-            {targets?.synced_at && <p className="text-[11px] text-muted-foreground mt-1">Последнее обновление целей: {fmtSyncTime(targets.synced_at)}</p>}
-          </div>
-          {targets?.source && <span className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted rounded-lg px-2 py-1">{targets.source}</span>}
-        </div>
-
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <div className="rounded-xl bg-muted/40 p-3">
-            <p className="text-[10px] text-muted-foreground">Текущий вес</p>
-            <p className="text-lg font-bold text-foreground mt-1">{fmtWeight(targets?.current_weight_kg)}</p>
-            {targets?.current_weight_date && <p className="text-[10px] text-muted-foreground mt-1">{fmtDate(targets.current_weight_date)}</p>}
-          </div>
-          <div className="rounded-xl bg-muted/40 p-3">
-            <p className="text-[10px] text-muted-foreground">Целевой вес</p>
-            <p className="text-lg font-bold text-foreground mt-1">{fmtWeight(targets?.target_weight_kg)}</p>
-          </div>
-          <div className="rounded-xl bg-muted/40 p-3">
-            <p className="text-[10px] text-muted-foreground">До цели</p>
-            <p className="text-lg font-bold text-foreground mt-1">{fmtTargetDelta(targets?.current_weight_kg, targets?.target_weight_kg)}</p>
-          </div>
-          <div className="rounded-xl bg-muted/40 p-3">
-            <p className="text-[10px] text-muted-foreground">Рост</p>
-            <p className="text-lg font-bold text-foreground mt-1">{fmtOptionalNumber(targets?.height_cm, ' см')}</p>
-          </div>
-          <div className="rounded-xl bg-muted/40 p-3">
-            <p className="text-[10px] text-muted-foreground">Цель ккал</p>
-            <p className="text-lg font-bold text-foreground mt-1">{fmtOptionalNumber(targets?.target_calories, ' ккал')}</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-xl bg-blue-500/10 p-3">
-            <p className="text-[10px] text-blue-300">Белки</p>
-            <p className="text-base font-bold text-blue-200 mt-1">{fmtOptionalNumber(targets?.target_protein_g, ' г')}</p>
-          </div>
-          <div className="rounded-xl bg-orange-500/10 p-3">
-            <p className="text-[10px] text-orange-300">Жиры</p>
-            <p className="text-base font-bold text-orange-200 mt-1">{fmtOptionalNumber(targets?.target_fat_g, ' г')}</p>
-          </div>
-          <div className="rounded-xl bg-emerald-500/10 p-3">
-            <p className="text-[10px] text-emerald-300">Углеводы</p>
-            <p className="text-base font-bold text-emerald-200 mt-1">{fmtOptionalNumber(targets?.target_carbs_g, ' г')}</p>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-dashed bg-muted/20 p-4 flex flex-col gap-3">
-          <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground">Ручные цели</h3>
-            <p className="text-xs text-muted-foreground mt-1">
-              Заполняй только то, чего не хватает в FatSecret, или то, что хочешь переопределить вручную.
-            </p>
-            {targets?.manual?.updated_at && (
-              <p className="text-[11px] text-muted-foreground mt-1">Последнее ручное обновление: {fmtSyncTime(targets.manual.updated_at)}</p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-muted-foreground">Целевой вес, кг</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={targetsForm.targetWeightKg}
-                onChange={e => setTargetsField('targetWeightKg', e.target.value)}
-                placeholder="например, 78"
-                className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-muted-foreground">Калории, ккал</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={targetsForm.targetCalories}
-                onChange={e => setTargetsField('targetCalories', e.target.value)}
-                placeholder="например, 2400"
-                className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-muted-foreground">Белки, г</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={targetsForm.targetProteinG}
-                onChange={e => setTargetsField('targetProteinG', e.target.value)}
-                placeholder="например, 160"
-                className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-muted-foreground">Жиры, г</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={targetsForm.targetFatG}
-                onChange={e => setTargetsField('targetFatG', e.target.value)}
-                placeholder="например, 70"
-                className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-muted-foreground">Углеводы, г</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={targetsForm.targetCarbsG}
-                onChange={e => setTargetsField('targetCarbsG', e.target.value)}
-                placeholder="например, 250"
-                className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </label>
-          </div>
-
-          {(targetsError || targetsNotice) && (
-            <p className={cn('text-xs', targetsError ? 'text-rose-400' : 'text-emerald-400')}>
-              {targetsError || targetsNotice}
-            </p>
-          )}
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => void handleSaveTargets(false)}
-              disabled={savingTargets}
-              className="rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
-              {savingTargets ? 'Сохраняю...' : 'Сохранить ручные цели'}
-            </button>
-            <button
-              onClick={() => void handleSaveTargets(true)}
-              disabled={savingTargets}
-              className="rounded-lg border px-3 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50 transition-colors"
-            >
-              Очистить ручные цели
-            </button>
-          </div>
-        </div>
-
-        {targets?.api_notes?.map(note => (
-          <p key={note} className="text-xs text-muted-foreground border border-dashed rounded-xl px-3 py-2">{note}</p>
-        ))}
-      </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -928,6 +781,175 @@ export function Nutrition() {
           )}
         </div>
       </div>
+
+      <ExpandablePanel
+        title="Цели питания и ручные настройки"
+        description="Редко меняется. Основные цели уже участвуют в UI и AI, поэтому форму можно держать свернутой."
+        open={showTargetsPanel}
+        onToggle={() => setShowTargetsPanel(current => !current)}
+        summary={(
+          <>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              Цель: {fmtOptionalNumber(targets?.target_calories, ' ккал')}
+            </span>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              Б/Ж/У: {fmtOptionalNumber(targets?.target_protein_g, ' г')} · {fmtOptionalNumber(targets?.target_fat_g, ' г')} · {fmtOptionalNumber(targets?.target_carbs_g, ' г')}
+            </span>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              Вес: {fmtWeight(targets?.current_weight_kg)} → {fmtWeight(targets?.target_weight_kg)}
+            </span>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              До цели: {fmtTargetDelta(targets?.current_weight_kg, targets?.target_weight_kg)}
+            </span>
+            {targets?.source ? (
+              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 uppercase tracking-wide">
+                {targets.source}
+              </span>
+            ) : null}
+          </>
+        )}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <div className="rounded-xl bg-muted/40 p-3">
+              <p className="text-[10px] text-muted-foreground">Текущий вес</p>
+              <p className="mt-1 text-lg font-bold text-foreground">{fmtWeight(targets?.current_weight_kg)}</p>
+              {targets?.current_weight_date && <p className="mt-1 text-[10px] text-muted-foreground">{fmtDate(targets.current_weight_date)}</p>}
+            </div>
+            <div className="rounded-xl bg-muted/40 p-3">
+              <p className="text-[10px] text-muted-foreground">Целевой вес</p>
+              <p className="mt-1 text-lg font-bold text-foreground">{fmtWeight(targets?.target_weight_kg)}</p>
+            </div>
+            <div className="rounded-xl bg-muted/40 p-3">
+              <p className="text-[10px] text-muted-foreground">До цели</p>
+              <p className="mt-1 text-lg font-bold text-foreground">{fmtTargetDelta(targets?.current_weight_kg, targets?.target_weight_kg)}</p>
+            </div>
+            <div className="rounded-xl bg-muted/40 p-3">
+              <p className="text-[10px] text-muted-foreground">Рост</p>
+              <p className="mt-1 text-lg font-bold text-foreground">{fmtOptionalNumber(targets?.height_cm, ' см')}</p>
+            </div>
+            <div className="rounded-xl bg-muted/40 p-3">
+              <p className="text-[10px] text-muted-foreground">Цель ккал</p>
+              <p className="mt-1 text-lg font-bold text-foreground">{fmtOptionalNumber(targets?.target_calories, ' ккал')}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl bg-blue-500/10 p-3">
+              <p className="text-[10px] text-blue-300">Белки</p>
+              <p className="mt-1 text-base font-bold text-blue-200">{fmtOptionalNumber(targets?.target_protein_g, ' г')}</p>
+            </div>
+            <div className="rounded-xl bg-orange-500/10 p-3">
+              <p className="text-[10px] text-orange-300">Жиры</p>
+              <p className="mt-1 text-base font-bold text-orange-200">{fmtOptionalNumber(targets?.target_fat_g, ' г')}</p>
+            </div>
+            <div className="rounded-xl bg-emerald-500/10 p-3">
+              <p className="text-[10px] text-emerald-300">Углеводы</p>
+              <p className="mt-1 text-base font-bold text-emerald-200">{fmtOptionalNumber(targets?.target_carbs_g, ' г')}</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-dashed bg-muted/20 p-4">
+            <div className="mb-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground">Ручные цели</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Заполняй только то, чего не хватает в FatSecret, или то, что хочешь переопределить вручную.
+              </p>
+              {targets?.manual?.updated_at ? (
+                <p className="mt-1 text-[11px] text-muted-foreground">Последнее ручное обновление: {fmtSyncTime(targets.manual.updated_at)}</p>
+              ) : null}
+              {targets?.synced_at ? (
+                <p className="mt-1 text-[11px] text-muted-foreground">Последнее обновление целей: {fmtSyncTime(targets.synced_at)}</p>
+              ) : null}
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">Целевой вес, кг</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={targetsForm.targetWeightKg}
+                  onChange={e => setTargetsField('targetWeightKg', e.target.value)}
+                  placeholder="например, 78"
+                  className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">Калории, ккал</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={targetsForm.targetCalories}
+                  onChange={e => setTargetsField('targetCalories', e.target.value)}
+                  placeholder="например, 2400"
+                  className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">Белки, г</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={targetsForm.targetProteinG}
+                  onChange={e => setTargetsField('targetProteinG', e.target.value)}
+                  placeholder="например, 160"
+                  className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">Жиры, г</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={targetsForm.targetFatG}
+                  onChange={e => setTargetsField('targetFatG', e.target.value)}
+                  placeholder="например, 70"
+                  className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">Углеводы, г</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={targetsForm.targetCarbsG}
+                  onChange={e => setTargetsField('targetCarbsG', e.target.value)}
+                  placeholder="например, 250"
+                  className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+            </div>
+
+            {(targetsError || targetsNotice) ? (
+              <p className={cn('mt-3 text-xs', targetsError ? 'text-rose-400' : 'text-emerald-400')}>
+                {targetsError || targetsNotice}
+              </p>
+            ) : null}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => void handleSaveTargets(false)}
+                disabled={savingTargets}
+                className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              >
+                {savingTargets ? 'Сохраняю...' : 'Сохранить ручные цели'}
+              </button>
+              <button
+                onClick={() => void handleSaveTargets(true)}
+                disabled={savingTargets}
+                className="rounded-lg border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
+              >
+                Очистить ручные цели
+              </button>
+            </div>
+          </div>
+
+          {targets?.api_notes?.map(note => (
+            <p key={note} className="rounded-xl border border-dashed px-3 py-2 text-xs text-muted-foreground">{note}</p>
+          ))}
+        </div>
+      </ExpandablePanel>
 
       {/* Daily log */}
       <div className="rounded-2xl border bg-card/90 overflow-hidden shadow-sm">
