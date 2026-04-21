@@ -350,23 +350,26 @@ export function AiChat() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)]">
+    <div className="flex min-h-[calc(100dvh-8rem)] flex-col gap-3">
       <PageHeader
         eyebrow="AI"
         title="AI Chat"
-        description="Вопросы к твоим данным без ручного свода. Финансы, тренировки, питание, задачи и checkup живут в одном контексте."
+        description="Спрашивай про финансы, тренировки, питание, задачи и checkup в одном чате."
         badges={[
-          { label: messages.length > 0 ? `${messages.length} сообщений в истории` : 'История пока пустая', tone: messages.length > 0 ? 'muted' : 'warning' },
           { label: latestCheckup?.has_report ? `Последний checkup: ${latestCheckup.period_label ?? 'есть отчёт'}` : 'Checkup ещё не запускался', tone: latestCheckup?.has_report ? 'primary' : 'muted' },
+          { label: messages.length > 0 ? `${messages.length} сообщений в истории` : 'История пока пустая', tone: messages.length > 0 ? 'muted' : 'warning' },
         ]}
+        compactOnMobile
+        hideDescriptionOnMobile
         actions={(
           <button
             onClick={clearHistory}
             disabled={historyLoading || loading || messages.length === 0}
-            className="inline-flex items-center gap-2 rounded-2xl border bg-card/85 px-4 py-3 text-sm text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex items-center gap-2 rounded-2xl border bg-card/85 px-3 py-2.5 text-sm text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40 sm:px-4 sm:py-3"
           >
             <Trash2 className="h-4 w-4" />
-            Очистить
+            <span className="hidden sm:inline">Очистить историю</span>
+            <span className="sm:hidden">Очистить</span>
           </button>
         )}
       />
@@ -377,21 +380,26 @@ export function AiChat() {
         </div>
       ) : null}
 
-      <div className="mb-3 rounded-2xl border bg-card/80 p-4 shadow-sm">
-        <div className="mb-2">
-          <p className="text-sm font-medium text-foreground">Checkup</p>
-          <p className="text-xs text-muted-foreground">Быстрый AI-отчёт по всем сферам за нужный период</p>
-          <p className="mt-1 text-xs text-muted-foreground">
+      <div className="rounded-2xl border bg-card/80 p-4 shadow-sm">
+        <div className="mb-3 flex flex-col gap-1.5 sm:mb-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-medium text-foreground">Checkup</p>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2 py-1 text-[10px] font-medium text-muted-foreground sm:hidden">
+              AI-отчёт
+            </span>
+          </div>
+          <p className="hidden text-xs text-muted-foreground sm:block">Быстрый AI-отчёт по всем сферам за нужный период</p>
+          <p className="text-xs leading-5 text-muted-foreground">
             {formatLatestCheckup(latestCheckup)}
           </p>
         </div>
-        <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
           {CHECKUP_ACTIONS.map(action => (
             <button
               key={action.period}
               onClick={() => sendCheckup(action)}
               disabled={loading || historyLoading}
-              className="shrink-0 rounded-xl border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-xl border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
               {action.label}
             </button>
@@ -400,14 +408,14 @@ export function AiChat() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto rounded-[24px] border bg-card/90 p-4 shadow-sm flex flex-col gap-4 min-h-0">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 rounded-[24px] border bg-card/90 p-3 shadow-sm sm:p-4">
         {historyLoading ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground gap-2">
+          <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             Загружаю историю чата...
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
+          <div className="flex h-full flex-col items-center justify-center gap-5 px-2 text-center">
             <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10">
               <Bot className="w-7 h-7 text-primary" />
             </div>
@@ -415,12 +423,12 @@ export function AiChat() {
               <p className="font-medium text-foreground">Чем могу помочь?</p>
               <p className="text-sm text-muted-foreground mt-1">У меня есть доступ к финансам, активности, тренировкам и питанию</p>
             </div>
-            <div className="flex flex-wrap gap-2 justify-center max-w-lg">
+            <div className="grid w-full gap-2 sm:flex sm:max-w-lg sm:flex-wrap sm:justify-center">
               {SUGGESTIONS.map(s => (
                 <button
                   key={s}
                   onClick={() => send(s)}
-                  className="px-3 py-2 text-sm rounded-lg border bg-background hover:bg-accent hover:text-accent-foreground transition-colors text-left"
+                  className="rounded-lg border bg-background px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
                 >
                   {s}
                 </button>
@@ -428,10 +436,11 @@ export function AiChat() {
             </div>
           </div>
         ) : (
-          messages.map((msg, i) => (
-            <div key={msg.id ?? `${msg.role}-${i}`} className={cn('flex gap-3', msg.role === 'user' && 'flex-row-reverse')}>
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+            {messages.map((msg, i) => (
+              <div key={msg.id ?? `${msg.role}-${i}`} className={cn('flex gap-2 sm:gap-3', msg.role === 'user' && 'flex-row-reverse')}>
               <div className={cn(
-                'flex items-center justify-center w-8 h-8 rounded-full shrink-0 mt-0.5',
+                'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full sm:h-8 sm:w-8',
                 msg.role === 'user' ? 'bg-primary' : 'bg-muted'
               )}>
                 {msg.role === 'user'
@@ -439,16 +448,16 @@ export function AiChat() {
                   : <Bot className="w-4 h-4 text-muted-foreground" />}
               </div>
               <div className={cn(
-                'max-w-[75%] rounded-[22px] px-4 py-3 text-sm shadow-sm',
+                'rounded-[20px] px-3.5 py-2.5 text-[13px] leading-5 shadow-sm sm:rounded-[22px] sm:px-4 sm:py-3 sm:text-sm sm:leading-6',
                 msg.role === 'user'
-                  ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                  : 'bg-muted text-foreground rounded-tl-sm'
+                  ? 'max-w-[85%] rounded-tr-sm bg-primary text-primary-foreground sm:max-w-[78%]'
+                  : 'max-w-[92%] rounded-tl-sm bg-muted text-foreground sm:max-w-[84%] lg:max-w-[78%]'
               )}>
                 {msg.loading
                   ? <Loader2 className="w-4 h-4 animate-spin" />
                   : msg.role === 'assistant'
                     ? (
-                        <div className="prose prose-sm dark:prose-invert max-w-none">
+                        <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-li:my-0.5 prose-ul:my-2 prose-ol:my-2">
                           <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                             {msg.content}
                           </ReactMarkdown>
@@ -456,32 +465,38 @@ export function AiChat() {
                       )
                     : <span className="whitespace-pre-wrap">{msg.content}</span>}
               </div>
-            </div>
-          ))
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       {/* Input */}
-      <div className="mt-3 flex gap-2">
-        <textarea
-          ref={inputRef}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Напиши вопрос... (Enter — отправить, Shift+Enter — перенос)"
-          rows={1}
-          disabled={loading || historyLoading}
-          className="flex-1 resize-none rounded-[20px] border bg-card/90 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
-          style={{ minHeight: '48px', maxHeight: '120px' }}
-        />
-        <button
-          onClick={() => send(input)}
-          disabled={!input.trim() || loading || historyLoading}
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] bg-primary text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-        </button>
+      <div className="sticky bottom-0 z-10 -mx-1 rounded-[24px] border border-white/5 bg-background/85 px-1 py-2 pb-[calc(0.4rem+env(safe-area-inset-bottom))] backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
+        <div className="flex gap-2">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Напиши вопрос..."
+            rows={1}
+            disabled={loading || historyLoading}
+            className="flex-1 resize-none rounded-[20px] border bg-card/90 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+            style={{ minHeight: '48px', maxHeight: '120px' }}
+          />
+          <button
+            onClick={() => send(input)}
+            disabled={!input.trim() || loading || historyLoading}
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] bg-primary text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          </button>
+        </div>
+        <p className="mt-2 px-1 text-[11px] text-muted-foreground">
+          Enter — отправить, Shift+Enter — перенос
+        </p>
       </div>
     </div>
   )
