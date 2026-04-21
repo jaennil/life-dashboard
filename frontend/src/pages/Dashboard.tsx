@@ -219,9 +219,9 @@ function WeatherCard({ weather, loading, onPickLocation }: {
         </div>
       </div>
 
-      <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
+      <div className="grid grid-cols-4 gap-2 rounded-xl border border-white/5 bg-background/20 p-3 sm:grid-cols-6 xl:grid-cols-12">
         {weather.hourly.slice(0, 12).map(h => (
-          <div key={h.time} className="flex flex-col items-center gap-1 shrink-0">
+          <div key={h.time} className="flex min-w-0 flex-col items-center gap-1 rounded-lg border border-white/5 bg-background/40 px-2 py-2 text-center">
             <span className="text-xs text-muted-foreground">{fmtHour(h.time)}</span>
             <span className="text-base">{wmoIcon(h.weather_code)}</span>
             <span className="text-xs font-medium text-foreground">{Math.round(h.temp)}°</span>
