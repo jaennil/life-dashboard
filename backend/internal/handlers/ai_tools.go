@@ -91,7 +91,7 @@ func (h *AIHandler) planToolCalls(ctx context.Context, message string, history [
 		},
 	}
 
-	rawPlan, err := h.complete(ctx, plannerMessages)
+	rawPlan, err := h.complete(ctx, "tool_planner", plannerMessages)
 	if err != nil {
 		return nil, err
 	}

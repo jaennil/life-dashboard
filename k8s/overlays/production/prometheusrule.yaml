@@ -1,0 +1,58 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: life-dashboard-alerts
+  namespace: life-dashboard
+spec:
+  groups:
+    - name: life-dashboard.http
+      rules:
+        - alert: LifeDashboardBackend5xxHigh
+          expr: |
+            (
+              sum(rate(life_dashboard_http_requests_total{namespace="life-dashboard",job="backend",status_code=~"5.."}[5m]))
+              /
+              clamp_min(sum(rate(life_dashboard_http_requests_total{namespace="life-dashboard",job="backend"}[5m])), 0.001)
+            ) > 0.05
+            and
+            sum(rate(life_dashboard_http_requests_total{namespace="life-dashboard",job="backend"}[5m])) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Life Dashboard backend returns too many 5xx responses
+            description: Backend 5xx ratio in namespace {{ $labels.namespace }} has been above 5% for 10 minutes.
+        - alert: LifeDashboardBackendLatencyHigh
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (
+                rate(life_dashboard_http_request_duration_seconds_bucket{namespace="life-dashboard",job="backend"}[5m])
+              )
+            ) > 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Life Dashboard backend p95 latency is high
+            description: Backend p95 latency in namespace {{ $labels.namespace }} has been above 2 seconds for 10 minutes.
+    - name: life-dashboard.integrations
+      rules:
+        - alert: LifeDashboardSyncErrors
+          expr: increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",status="error"}[15m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: Life Dashboard sync errors detected
+            description: One or more connector sync runs failed in the last 15 minutes.
+    - name: life-dashboard.ai
+      rules:
+        - alert: LifeDashboardAIUpstreamErrors
+          expr: increase(life_dashboard_ai_upstream_requests_total{namespace="life-dashboard",job="backend",status!="success"}[15m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: Life Dashboard AI upstream errors detected
+            description: One or more AI upstream requests failed or returned an invalid response in the last 15 minutes.

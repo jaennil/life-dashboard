@@ -15,6 +15,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -23,6 +24,7 @@ import (
 	"life-dashboard/internal/database"
 	"life-dashboard/internal/handlers"
 	authmw "life-dashboard/internal/middleware"
+	"life-dashboard/internal/observability"
 	"life-dashboard/internal/scheduler"
 )
 
@@ -162,7 +164,9 @@ func main() {
 					continue
 				}
 				log.Info().Str("connector", connCopy.Name()).Str("user_id", userID).Msg("scheduled sync for user")
-				if err := connCopy.Sync(ctx, userID); err != nil {
+				if err := observability.RunSync(ctx, connCopy.Name(), observability.SyncTriggerScheduled, func(ctx context.Context) error {
+					return connCopy.Sync(ctx, userID)
+				}); err != nil {
 					log.Error().Err(err).Str("connector", connCopy.Name()).Str("user_id", userID).Msg("scheduled sync failed")
 				}
 			}
@@ -195,6 +199,9 @@ func main() {
 			start := time.Now()
 			ww := middleware.NewWrapResponseWriter(w, req.ProtoMajor)
 			next.ServeHTTP(ww, req)
+			if req.URL.Path == "/health" || req.URL.Path == "/metrics" {
+				return
+			}
 			log.Info().
 				Str("method", req.Method).
 				Str("path", req.URL.Path).
@@ -204,6 +211,7 @@ func main() {
 				Msg("request")
 		})
 	})
+	r.Use(observability.HTTPMetricsMiddleware)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		if err := pool.Ping(r.Context()); err != nil {
@@ -215,6 +223,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
 	})
+	r.Handle("/metrics", promhttp.Handler())
 
 	// Auth (public)
 	usersHandler := handlers.NewUsers(pool, cfg.Auth.JWTSecret, "Life Dashboard", log.Logger)

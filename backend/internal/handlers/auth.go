@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 	"life-dashboard/internal/connectors"
 	"life-dashboard/internal/middleware"
+	"life-dashboard/internal/observability"
 )
 
 type AuthHandler struct {
@@ -336,7 +337,9 @@ func (h *AuthHandler) runInitialSync(source string, userID string, conn connecto
 	defer cancel()
 
 	h.logger.Info().Str("source", source).Str("user_id", userID).Msg("running initial sync inline")
-	if err := conn.Sync(ctx, userID); err != nil {
+	if err := observability.RunSync(ctx, source, observability.SyncTriggerInitial, func(ctx context.Context) error {
+		return conn.Sync(ctx, userID)
+	}); err != nil {
 		h.logger.Error().Err(err).Str("source", source).Str("user_id", userID).Msg("initial sync failed")
 		return err
 	}

@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: life-dashboard-backend
+  namespace: life-dashboard
+spec:
+  jobLabel: app
+  namespaceSelector:
+    matchNames:
+      - life-dashboard
+  selector:
+    matchLabels:
+      app: backend
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

@@ -86,7 +86,7 @@ func (h *AIHandler) Checkup(w http.ResponseWriter, r *http.Request) {
 	systemPrompt := buildAICheckupPrompt(now, window, dataContext)
 	userPrompt := fmt.Sprintf("Сделай checkup %s.", window.UserLabel)
 
-	content, err := h.complete(r.Context(), []ChatMessage{
+	content, err := h.complete(r.Context(), "checkup", []ChatMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
 	})

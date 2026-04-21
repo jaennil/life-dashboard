@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	authmw "life-dashboard/internal/middleware"
+	"life-dashboard/internal/observability"
 )
 
 type AIHandler struct {
@@ -73,9 +74,9 @@ const (
 )
 
 var (
-	errAIUnavailable = errors.New("ai unavailable")
-	errAIUpstream    = errors.New("ai upstream error")
-	errAIBadResponse = errors.New("ai bad response")
+	errAIUnavailable = observability.ErrAIUnavailable
+	errAIUpstream    = observability.ErrAIUpstream
+	errAIBadResponse = observability.ErrAIBadResponse
 )
 
 func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +112,7 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	messages = append(messages, history...)
 	messages = append(messages, ChatMessage{Role: "user", Content: req.Message})
 
-	content, err := h.complete(ctx, messages)
+	content, err := h.complete(ctx, "chat", messages)
 	if err != nil {
 		writeAICompletionError(w, err)
 		return
@@ -239,7 +240,12 @@ func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionN
 %s`, strings.Join(sectionNames, ", "), now.Format("02.01.2006 15:04"), dataContext)
 }
 
-func (h *AIHandler) complete(ctx context.Context, messages []ChatMessage) (string, error) {
+func (h *AIHandler) complete(ctx context.Context, operation string, messages []ChatMessage) (_ string, err error) {
+	start := time.Now()
+	defer func() {
+		observability.ObserveAIUpstream(operation, observability.AIStatusFromError(err), time.Since(start))
+	}()
+
 	body, err := json.Marshal(map[string]any{
 		"model":    h.model,
 		"messages": messages,

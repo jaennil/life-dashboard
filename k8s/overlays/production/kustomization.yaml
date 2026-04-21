@@ -9,6 +9,9 @@ resources:
 - postgres-sealed.yaml
 - ghcr-sealed.yaml
 - app-config-sealed.yaml
+- servicemonitor.yaml
+- prometheusrule.yaml
+- grafana-dashboard.yaml
 
 images:
 - name: backend
