@@ -87,16 +87,8 @@ func (h *AuthHandler) FatSecretCallback(w http.ResponseWriter, r *http.Request) 
 	}
 
 	fsUserID := r.Context().Value(middleware.UserIDKey).(string)
-	h.logger.Info().Str("user_id", fsUserID).Msg("fatsecret authorization successful, starting initial sync")
-	go func() {
-		if err := h.fatsecret.Sync(context.Background(), fsUserID); err != nil {
-			h.logger.Error().Err(err).Msg("fatsecret initial sync failed")
-		} else {
-			h.logger.Info().Msg("fatsecret initial sync complete")
-		}
-	}()
-
-	redirectToSettingsAfterSync(w, r, "fatsecret")
+	syncErr := h.runInitialSync("fatsecret", fsUserID, h.fatsecret)
+	redirectToSettingsAfterSync(w, r, "fatsecret", syncErr)
 }
 
 // GET /api/v1/auth/strava/callback — exchange code for tokens
@@ -120,16 +112,8 @@ func (h *AuthHandler) StravaCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authorization failed", http.StatusInternalServerError)
 		return
 	}
-	h.logger.Info().Str("user_id", stravaUserID).Msg("strava authorization successful, starting initial sync")
-	go func() {
-		if err := h.strava.Sync(context.Background(), stravaUserID); err != nil {
-			h.logger.Error().Err(err).Msg("strava initial sync failed")
-		} else {
-			h.logger.Info().Msg("strava initial sync complete")
-		}
-	}()
-
-	redirectToSettingsAfterSync(w, r, "strava")
+	syncErr := h.runInitialSync("strava", stravaUserID, h.strava)
+	redirectToSettingsAfterSync(w, r, "strava", syncErr)
 }
 
 // GET /api/v1/auth/zenmoney — redirect to ZenMoney OAuth
@@ -169,16 +153,8 @@ func (h *AuthHandler) ZenmoneyCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("user_id", zmUserID).Msg("zenmoney authorization successful, starting initial sync")
-	go func() {
-		if err := h.zenmoney.Sync(context.Background(), zmUserID); err != nil {
-			h.logger.Error().Err(err).Msg("zenmoney initial sync failed")
-		} else {
-			h.logger.Info().Msg("zenmoney initial sync complete")
-		}
-	}()
-
-	redirectToSettingsAfterSync(w, r, "zenmoney")
+	syncErr := h.runInitialSync("zenmoney", zmUserID, h.zenmoney)
+	redirectToSettingsAfterSync(w, r, "zenmoney", syncErr)
 }
 
 // GET /api/v1/auth/notion — redirect to Notion OAuth
@@ -218,14 +194,8 @@ func (h *AuthHandler) NotionCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("user_id", notionUserID).Msg("notion authorized, starting sync")
-	go func() {
-		if err := h.notion.Sync(context.Background(), notionUserID); err != nil {
-			h.logger.Error().Err(err).Msg("notion initial sync failed")
-		}
-	}()
-
-	redirectToSettingsAfterSync(w, r, "notion")
+	syncErr := h.runInitialSync("notion", notionUserID, h.notion)
+	redirectToSettingsAfterSync(w, r, "notion", syncErr)
 }
 
 // GET /api/v1/auth/todoist — redirect to Todoist OAuth
@@ -265,14 +235,8 @@ func (h *AuthHandler) TodoistCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("user_id", todoistUserID).Msg("todoist authorized, starting sync")
-	go func() {
-		if err := h.todoist.Sync(context.Background(), todoistUserID); err != nil {
-			h.logger.Error().Err(err).Msg("todoist initial sync failed")
-		}
-	}()
-
-	redirectToSettingsAfterSync(w, r, "todoist")
+	syncErr := h.runInitialSync("todoist", todoistUserID, h.todoist)
+	redirectToSettingsAfterSync(w, r, "todoist", syncErr)
 }
 
 // GET /api/v1/auth/google — redirect to Google OAuth
@@ -311,14 +275,8 @@ func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("user_id", gcUserID).Msg("google calendar authorized, starting sync")
-	go func() {
-		if err := h.googleCalendar.Sync(context.Background(), gcUserID); err != nil {
-			h.logger.Error().Err(err).Msg("google calendar initial sync failed")
-		}
-	}()
-
-	redirectToSettingsAfterSync(w, r, "google_calendar")
+	syncErr := h.runInitialSync("google_calendar", gcUserID, h.googleCalendar)
+	redirectToSettingsAfterSync(w, r, "google_calendar", syncErr)
 }
 
 func issueOAuthState(w http.ResponseWriter, r *http.Request, source string) (string, error) {
@@ -373,10 +331,40 @@ func isSecureRequest(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
-func redirectToSettingsAfterSync(w http.ResponseWriter, r *http.Request, source string) {
+func (h *AuthHandler) runInitialSync(source string, userID string, conn connectors.Connector) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	h.logger.Info().Str("source", source).Str("user_id", userID).Msg("running initial sync inline")
+	if err := conn.Sync(ctx, userID); err != nil {
+		h.logger.Error().Err(err).Str("source", source).Str("user_id", userID).Msg("initial sync failed")
+		return err
+	}
+
+	h.logger.Info().Str("source", source).Str("user_id", userID).Msg("initial sync complete")
+	return nil
+}
+
+func redirectToSettingsAfterSync(w http.ResponseWriter, r *http.Request, source string, syncErr error) {
 	params := url.Values{
-		"sync":       {source},
-		"started_at": {time.Now().UTC().Format(time.RFC3339Nano)},
+		"sync_source": {source},
+	}
+	if syncErr != nil {
+		params.Set("sync_status", "error")
+		params.Set("sync_error", truncateSyncError(syncErr))
+	} else {
+		params.Set("sync_status", "success")
 	}
 	http.Redirect(w, r, "/settings?"+params.Encode(), http.StatusFound)
+}
+
+func truncateSyncError(err error) string {
+	if err == nil {
+		return ""
+	}
+	text := strings.TrimSpace(err.Error())
+	if len(text) > 180 {
+		return text[:180] + "..."
+	}
+	return text
 }

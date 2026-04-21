@@ -269,7 +269,8 @@ export interface Integration {
 export interface ConnectionResult {
   status: string
   source?: string
-  sync_started_at?: string
+  sync_completed_at?: string
+  sync_error?: string
 }
 
 export interface AIHistoryMessage {
@@ -462,7 +463,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, ...extra }),
     }).then(async r => {
-      if (!r.ok) throw new Error(r.statusText)
+      if (!r.ok) throw new Error(await r.text())
       return r.json() as Promise<ConnectionResult>
     }),
   me: () => get<User>('/auth/me'),

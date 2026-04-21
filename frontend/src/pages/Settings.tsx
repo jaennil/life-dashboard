@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
 import { PageHeader } from '@/components/PageHeader'
@@ -74,12 +74,11 @@ function fmtCount(n: number, name: string) {
   return `${n.toLocaleString('ru-RU')} ${label}`
 }
 
-function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending = false }: {
+function IntegrationCard({ integration, onToggle, onSync, onRefresh }: {
   integration: Integration
   onToggle: (enabled: boolean) => void
   onSync: () => void
   onRefresh: () => void
-  syncPending?: boolean
 }) {
   const [syncing, setSyncing] = useState(false)
   const [toggling, setToggling] = useState(false)
@@ -87,6 +86,7 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
   const [extraInput, setExtraInput] = useState('')
   const [showTokenForm, setShowTokenForm] = useState(false)
   const [savingToken, setSavingToken] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   async function handleSync() {
     setSyncing(true)
@@ -103,21 +103,19 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
     const extra = tokenMeta?.extraField ? extraInput.trim() : undefined
     if (tokenMeta?.extraField && !extra) return
     setSavingToken(true)
+    setSaveError('')
     try {
       const result = await api.saveToken(integration.name, tokenInput.trim(), extra ? { [tokenMeta!.extraField!.key]: extra } : undefined)
       setTokenInput('')
       setExtraInput('')
       setShowTokenForm(false)
-      onRefresh()
-      if (result.sync_started_at) {
-        window.dispatchEvent(new CustomEvent('integration-sync-started', {
-          detail: {
-            name: result.source ?? integration.name,
-            startedAt: result.sync_started_at,
-          },
-        }))
+      await onRefresh()
+      if (result.sync_error) {
+        setSaveError(`Подключение сохранено, но первичная синхронизация упала: ${result.sync_error}`)
       }
-    } catch { /* ignore */ } finally {
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Не удалось сохранить подключение')
+    } finally {
       setSavingToken(false)
     }
   }
@@ -131,20 +129,15 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
   const hasSyncData = integration.record_count > 0 || !!integration.last_sync_at
   const isConnected = requiresCredentials ? integration.has_credentials : integration.enabled
   const isActive = integration.enabled && (requiresCredentials ? integration.has_credentials : integration.configured)
-  const showSyncPending = syncPending && integration.enabled
 
   const statusIcon = !integration.configured
     ? <AlertCircle className="w-4 h-4 text-muted-foreground" />
-    : showSyncPending
-      ? <RefreshCw className="w-4 h-4 text-primary animate-spin" />
-      : isActive
+    : isActive
       ? <CheckCircle className="w-4 h-4 text-emerald-500" />
       : <XCircle className="w-4 h-4 text-muted-foreground" />
 
   const statusText = !integration.configured
     ? 'Не настроено'
-    : showSyncPending
-      ? 'Синхронизация...'
     : requiresCredentials
       ? isConnected
         ? integration.enabled ? 'Подключено' : 'Отключено'
@@ -320,6 +313,11 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
               {savingToken ? '...' : 'Сохранить'}
             </button>
           </div>
+          {saveError ? (
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+              {saveError}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -329,11 +327,7 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
             {statusIcon}
             <span className="text-xs font-medium text-foreground">{statusText}</span>
           </div>
-          {showSyncPending ? (
-            <div className="text-xs text-muted-foreground">
-              Данные обновляются, карточка обновится автоматически
-            </div>
-          ) : (requiresCredentials ? (isConnected || hasSyncData) : integration.enabled) && (
+          {(requiresCredentials ? (isConnected || hasSyncData) : integration.enabled) && (
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <span>Синхр.: {formatLastSyncAt(integration.last_sync_at)}</span>
               <span>•</span>
@@ -345,11 +339,11 @@ function IntegrationCard({ integration, onToggle, onSync, onRefresh, syncPending
         {isActive && !isWebhookOnly && (
           <button
             onClick={handleSync}
-            disabled={syncing || showSyncPending}
+            disabled={syncing}
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-lg hover:bg-muted/50"
           >
-            <RefreshCw className={cn('w-3 h-3', (syncing || showSyncPending) && 'animate-spin')} />
-            {syncing || showSyncPending ? 'Синхронизация...' : 'Синхронизировать'}
+            <RefreshCw className={cn('w-3 h-3', syncing && 'animate-spin')} />
+            {syncing ? 'Синхронизация...' : 'Синхронизировать'}
           </button>
         )}
         {isActive && isWebhookOnly && (
@@ -663,9 +657,10 @@ export function Settings() {
   const [healthReloadKey, setHealthReloadKey] = useState(0)
   const location = useLocation()
   const navigate = useNavigate()
-  const syncTarget = new URLSearchParams(location.search).get('sync')
-  const syncStartedAtRaw = new URLSearchParams(location.search).get('started_at')
-  const [pendingSync, setPendingSync] = useState<{ name: string; startedAt: number; clearUrl: boolean } | null>(null)
+  const searchParams = new URLSearchParams(location.search)
+  const syncStatus = searchParams.get('sync_status')
+  const syncSource = searchParams.get('sync_source')
+  const syncError = searchParams.get('sync_error')
 
   function load() {
     return api.getIntegrations()
@@ -676,93 +671,6 @@ export function Settings() {
   useEffect(() => {
     load().finally(() => setLoading(false))
   }, [location.key])
-
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const customEvent = event as CustomEvent<{ name?: string; startedAt?: string }>
-      const name = customEvent.detail?.name
-      const startedAtRaw = customEvent.detail?.startedAt
-      if (!name || !startedAtRaw) return
-
-      const startedAt = Date.parse(startedAtRaw)
-      if (Number.isNaN(startedAt)) return
-
-      setPendingSync({ name, startedAt, clearUrl: false })
-    }
-
-    window.addEventListener('integration-sync-started', handler as EventListener)
-    return () => window.removeEventListener('integration-sync-started', handler as EventListener)
-  }, [])
-
-  useEffect(() => {
-    if (!syncTarget || !syncStartedAtRaw) {
-      return
-    }
-
-    const syncStartedAt = Date.parse(syncStartedAtRaw)
-    if (Number.isNaN(syncStartedAt)) {
-      navigate(location.pathname, { replace: true })
-      return
-    }
-    startTransition(() => {
-      setPendingSync({ name: syncTarget, startedAt: syncStartedAt, clearUrl: true })
-    })
-  }, [location.pathname, navigate, syncStartedAtRaw, syncTarget])
-
-  useEffect(() => {
-    if (!pendingSync) {
-      return
-    }
-
-    let cancelled = false
-    let timer: number | undefined
-    let attempts = 0
-    const maxAttempts = 30
-
-    const finish = () => {
-      if (cancelled) return
-      setPendingSync(current =>
-        current?.name === pendingSync.name && current.startedAt === pendingSync.startedAt ? null : current
-      )
-      if (pendingSync.clearUrl) {
-        navigate(location.pathname, { replace: true })
-      }
-    }
-
-    const poll = async () => {
-      try {
-        const next = await api.getIntegrations()
-        if (cancelled) return
-
-        setIntegrations(next)
-        setLoading(false)
-
-        const target = next.find(integration => integration.name === pendingSync.name)
-        const lastSyncedAt = target?.last_sync_at ? Date.parse(target.last_sync_at) : NaN
-        if (!target || (Number.isFinite(lastSyncedAt) && lastSyncedAt >= pendingSync.startedAt)) {
-          finish()
-          return
-        }
-      } catch (err) {
-        console.error(err)
-      }
-
-      attempts += 1
-      if (attempts >= maxAttempts) {
-        finish()
-        return
-      }
-
-      timer = window.setTimeout(poll, 2000)
-    }
-
-    poll()
-
-    return () => {
-      cancelled = true
-      if (timer) window.clearTimeout(timer)
-    }
-  }, [location.pathname, navigate, pendingSync])
 
   async function handleToggle(name: string, enabled: boolean) {
     await api.toggleIntegration(name, enabled)
@@ -786,9 +694,48 @@ export function Settings() {
         badges={[
           { label: `${integrations.filter(integration => integration.enabled).length} активных интеграций`, tone: 'primary' },
           { label: `${integrations.filter(integration => integration.has_credentials).length} подключено с доступом`, tone: 'muted' },
-          { label: pendingSync ? `Сейчас синхронизируется: ${pendingSync.name}` : 'Нет активной синхронизации', tone: pendingSync ? 'success' : 'muted' },
+          { label: syncStatus === 'success' && syncSource ? `Подключено и синхронизировано: ${syncSource}` : 'Ручной sync запускается отдельно', tone: syncStatus === 'success' ? 'success' : 'muted' },
         ]}
       />
+
+      {syncStatus === 'success' && syncSource ? (
+        <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium text-emerald-50">Первичная синхронизация завершена</p>
+              <p className="mt-1 text-xs text-emerald-200/90">
+                Источник <span className="font-medium">{syncSource}</span> подключён и уже успел подтянуть данные.
+              </p>
+            </div>
+            <button
+              onClick={() => navigate(location.pathname, { replace: true })}
+              className="text-xs text-emerald-200 transition-colors hover:text-emerald-50"
+            >
+              Скрыть
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {syncStatus === 'error' && syncSource ? (
+        <div className="rounded-2xl border border-rose-500/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium text-rose-50">Первичная синхронизация не завершилась</p>
+              <p className="mt-1 text-xs text-rose-200/90">
+                Подключение <span className="font-medium">{syncSource}</span> сохранено, но данные автоматически не подтянулись.
+              </p>
+              {syncError ? <p className="mt-2 text-xs text-rose-200/90">{syncError}</p> : null}
+            </div>
+            <button
+              onClick={() => navigate(location.pathname, { replace: true })}
+              className="text-xs text-rose-200 transition-colors hover:text-rose-50"
+            >
+              Скрыть
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div>
         <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Аккаунт</h2>
@@ -814,7 +761,6 @@ export function Settings() {
                 onToggle={enabled => handleToggle(integration.name, enabled)}
                 onSync={() => handleSync(integration.name)}
                 onRefresh={load}
-                syncPending={pendingSync?.name === integration.name}
               />
             ))}
           </div>
