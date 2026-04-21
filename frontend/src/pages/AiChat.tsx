@@ -34,7 +34,7 @@ interface CheckupSendResult extends SendResult {
   periodLabel?: string
 }
 
-type CheckupPeriod = 'today' | 'week' | 'month' | 'since_last'
+type CheckupPeriod = 'today' | 'yesterday' | 'week' | 'month' | 'since_last'
 
 interface CheckupAction {
   period: CheckupPeriod
@@ -54,6 +54,7 @@ const SUGGESTIONS = [
 
 const CHECKUP_ACTIONS: CheckupAction[] = [
   { period: 'today', label: 'Сегодня', userMessage: 'Сделай checkup за сегодня' },
+  { period: 'yesterday', label: 'Вчера', userMessage: 'Сделай checkup за вчера' },
   { period: 'week', label: '7 дней', userMessage: 'Сделай checkup за неделю' },
   { period: 'month', label: '30 дней', userMessage: 'Сделай checkup за месяц' },
   { period: 'since_last', label: 'С прошлого', userMessage: 'Сделай checkup с момента последнего отчёта' },

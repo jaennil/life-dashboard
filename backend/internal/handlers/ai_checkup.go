@@ -43,6 +43,7 @@ type checkupWindow struct {
 
 const (
 	checkupPeriodToday     = "today"
+	checkupPeriodYesterday = "yesterday"
 	checkupPeriodWeek      = "week"
 	checkupPeriodMonth     = "month"
 	checkupPeriodSinceLast = "since_last"
@@ -181,6 +182,16 @@ func resolveCheckupWindow(now time.Time, requested string, lastReportAt *time.Ti
 			Start:           startOfDay(now),
 			End:             now,
 		}, nil
+	case checkupPeriodYesterday:
+		yesterdayStart := startOfDay(now.AddDate(0, 0, -1))
+		return checkupWindow{
+			RequestedPeriod: requested,
+			EffectivePeriod: requested,
+			Title:           "Checkup за вчера",
+			UserLabel:       "за вчера",
+			Start:           yesterdayStart,
+			End:             yesterdayStart.Add(24*time.Hour - time.Nanosecond),
+		}, nil
 	case checkupPeriodWeek:
 		return checkupWindow{
 			RequestedPeriod: requested,
@@ -234,6 +245,8 @@ func checkupPeriodLabel(period string) string {
 	switch strings.TrimSpace(strings.ToLower(period)) {
 	case checkupPeriodToday:
 		return "за сегодня"
+	case checkupPeriodYesterday:
+		return "за вчера"
 	case checkupPeriodWeek:
 		return "за 7 дней"
 	case checkupPeriodMonth:
