@@ -13,8 +13,8 @@ func TestResolveCheckupWindowYesterday(t *testing.T) {
 		t.Fatalf("resolveCheckupWindow returned error: %v", err)
 	}
 
-	wantStart := time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)
-	wantEnd := time.Date(2026, 4, 20, 23, 59, 59, int(time.Second-time.Nanosecond), time.UTC)
+	wantStart := "2026-04-20T00:00:00+03:00"
+	wantEnd := "2026-04-20T23:59:59+03:00"
 
 	if window.RequestedPeriod != checkupPeriodYesterday {
 		t.Fatalf("requested period = %q, want %q", window.RequestedPeriod, checkupPeriodYesterday)
@@ -25,11 +25,11 @@ func TestResolveCheckupWindowYesterday(t *testing.T) {
 	if window.UserLabel != "за вчера" {
 		t.Fatalf("user label = %q, want %q", window.UserLabel, "за вчера")
 	}
-	if !window.Start.Equal(wantStart) {
-		t.Fatalf("start = %s, want %s", window.Start, wantStart)
+	if got := window.Start.Format("2006-01-02T15:04:05Z07:00"); got != wantStart {
+		t.Fatalf("start = %s, want %s", got, wantStart)
 	}
-	if !window.End.Equal(wantEnd) {
-		t.Fatalf("end = %s, want %s", window.End, wantEnd)
+	if got := window.End.Format("2006-01-02T15:04:05Z07:00"); got != wantEnd {
+		t.Fatalf("end = %s, want %s", got, wantEnd)
 	}
 }
 

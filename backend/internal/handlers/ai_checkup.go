@@ -171,6 +171,7 @@ func resolveCheckupWindow(now time.Time, requested string, lastReportAt *time.Ti
 	if requested == "" {
 		requested = checkupPeriodWeek
 	}
+	now = aiTime(now)
 
 	switch requested {
 	case checkupPeriodToday:
@@ -259,7 +260,8 @@ func checkupPeriodLabel(period string) string {
 }
 
 func startOfDay(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	t = aiTime(t)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, aiTimeLocation())
 }
 
 func buildAICheckupPrompt(now time.Time, window checkupWindow, dataContext string) string {
@@ -286,11 +288,11 @@ func buildAICheckupPrompt(now time.Time, window checkupWindow, dataContext strin
 	sb.WriteString("Если по какой-то сфере данных нет, напиши это коротко и без воды.\n")
 	sb.WriteString("Если видна динамика веса, шагов, расходов, тренировок или питания — покажи её числами.\n")
 	sb.WriteString("Не делай длинное эссе: нужен практичный checkup.\n\n")
-	sb.WriteString(fmt.Sprintf("Сейчас %s.\n", now.Format("02.01.2006 15:04")))
+	sb.WriteString(fmt.Sprintf("Сейчас %s.\n", formatAITimestampLocal(now, "02.01.2006 15:04")))
 	sb.WriteString(fmt.Sprintf("Период отчёта: %s (%s — %s).\n",
 		window.Title,
-		window.Start.Format("02.01.2006 15:04"),
-		window.End.Format("02.01.2006 15:04"),
+		formatAITimestampLocal(window.Start, "02.01.2006 15:04"),
+		formatAITimestampLocal(window.End, "02.01.2006 15:04"),
 	))
 	if window.Note != "" {
 		sb.WriteString(window.Note + "\n")
@@ -303,8 +305,8 @@ func buildAICheckupPrompt(now time.Time, window checkupWindow, dataContext strin
 func (h *AIHandler) buildCheckupContext(ctx context.Context, userID string, window checkupWindow) (string, error) {
 	var sb strings.Builder
 	sb.WriteString("=== ПЕРИОД ===\n")
-	sb.WriteString(fmt.Sprintf("Начало: %s\n", window.Start.Format("02.01.2006 15:04")))
-	sb.WriteString(fmt.Sprintf("Конец: %s\n", window.End.Format("02.01.2006 15:04")))
+	sb.WriteString(fmt.Sprintf("Начало: %s\n", formatAITimestampLocal(window.Start, "02.01.2006 15:04")))
+	sb.WriteString(fmt.Sprintf("Конец: %s\n", formatAITimestampLocal(window.End, "02.01.2006 15:04")))
 	if window.Note != "" {
 		sb.WriteString("Примечание: " + window.Note + "\n")
 	}

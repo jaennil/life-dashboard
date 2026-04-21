@@ -30,6 +30,14 @@ type AIHandler struct {
 	logger  zerolog.Logger
 }
 
+var aiDisplayLocation = func() *time.Location {
+	loc, err := time.LoadLocation("Europe/Moscow")
+	if err == nil {
+		return loc
+	}
+	return time.FixedZone("MSK", 3*60*60)
+}()
+
 func NewAI(db *pgxpool.Pool, baseURL, model, apiKey string, weather *WeatherHandler, unleashClient *unleashclient.Client, logger zerolog.Logger) *AIHandler {
 	return &AIHandler{
 		db:      db,
@@ -237,7 +245,7 @@ func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionN
 Сейчас особенно релевантны разделы данных: %s.
 
 Текущие данные пользователя (обновлено %s):
-%s`, strings.Join(sectionNames, ", "), now.Format("02.01.2006 15:04"), dataContext)
+%s`, strings.Join(sectionNames, ", "), formatAITimestampLocal(now, "02.01.2006 15:04"), dataContext)
 }
 
 func (h *AIHandler) complete(ctx context.Context, operation string, messages []ChatMessage) (_ string, err error) {
@@ -856,7 +864,7 @@ func (h *AIHandler) buildRecentWorkoutContextLimit(ctx context.Context, userID s
 func formatAIWorkoutContext(workout Workout) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("\nТренировка %s: %s\n", workout.StartedAt.Format("02.01.2006 15:04"), workout.Title))
+	sb.WriteString(fmt.Sprintf("\nТренировка %s: %s\n", formatAITimestampLocal(workout.StartedAt, "02.01.2006 15:04"), workout.Title))
 	if workout.Notes != "" {
 		sb.WriteString(fmt.Sprintf("  Заметки: %s\n", truncateAIText(workout.Notes, 240)))
 	}
@@ -927,8 +935,20 @@ func formatAIFloat(value float64) string {
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.1f", value), "0"), ".")
 }
 
+func aiTimeLocation() *time.Location {
+	return aiDisplayLocation
+}
+
+func aiTime(t time.Time) time.Time {
+	return t.In(aiTimeLocation())
+}
+
+func aiNow() time.Time {
+	return aiTime(time.Now())
+}
+
 func formatAITimestampLocal(t time.Time, layout string) string {
-	return t.In(time.Local).Format(layout)
+	return aiTime(t).Format(layout)
 }
 
 func formatAICalendarEvent(startTime, endTime time.Time, allDay bool, title, location string) string {

@@ -38,7 +38,7 @@ func TestFormatAIWorkoutContextIncludesHevyDetails(t *testing.T) {
 	context := formatAIWorkoutContext(workout)
 
 	for _, expected := range []string{
-		"Тренировка 10.04.2026 19:30: Push",
+		"Тренировка 10.04.2026 22:30: Push",
 		"Заметки: Heavy bench focus",
 		"Bench Press [блок 1]",
 		"Заметки: Pause on chest",
@@ -47,6 +47,18 @@ func TestFormatAIWorkoutContextIncludesHevyDetails(t *testing.T) {
 		if !strings.Contains(context, expected) {
 			t.Fatalf("expected context to contain %q, got:\n%s", expected, context)
 		}
+	}
+}
+
+func TestFormatAICalendarEventUsesMoscowTimezone(t *testing.T) {
+	start := time.Date(2026, 4, 21, 18, 30, 0, 0, time.UTC)
+	end := time.Date(2026, 4, 22, 2, 30, 0, 0, time.UTC)
+
+	got := formatAICalendarEvent(start, end, false, "сон", "")
+
+	want := "  21.04 21:30-05:30: сон"
+	if got != want {
+		t.Fatalf("calendar event = %q, want %q", got, want)
 	}
 }
 

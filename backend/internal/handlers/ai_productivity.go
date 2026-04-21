@@ -263,8 +263,8 @@ func renderProductivityOverviewText(title string, data AIProductivityOverviewDat
 	if len(data.KeyTasks) == 0 {
 		sb.WriteString("  - Критичных или срочных задач сейчас нет\n")
 	} else {
-		now := time.Now()
-		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		now := aiNow()
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiTimeLocation())
 		tomorrowStart := todayStart.AddDate(0, 0, 1)
 		nextWeekStart := todayStart.AddDate(0, 0, 8)
 		staleBefore := todayStart.AddDate(0, 0, -14)
@@ -299,7 +299,7 @@ func renderProductivityOverviewText(title string, data AIProductivityOverviewDat
 				line += " | recurring"
 			}
 			if task.DueAt != nil {
-				line += " | дедлайн " + task.DueAt.Format("02.01 15:04")
+				line += " | дедлайн " + formatAITimestampLocal(*task.DueAt, "02.01 15:04")
 			} else if task.DueDate != nil {
 				line += " | дедлайн " + task.DueDate.Format("02.01")
 			}
@@ -315,7 +315,7 @@ func renderProductivityOverviewText(title string, data AIProductivityOverviewDat
 		sb.WriteString("  - Нет завершённых задач за окно\n")
 	} else {
 		for _, item := range data.RecentCompleted {
-			line := fmt.Sprintf("  - %s: %s", item.CompletedAt.Format("02.01 15:04"), item.Content)
+			line := fmt.Sprintf("  - %s: %s", formatAITimestampLocal(item.CompletedAt, "02.01 15:04"), item.Content)
 			if item.ProjectName != "" {
 				line += " [" + item.ProjectName + "]"
 			}

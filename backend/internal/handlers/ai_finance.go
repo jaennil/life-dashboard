@@ -222,7 +222,7 @@ func renderRecentTransactionsText(title string, data AIRecentTransactionsData) s
 			sign = "+"
 		}
 		sb.WriteString(fmt.Sprintf("  %s %s%.0f %s %s\n",
-			item.OccurredAt.Format("02.01 15:04"),
+			formatAITimestampLocal(item.OccurredAt, "02.01 15:04"),
 			sign,
 			item.Amount,
 			item.Currency,
