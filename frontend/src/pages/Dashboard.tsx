@@ -196,26 +196,26 @@ function WeatherCard({ weather, loading, onPickLocation }: {
   if (!weather) return null
 
   return (
-    <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+    <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex min-w-0 flex-col gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <button
             onClick={onPickLocation}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors group"
+            className="group flex min-w-0 items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
-            <MapPin className="w-3 h-3" />
-            <span>{weather.city}</span>
+            <MapPin className="h-3 w-3 shrink-0" />
+            <span className="truncate">{weather.city}</span>
           </button>
-          <div className="flex items-end gap-2 mt-1">
+          <div className="mt-1 flex flex-wrap items-end gap-2">
             <span className="text-5xl font-bold text-foreground">{Math.round(weather.temp)}°</span>
             <span className="text-4xl mb-0.5">{wmoIcon(weather.weather_code)}</span>
           </div>
-          <p className="text-sm text-muted-foreground mt-1">{weather.description}</p>
+          <p className="mt-1 break-words text-sm text-muted-foreground">{weather.description}</p>
         </div>
-        <div className="flex flex-col gap-2 text-xs text-muted-foreground shrink-0 mt-1">
-          <span>Ощущается {Math.round(weather.feels_like)}°</span>
-          <span className="flex items-center gap-1"><Droplets className="w-3 h-3" />{weather.humidity}%</span>
-          <span className="flex items-center gap-1"><Wind className="w-3 h-3" />{Math.round(weather.wind_speed)} км/ч</span>
+        <div className="grid grid-cols-3 gap-2 rounded-xl bg-background/35 p-3 text-xs text-muted-foreground sm:mt-1 sm:min-w-[96px] sm:grid-cols-1 sm:bg-transparent sm:p-0">
+          <span className="min-w-0 break-words">Ощущается {Math.round(weather.feels_like)}°</span>
+          <span className="flex min-w-0 items-center gap-1"><Droplets className="h-3 w-3 shrink-0" />{weather.humidity}%</span>
+          <span className="flex min-w-0 items-center gap-1"><Wind className="h-3 w-3 shrink-0" />{Math.round(weather.wind_speed)} км/ч</span>
         </div>
       </div>
 
@@ -378,11 +378,11 @@ export function Dashboard() {
       />
 
       {/* Weather + Stats */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-1">
+      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="min-w-0 lg:col-span-1">
           <WeatherCard weather={weather} loading={weatherLoading} onPickLocation={() => setShowPicker(true)} />
         </div>
-        <div className="lg:col-span-2 grid grid-cols-2 gap-4 content-start">
+        <div className="grid min-w-0 grid-cols-1 gap-4 content-start sm:grid-cols-2 lg:col-span-2">
           <StatCard
             title="Баланс"
             value={summary ? fmt(summary.finance.total_balance, 'RUB') : '—'}

@@ -17,7 +17,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <InstallPrompt />
-      <main className="app-shell-main flex-1 lg:ml-56">
+      <main className="app-shell-main min-w-0 flex-1 lg:ml-56">
         <div className="page-shell">
           {children}
         </div>

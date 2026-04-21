@@ -100,9 +100,15 @@ body {
   z-index: 1;
   margin: 0 auto;
   width: min(100%, 1560px);
+  max-width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+}
+
+.page-shell > * {
+  min-width: 0;
 }
 
 .page-header-panel {
