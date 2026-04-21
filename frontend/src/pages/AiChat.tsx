@@ -34,6 +34,14 @@ interface CheckupSendResult extends SendResult {
   periodLabel?: string
 }
 
+interface AIStreamEvent {
+  type: 'delta' | 'done' | 'error'
+  content?: string
+  period?: CheckupPeriod
+  period_label?: string
+  generated_at?: string
+}
+
 type CheckupPeriod = 'today' | 'yesterday' | 'week' | 'month' | 'since_last'
 
 interface CheckupAction {
@@ -105,7 +113,7 @@ function sleep(ms: number) {
   return new Promise(resolve => window.setTimeout(resolve, ms))
 }
 
-async function requestChat(message: string, history: Message[]): Promise<SendResult> {
+async function requestChatStream(message: string, history: Message[], onDelta: (content: string) => void): Promise<SendResult> {
   const payload = JSON.stringify({
     message,
     history: history
@@ -114,7 +122,7 @@ async function requestChat(message: string, history: Message[]): Promise<SendRes
       .map(m => ({ role: m.role, content: m.content })),
   })
 
-  return requestAI('/api/v1/ai/chat', payload)
+  return requestAIStream('/api/v1/ai/chat', payload, onDelta)
 }
 
 async function requestCheckup(period: CheckupPeriod): Promise<CheckupSendResult> {
@@ -178,6 +186,10 @@ async function requestCheckup(period: CheckupPeriod): Promise<CheckupSendResult>
   }
 }
 
+async function requestCheckupStream(period: CheckupPeriod, onDelta: (content: string) => void): Promise<CheckupSendResult> {
+  return requestAIStream('/api/v1/ai/checkup', JSON.stringify({ period }), onDelta)
+}
+
 async function requestAI(url: string, payload: string): Promise<SendResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -237,6 +249,134 @@ async function requestAI(url: string, payload: string): Promise<SendResult> {
   }
 }
 
+async function requestAIStream(url: string, payload: string, onDelta: (content: string) => void): Promise<CheckupSendResult> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${url}?stream=1`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+      })
+      const raw = await (async () => {
+        if (res.ok || !res.body) return ''
+        return res.text()
+      })()
+
+      if (!res.ok) {
+        if (attempt === 0 && RETRYABLE_CHAT_STATUSES.has(res.status)) {
+          await sleep(CHAT_RETRY_DELAY_MS)
+          continue
+        }
+        return {
+          content: formatChatError(res.status, raw),
+          isError: true,
+        }
+      }
+
+      if (!res.body) {
+        return url.includes('/checkup')
+          ? requestCheckup(JSON.parse(payload).period as CheckupPeriod)
+          : requestAI(url, payload)
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let content = ''
+      let finalEventType: AIStreamEvent['type'] | null = null
+      let finalEventContent = ''
+      let finalEventPeriodLabel: string | undefined
+      let finalEventGeneratedAt: string | undefined
+
+      const handleLine = (line: string) => {
+        if (!line.trim()) return
+        let event: AIStreamEvent
+        try {
+          event = JSON.parse(line) as AIStreamEvent
+        } catch {
+          return
+        }
+
+        if (event.type === 'delta' && event.content) {
+          content += event.content
+          onDelta(content)
+          return
+        }
+
+        if (event.type === 'done') {
+          if (event.content && event.content !== content) {
+            content = event.content
+            onDelta(content)
+          }
+          finalEventType = 'done'
+          finalEventContent = event.content || content
+          finalEventPeriodLabel = event.period_label
+          finalEventGeneratedAt = event.generated_at
+          return
+        }
+
+        if (event.type === 'error') {
+          finalEventType = 'error'
+          finalEventContent = event.content || ''
+        }
+      }
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        let newlineIndex = buffer.indexOf('\n')
+        while (newlineIndex >= 0) {
+          const line = buffer.slice(0, newlineIndex).trim()
+          buffer = buffer.slice(newlineIndex + 1)
+          handleLine(line)
+          newlineIndex = buffer.indexOf('\n')
+        }
+      }
+
+      buffer += decoder.decode()
+      if (buffer.trim()) {
+        handleLine(buffer.trim())
+      }
+
+      if (finalEventType === 'error') {
+        return {
+          content: finalEventContent || 'AI сервис сейчас недоступен. Попробуй позже.',
+          isError: true,
+        }
+      }
+
+      if (finalEventType === 'done') {
+        return {
+          content: finalEventContent || content,
+          periodLabel: finalEventPeriodLabel,
+          generatedAt: finalEventGeneratedAt,
+        }
+      }
+
+      if (content.trim()) {
+        return { content }
+      }
+
+      if (attempt === 0) {
+        await sleep(CHAT_RETRY_DELAY_MS)
+        continue
+      }
+    } catch {
+      if (attempt === 0) {
+        await sleep(CHAT_RETRY_DELAY_MS)
+        continue
+      }
+    }
+  }
+
+  return {
+    content: 'Не удалось подключиться к AI.',
+    isError: true,
+  }
+}
+
 export function AiChat() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -250,6 +390,21 @@ export function AiChat() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  function updatePendingAssistant(content: string, loading = true) {
+    setMessages(prev => {
+      if (prev.length === 0) return prev
+      const next = [...prev]
+      const last = next[next.length - 1]
+      next[next.length - 1] = {
+        ...last,
+        role: 'assistant',
+        content,
+        loading,
+      }
+      return next
+    })
+  }
 
   useEffect(() => {
     let active = true
@@ -283,6 +438,7 @@ export function AiChat() {
 
   async function send(text: string) {
     if (!text.trim() || loading || historyLoading) return
+    const contextMessages = messages
     setInput('')
     setLoading(true)
 
@@ -291,11 +447,8 @@ export function AiChat() {
     setMessages(prev => [...prev, userMsg, assistantMsg])
 
     try {
-      const result = await requestChat(text, messages)
-      setMessages(prev => [
-        ...prev.slice(0, -1),
-        { role: 'assistant', content: result.content, loading: false },
-      ])
+      const result = await requestChatStream(text, contextMessages, content => updatePendingAssistant(content, true))
+      updatePendingAssistant(result.content, false)
     } finally {
       setLoading(false)
     }
@@ -310,11 +463,8 @@ export function AiChat() {
     setMessages(prev => [...prev, userMsg, assistantMsg])
 
     try {
-      const result = await requestCheckup(action.period)
-      setMessages(prev => [
-        ...prev.slice(0, -1),
-        { role: 'assistant', content: result.content, loading: false },
-      ])
+      const result = await requestCheckupStream(action.period, content => updatePendingAssistant(content, true))
+      updatePendingAssistant(result.content, false)
       if (!result.isError) {
         setLatestCheckup({
           has_report: true,
@@ -456,7 +606,7 @@ export function AiChat() {
                   ? 'max-w-[85%] rounded-tr-sm bg-primary text-primary-foreground sm:max-w-[78%]'
                   : 'max-w-[92%] rounded-tl-sm bg-muted text-foreground sm:max-w-[84%] lg:max-w-[78%]'
               )}>
-                {msg.loading
+                {msg.loading && !msg.content
                   ? <Loader2 className="w-4 h-4 animate-spin" />
                   : msg.role === 'assistant'
                     ? (

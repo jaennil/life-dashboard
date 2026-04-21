@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -83,6 +84,14 @@ type aiJournalEntry struct {
 	Source  string
 }
 
+type aiStreamEvent struct {
+	Type        string `json:"type"`
+	Content     string `json:"content,omitempty"`
+	Period      string `json:"period,omitempty"`
+	PeriodLabel string `json:"period_label,omitempty"`
+	GeneratedAt string `json:"generated_at,omitempty"`
+}
+
 const (
 	aiUpstreamDialTimeout     = 5 * time.Second
 	aiUpstreamHeaderTimeout   = 150 * time.Second
@@ -128,6 +137,26 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
 	messages = append(messages, history...)
 	messages = append(messages, ChatMessage{Role: "user", Content: req.Message})
+
+	if isAIStreamRequest(r) {
+		flusher, ok := prepareAIStream(w)
+		if !ok {
+			http.Error(w, "stream unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		content, err := h.completeStream(ctx, "chat", messages, func(delta string) error {
+			return writeAIStreamEvent(w, flusher, aiStreamEvent{Type: "delta", Content: delta})
+		})
+		if err != nil {
+			_ = writeAIStreamEvent(w, flusher, aiStreamEvent{Type: "error", Content: aiCompletionErrorMessage(err)})
+			return
+		}
+
+		h.storeChatExchange(ctx, userID, req.Message, content)
+		_ = writeAIStreamEvent(w, flusher, aiStreamEvent{Type: "done", Content: content})
+		return
+	}
 
 	content, err := h.complete(ctx, "chat", messages)
 	if err != nil {
@@ -346,17 +375,255 @@ func (h *AIHandler) complete(ctx context.Context, operation string, messages []C
 	return content, nil
 }
 
+func (h *AIHandler) completeStream(ctx context.Context, operation string, messages []ChatMessage, onDelta func(string) error) (_ string, err error) {
+	start := time.Now()
+	defer func() {
+		observability.ObserveAIUpstream(operation, observability.AIStatusFromError(err), time.Since(start))
+	}()
+
+	body, err := json.Marshal(map[string]any{
+		"model":    h.model,
+		"messages": messages,
+		"stream":   true,
+	})
+	if err != nil {
+		h.logger.Error().Err(err).Msg("marshal ai stream request")
+		return "", err
+	}
+
+	upstreamCtx, cancel := context.WithTimeout(ctx, aiUpstreamRequestTimeout)
+	defer cancel()
+
+	apiReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost,
+		h.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	apiReq.Header.Set("Content-Type", "application/json")
+	if h.apiKey != "" {
+		apiReq.Header.Set("Authorization", "Bearer "+h.apiKey)
+	}
+
+	client := &http.Client{
+		Timeout: aiUpstreamRequestTimeout,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   aiUpstreamDialTimeout,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   aiUpstreamDialTimeout,
+			ResponseHeaderTimeout: aiUpstreamHeaderTimeout,
+		},
+	}
+
+	resp, err := client.Do(apiReq)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("ai stream request")
+		return "", errAIUnavailable
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, aiUpstreamResponseLogSize))
+		h.logger.Error().
+			Int("status", resp.StatusCode).
+			Str("body", strings.TrimSpace(string(body))).
+			Msg("ai stream api error")
+		return "", errAIUpstream
+	}
+
+	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		rawResp, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			h.logger.Error().Err(readErr).Msg("read non-stream ai response")
+			return "", errAIUnavailable
+		}
+
+		content, parseErr := parseAICompletion(rawResp)
+		if parseErr != nil {
+			h.logger.Error().Err(parseErr).Str("body", truncateAIText(string(rawResp), aiUpstreamResponseLogSize)).Msg("decode non-stream ai response")
+			return "", errAIBadResponse
+		}
+		if onDelta != nil {
+			if writeErr := onDelta(content); writeErr != nil {
+				return "", writeErr
+			}
+		}
+		return content, nil
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	var content strings.Builder
+	dataLines := make([]string, 0, 4)
+
+	processEvent := func(lines []string) error {
+		if len(lines) == 0 {
+			return nil
+		}
+
+		delta, done, parseErr := parseAIStreamData(strings.Join(lines, "\n"))
+		if parseErr != nil {
+			h.logger.Error().Err(parseErr).Msg("decode ai stream event")
+			return errAIBadResponse
+		}
+		if done {
+			return nil
+		}
+		if delta == "" {
+			return nil
+		}
+
+		content.WriteString(delta)
+		if onDelta != nil {
+			if err := onDelta(delta); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	for {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			h.logger.Error().Err(readErr).Msg("read ai stream line")
+			return "", errAIUnavailable
+		}
+
+		trimmed := strings.TrimRight(line, "\r\n")
+		if trimmed == "" {
+			if err := processEvent(dataLines); err != nil {
+				return "", err
+			}
+			dataLines = dataLines[:0]
+		} else if strings.HasPrefix(trimmed, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(trimmed, "data:")))
+		}
+
+		if errors.Is(readErr, io.EOF) {
+			if err := processEvent(dataLines); err != nil {
+				return "", err
+			}
+			break
+		}
+	}
+
+	if strings.TrimSpace(content.String()) == "" {
+		h.logger.Error().Msg("ai stream content is empty")
+		return "", errAIBadResponse
+	}
+
+	return content.String(), nil
+}
+
 func writeAICompletionError(w http.ResponseWriter, err error) {
+	http.Error(w, aiCompletionErrorMessage(err), aiCompletionStatusCode(err))
+}
+
+func aiCompletionErrorMessage(err error) string {
 	switch {
 	case errors.Is(err, errAIUnavailable):
-		http.Error(w, "AI сервис временно недоступен. Попробуй позже.", http.StatusServiceUnavailable)
+		return "AI сервис временно недоступен. Попробуй позже."
 	case errors.Is(err, errAIUpstream):
-		http.Error(w, "AI сервис вернул ошибку. Попробуй позже.", http.StatusBadGateway)
+		return "AI сервис вернул ошибку. Попробуй позже."
 	case errors.Is(err, errAIBadResponse):
-		http.Error(w, "AI сервис не вернул корректный ответ. Попробуй позже.", http.StatusBadGateway)
+		return "AI сервис не вернул корректный ответ. Попробуй позже."
 	default:
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		return "internal error"
 	}
+}
+
+func aiCompletionStatusCode(err error) int {
+	switch {
+	case errors.Is(err, errAIUnavailable):
+		return http.StatusServiceUnavailable
+	case errors.Is(err, errAIUpstream), errors.Is(err, errAIBadResponse):
+		return http.StatusBadGateway
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func prepareAIStream(w http.ResponseWriter) (http.Flusher, bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return nil, false
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	return flusher, true
+}
+
+func writeAIStreamEvent(w io.Writer, flusher http.Flusher, event aiStreamEvent) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(append(payload, '\n')); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
+}
+
+func isAIStreamRequest(r *http.Request) bool {
+	return r.URL.Query().Get("stream") == "1"
+}
+
+func parseAICompletion(rawResp []byte) (string, error) {
+	var completion struct {
+		Choices []struct {
+			Message struct {
+				Content any `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(rawResp, &completion); err != nil {
+		return "", err
+	}
+	if len(completion.Choices) == 0 {
+		return "", errAIBadResponse
+	}
+
+	content := normalizeAIContent(completion.Choices[0].Message.Content)
+	if strings.TrimSpace(content) == "" {
+		return "", errAIBadResponse
+	}
+	return content, nil
+}
+
+func parseAIStreamData(data string) (delta string, done bool, err error) {
+	if strings.TrimSpace(data) == "" {
+		return "", false, nil
+	}
+	if strings.TrimSpace(data) == "[DONE]" {
+		return "", true, nil
+	}
+
+	var chunk struct {
+		Choices []struct {
+			Delta struct {
+				Content any `json:"content"`
+			} `json:"delta"`
+			Message struct {
+				Content any `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		return "", false, err
+	}
+	if len(chunk.Choices) == 0 {
+		return "", false, nil
+	}
+
+	delta = normalizeAIContent(chunk.Choices[0].Delta.Content)
+	if strings.TrimSpace(delta) != "" {
+		return delta, false, nil
+	}
+	return normalizeAIContent(chunk.Choices[0].Message.Content), false, nil
 }
 
 func normalizeAIContent(content any) string {

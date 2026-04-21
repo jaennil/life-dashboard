@@ -79,6 +79,32 @@ func TestFormatAIJournalEntryUntitled(t *testing.T) {
 	}
 }
 
+func TestParseAIStreamDataDelta(t *testing.T) {
+	delta, done, err := parseAIStreamData(`{"choices":[{"delta":{"content":"Привет"}}]}`)
+	if err != nil {
+		t.Fatalf("parseAIStreamData returned error: %v", err)
+	}
+	if done {
+		t.Fatalf("expected done=false")
+	}
+	if delta != "Привет" {
+		t.Fatalf("delta = %q, want %q", delta, "Привет")
+	}
+}
+
+func TestParseAIStreamDataDone(t *testing.T) {
+	delta, done, err := parseAIStreamData(`[DONE]`)
+	if err != nil {
+		t.Fatalf("parseAIStreamData returned error: %v", err)
+	}
+	if !done {
+		t.Fatalf("expected done=true")
+	}
+	if delta != "" {
+		t.Fatalf("delta = %q, want empty", delta)
+	}
+}
+
 func TestSelectAIContextScopePrefersWorkoutContextForEquipmentQuestions(t *testing.T) {
 	scope := selectAIContextScope("купил гантельные грифы и блины, какие блины докупить под мои рабочие веса?", nil)
 

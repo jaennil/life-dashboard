@@ -86,6 +86,39 @@ func (h *AIHandler) Checkup(w http.ResponseWriter, r *http.Request) {
 	systemPrompt := buildAICheckupPrompt(now, window, dataContext)
 	userPrompt := fmt.Sprintf("Сделай checkup %s.", window.UserLabel)
 
+	if isAIStreamRequest(r) {
+		flusher, ok := prepareAIStream(w)
+		if !ok {
+			http.Error(w, "stream unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		content, err := h.completeStream(r.Context(), "checkup", []ChatMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userPrompt},
+		}, func(delta string) error {
+			return writeAIStreamEvent(w, flusher, aiStreamEvent{Type: "delta", Content: delta})
+		})
+		if err != nil {
+			_ = writeAIStreamEvent(w, flusher, aiStreamEvent{Type: "error", Content: aiCompletionErrorMessage(err)})
+			return
+		}
+
+		if err := h.storeCheckupReport(r.Context(), userID, window, content); err != nil {
+			h.logger.Warn().Err(err).Msg("store ai checkup report")
+		}
+		h.storeChatExchange(r.Context(), userID, userPrompt, content)
+
+		_ = writeAIStreamEvent(w, flusher, aiStreamEvent{
+			Type:        "done",
+			Content:     content,
+			Period:      window.RequestedPeriod,
+			PeriodLabel: window.Title,
+			GeneratedAt: now.Format(time.RFC3339),
+		})
+		return
+	}
+
 	content, err := h.complete(r.Context(), "checkup", []ChatMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
