@@ -75,7 +75,7 @@ func (r aiToolRun) render() string {
 	return strings.TrimSpace(sb.String())
 }
 
-func (h *AIHandler) runAITools(ctx context.Context, userID string, executions []aiToolExecution) (aiToolRun, error) {
+func (h *AIHandler) runAITools(ctx context.Context, userID string, executions []aiToolExecution, progress func(aiProgressUpdate) error) (aiToolRun, error) {
 	run := aiToolRun{
 		Results:  make([]aiToolResult, 0, len(executions)),
 		Sections: make([]string, 0, len(executions)),
@@ -85,6 +85,19 @@ func (h *AIHandler) runAITools(ctx context.Context, userID string, executions []
 	for _, execution := range executions {
 		if execution.Run == nil && execution.Data == nil {
 			continue
+		}
+
+		if progress != nil {
+			label := aiToolProgressLabel(execution.Name)
+			if label == "" {
+				label = "данные"
+			}
+			_ = progress(aiProgressUpdate{
+				Stage:   "loading",
+				Message: "Загружаю " + label,
+				Tool:    execution.Name,
+				Section: execution.Section,
+			})
 		}
 
 		startedAt := time.Now()

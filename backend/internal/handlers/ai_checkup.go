@@ -77,21 +77,36 @@ func (h *AIHandler) Checkup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dataContext, err := h.buildCheckupContext(r.Context(), userID, window)
-	if err != nil {
-		h.logger.Error().Err(err).Msg("build ai checkup context")
-		dataContext = "Данные пользователя временно недоступны."
-	}
-
-	systemPrompt := buildAICheckupPrompt(now, window, dataContext)
-	userPrompt := fmt.Sprintf("Сделай checkup %s.", window.UserLabel)
-
 	if isAIStreamRequest(r) {
 		flusher, ok := prepareAIStream(w)
 		if !ok {
 			http.Error(w, "stream unsupported", http.StatusInternalServerError)
 			return
 		}
+
+		progress := func(update aiProgressUpdate) error {
+			return writeAIStreamEvent(w, flusher, aiStreamEvent{
+				Type:    "status",
+				Content: update.Message,
+				Stage:   update.Stage,
+				Tool:    string(update.Tool),
+				Section: update.Section,
+			})
+		}
+
+		_ = progress(aiProgressUpdate{Stage: "planning", Message: "Готовлю данные для checkup"})
+
+		dataContext, err := h.buildCheckupContextWithProgress(r.Context(), userID, window, progress)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("build ai checkup context")
+			dataContext = "Данные пользователя временно недоступны."
+			_ = progress(aiProgressUpdate{Stage: "loading", Message: "Часть данных недоступна, соберу checkup из доступных разделов"})
+		}
+
+		systemPrompt := buildAICheckupPrompt(now, window, dataContext)
+		userPrompt := fmt.Sprintf("Сделай checkup %s.", window.UserLabel)
+
+		_ = progress(aiProgressUpdate{Stage: "generating", Message: "Собираю итоговый отчёт"})
 
 		content, err := h.completeStream(r.Context(), "checkup", []ChatMessage{
 			{Role: "system", Content: systemPrompt},
@@ -118,6 +133,15 @@ func (h *AIHandler) Checkup(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	dataContext, err := h.buildCheckupContext(r.Context(), userID, window)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("build ai checkup context")
+		dataContext = "Данные пользователя временно недоступны."
+	}
+
+	systemPrompt := buildAICheckupPrompt(now, window, dataContext)
+	userPrompt := fmt.Sprintf("Сделай checkup %s.", window.UserLabel)
 
 	content, err := h.complete(r.Context(), "checkup", []ChatMessage{
 		{Role: "system", Content: systemPrompt},
@@ -336,6 +360,10 @@ func buildAICheckupPrompt(now time.Time, window checkupWindow, dataContext strin
 }
 
 func (h *AIHandler) buildCheckupContext(ctx context.Context, userID string, window checkupWindow) (string, error) {
+	return h.buildCheckupContextWithProgress(ctx, userID, window, nil)
+}
+
+func (h *AIHandler) buildCheckupContextWithProgress(ctx context.Context, userID string, window checkupWindow, progress func(aiProgressUpdate) error) (string, error) {
 	var sb strings.Builder
 	sb.WriteString("=== ПЕРИОД ===\n")
 	sb.WriteString(fmt.Sprintf("Начало: %s\n", formatAITimestampLocal(window.Start, "02.01.2006 15:04")))
@@ -344,7 +372,7 @@ func (h *AIHandler) buildCheckupContext(ctx context.Context, userID string, wind
 		sb.WriteString("Примечание: " + window.Note + "\n")
 	}
 
-	run, err := h.runAITools(ctx, userID, h.checkupToolExecutions(ctx, userID, window))
+	run, err := h.runAITools(ctx, userID, h.checkupToolExecutions(ctx, userID, window), progress)
 	if err != nil {
 		return "", err
 	}

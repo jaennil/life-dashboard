@@ -35,11 +35,14 @@ interface CheckupSendResult extends SendResult {
 }
 
 interface AIStreamEvent {
-  type: 'delta' | 'done' | 'error'
+  type: 'delta' | 'done' | 'error' | 'status'
   content?: string
   period?: CheckupPeriod
   period_label?: string
   generated_at?: string
+  stage?: 'planning' | 'loading' | 'generating'
+  tool?: string
+  section?: string
 }
 
 type CheckupPeriod = 'today' | 'yesterday' | 'week' | 'month' | 'since_last'
@@ -113,7 +116,12 @@ function sleep(ms: number) {
   return new Promise(resolve => window.setTimeout(resolve, ms))
 }
 
-async function requestChatStream(message: string, history: Message[], onDelta: (content: string) => void): Promise<SendResult> {
+interface AIStreamHandlers {
+  onDelta: (content: string) => void
+  onStatus?: (status: string) => void
+}
+
+async function requestChatStream(message: string, history: Message[], handlers: AIStreamHandlers): Promise<SendResult> {
   const payload = JSON.stringify({
     message,
     history: history
@@ -122,7 +130,7 @@ async function requestChatStream(message: string, history: Message[], onDelta: (
       .map(m => ({ role: m.role, content: m.content })),
   })
 
-  return requestAIStream('/api/v1/ai/chat', payload, onDelta)
+  return requestAIStream('/api/v1/ai/chat', payload, handlers)
 }
 
 async function requestCheckup(period: CheckupPeriod): Promise<CheckupSendResult> {
@@ -186,8 +194,8 @@ async function requestCheckup(period: CheckupPeriod): Promise<CheckupSendResult>
   }
 }
 
-async function requestCheckupStream(period: CheckupPeriod, onDelta: (content: string) => void): Promise<CheckupSendResult> {
-  return requestAIStream('/api/v1/ai/checkup', JSON.stringify({ period }), onDelta)
+async function requestCheckupStream(period: CheckupPeriod, handlers: AIStreamHandlers): Promise<CheckupSendResult> {
+  return requestAIStream('/api/v1/ai/checkup', JSON.stringify({ period }), handlers)
 }
 
 async function requestAI(url: string, payload: string): Promise<SendResult> {
@@ -249,7 +257,7 @@ async function requestAI(url: string, payload: string): Promise<SendResult> {
   }
 }
 
-async function requestAIStream(url: string, payload: string, onDelta: (content: string) => void): Promise<CheckupSendResult> {
+async function requestAIStream(url: string, payload: string, handlers: AIStreamHandlers): Promise<CheckupSendResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch(`${url}?stream=1`, {
@@ -299,14 +307,19 @@ async function requestAIStream(url: string, payload: string, onDelta: (content: 
 
         if (event.type === 'delta' && event.content) {
           content += event.content
-          onDelta(content)
+          handlers.onDelta(content)
+          return
+        }
+
+        if (event.type === 'status' && event.content) {
+          handlers.onStatus?.(event.content)
           return
         }
 
         if (event.type === 'done') {
           if (event.content && event.content !== content) {
             content = event.content
-            onDelta(content)
+            handlers.onDelta(content)
           }
           finalEventType = 'done'
           finalEventContent = event.content || content
@@ -384,6 +397,7 @@ export function AiChat() {
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyError, setHistoryError] = useState('')
   const [latestCheckup, setLatestCheckup] = useState<AILatestCheckup | null>(null)
+  const [streamStatuses, setStreamStatuses] = useState<string[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -403,6 +417,15 @@ export function AiChat() {
         loading,
       }
       return next
+    })
+  }
+
+  function pushStreamStatus(status: string) {
+    const normalized = status.trim()
+    if (!normalized) return
+    setStreamStatuses(prev => {
+      if (prev[prev.length - 1] === normalized) return prev
+      return [...prev, normalized].slice(-6)
     })
   }
 
@@ -441,15 +464,20 @@ export function AiChat() {
     const contextMessages = messages
     setInput('')
     setLoading(true)
+    setStreamStatuses([])
 
     const userMsg: Message = { role: 'user', content: text }
     const assistantMsg: Message = { role: 'assistant', content: '', loading: true }
     setMessages(prev => [...prev, userMsg, assistantMsg])
 
     try {
-      const result = await requestChatStream(text, contextMessages, content => updatePendingAssistant(content, true))
+      const result = await requestChatStream(text, contextMessages, {
+        onDelta: content => updatePendingAssistant(content, true),
+        onStatus: pushStreamStatus,
+      })
       updatePendingAssistant(result.content, false)
     } finally {
+      setStreamStatuses([])
       setLoading(false)
     }
   }
@@ -457,13 +485,17 @@ export function AiChat() {
   async function sendCheckup(action: CheckupAction) {
     if (loading || historyLoading) return
     setLoading(true)
+    setStreamStatuses([])
 
     const userMsg: Message = { role: 'user', content: action.userMessage }
     const assistantMsg: Message = { role: 'assistant', content: '', loading: true }
     setMessages(prev => [...prev, userMsg, assistantMsg])
 
     try {
-      const result = await requestCheckupStream(action.period, content => updatePendingAssistant(content, true))
+      const result = await requestCheckupStream(action.period, {
+        onDelta: content => updatePendingAssistant(content, true),
+        onStatus: pushStreamStatus,
+      })
       updatePendingAssistant(result.content, false)
       if (!result.isError) {
         setLatestCheckup({
@@ -474,6 +506,7 @@ export function AiChat() {
         })
       }
     } finally {
+      setStreamStatuses([])
       setLoading(false)
     }
   }
@@ -590,36 +623,58 @@ export function AiChat() {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-            {messages.map((msg, i) => (
-              <div key={msg.id ?? `${msg.role}-${i}`} className={cn('flex gap-2 sm:gap-3', msg.role === 'user' && 'flex-row-reverse')}>
-              <div className={cn(
-                'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full sm:h-8 sm:w-8',
-                msg.role === 'user' ? 'bg-primary' : 'bg-muted'
-              )}>
-                {msg.role === 'user'
-                  ? <User className="w-4 h-4 text-primary-foreground" />
-                  : <Bot className="w-4 h-4 text-muted-foreground" />}
-              </div>
-              <div className={cn(
-                'rounded-[20px] px-3.5 py-2.5 text-[13px] leading-5 shadow-sm sm:rounded-[22px] sm:px-4 sm:py-3 sm:text-sm sm:leading-6',
-                msg.role === 'user'
-                  ? 'max-w-[85%] rounded-tr-sm bg-primary text-primary-foreground sm:max-w-[78%]'
-                  : 'max-w-[92%] rounded-tl-sm bg-muted text-foreground sm:max-w-[84%] lg:max-w-[78%]'
-              )}>
-                {msg.loading && !msg.content
-                  ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : msg.role === 'assistant'
-                    ? (
-                        <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-li:my-0.5 prose-ul:my-2 prose-ol:my-2">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
-                            {msg.content}
-                          </ReactMarkdown>
+            {messages.map((msg, i) => {
+              const showLiveStatuses = msg.loading && i === messages.length - 1 && streamStatuses.length > 0
+
+              return (
+                <div key={msg.id ?? `${msg.role}-${i}`} className={cn('flex gap-2 sm:gap-3', msg.role === 'user' && 'flex-row-reverse')}>
+                  <div className={cn(
+                    'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full sm:h-8 sm:w-8',
+                    msg.role === 'user' ? 'bg-primary' : 'bg-muted'
+                  )}>
+                    {msg.role === 'user'
+                      ? <User className="w-4 h-4 text-primary-foreground" />
+                      : <Bot className="w-4 h-4 text-muted-foreground" />}
+                  </div>
+                  <div className={cn(
+                    'rounded-[20px] px-3.5 py-2.5 text-[13px] leading-5 shadow-sm sm:rounded-[22px] sm:px-4 sm:py-3 sm:text-sm sm:leading-6',
+                    msg.role === 'user'
+                      ? 'max-w-[85%] rounded-tr-sm bg-primary text-primary-foreground sm:max-w-[78%]'
+                      : 'max-w-[92%] rounded-tl-sm bg-muted text-foreground sm:max-w-[84%] lg:max-w-[78%]'
+                  )}>
+                    {showLiveStatuses ? (
+                      <div className="mb-3 rounded-2xl border border-white/10 bg-background/35 px-3 py-2 text-xs text-muted-foreground">
+                        <div className="mb-2 flex items-center gap-2 font-medium text-foreground/90">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <span>{streamStatuses[streamStatuses.length - 1]}</span>
                         </div>
-                      )
-                    : <span className="whitespace-pre-wrap">{msg.content}</span>}
-              </div>
-              </div>
-            ))}
+                        {streamStatuses.length > 1 ? (
+                          <div className="space-y-1">
+                            {streamStatuses.slice(0, -1).map(status => (
+                              <div key={status} className="flex items-center gap-2">
+                                <span className="text-emerald-400">✓</span>
+                                <span>{status}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {msg.loading && !msg.content && !showLiveStatuses
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : msg.role === 'assistant'
+                        ? (
+                            <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-li:my-0.5 prose-ul:my-2 prose-ol:my-2">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+                                {msg.content}
+                              </ReactMarkdown>
+                            </div>
+                          )
+                        : <span className="whitespace-pre-wrap">{msg.content}</span>}
+                  </div>
+                </div>
+              )
+            })}
             <div ref={bottomRef} />
           </div>
         )}

@@ -90,6 +90,16 @@ type aiStreamEvent struct {
 	Period      string `json:"period,omitempty"`
 	PeriodLabel string `json:"period_label,omitempty"`
 	GeneratedAt string `json:"generated_at,omitempty"`
+	Stage       string `json:"stage,omitempty"`
+	Tool        string `json:"tool,omitempty"`
+	Section     string `json:"section,omitempty"`
+}
+
+type aiProgressUpdate struct {
+	Stage   string
+	Message string
+	Tool    aiToolName
+	Section string
 }
 
 const (
@@ -125,25 +135,43 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 	history := h.buildConversationHistory(ctx, userID, req.History)
 
-	dataContext, sectionNames, err := h.buildChatContext(ctx, userID, req.Message, history)
-	if err != nil {
-		h.logger.Error().Err(err).Msg("build context")
-		dataContext = "Данные пользователя временно недоступны."
-		sectionNames = defaultAIContextScope().sectionNames()
-	}
-
-	systemPrompt := buildAISystemPromptWithSections(time.Now(), dataContext, sectionNames)
-
-	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
-	messages = append(messages, history...)
-	messages = append(messages, ChatMessage{Role: "user", Content: req.Message})
-
 	if isAIStreamRequest(r) {
 		flusher, ok := prepareAIStream(w)
 		if !ok {
 			http.Error(w, "stream unsupported", http.StatusInternalServerError)
 			return
 		}
+
+		progress := func(update aiProgressUpdate) error {
+			return writeAIStreamEvent(w, flusher, aiStreamEvent{
+				Type:    "status",
+				Content: update.Message,
+				Stage:   update.Stage,
+				Tool:    string(update.Tool),
+				Section: update.Section,
+			})
+		}
+
+		if err := progress(aiProgressUpdate{Stage: "planning", Message: "Понимаю вопрос и определяю, какие данные нужны"}); err != nil {
+			h.logger.Warn().Err(err).Msg("write ai planning status")
+			return
+		}
+
+		dataContext, sectionNames, err := h.buildChatContextWithProgress(ctx, userID, req.Message, history, progress)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("build context")
+			dataContext = "Данные пользователя временно недоступны."
+			sectionNames = defaultAIContextScope().sectionNames()
+			_ = progress(aiProgressUpdate{Stage: "loading", Message: "Часть данных недоступна, отвечу по тому, что удалось загрузить"})
+		}
+
+		systemPrompt := buildAISystemPromptWithSections(time.Now(), dataContext, sectionNames)
+
+		messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
+		messages = append(messages, history...)
+		messages = append(messages, ChatMessage{Role: "user", Content: req.Message})
+
+		_ = progress(aiProgressUpdate{Stage: "generating", Message: "Формирую ответ"})
 
 		content, err := h.completeStream(ctx, "chat", messages, func(delta string) error {
 			return writeAIStreamEvent(w, flusher, aiStreamEvent{Type: "delta", Content: delta})
@@ -157,6 +185,19 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		_ = writeAIStreamEvent(w, flusher, aiStreamEvent{Type: "done", Content: content})
 		return
 	}
+
+	dataContext, sectionNames, err := h.buildChatContext(ctx, userID, req.Message, history)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("build context")
+		dataContext = "Данные пользователя временно недоступны."
+		sectionNames = defaultAIContextScope().sectionNames()
+	}
+
+	systemPrompt := buildAISystemPromptWithSections(time.Now(), dataContext, sectionNames)
+
+	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
+	messages = append(messages, history...)
+	messages = append(messages, ChatMessage{Role: "user", Content: req.Message})
 
 	content, err := h.complete(ctx, "chat", messages)
 	if err != nil {
@@ -217,6 +258,54 @@ func sanitizeChatHistory(history []ChatMessage, limit int) []ChatMessage {
 		}
 	}
 	return messages
+}
+
+func formatAIProgressToolList(calls []aiToolCall) string {
+	if len(calls) == 0 {
+		return "базовый набор данных"
+	}
+
+	seen := make(map[string]bool, len(calls))
+	names := make([]string, 0, len(calls))
+	for _, call := range calls {
+		label := aiToolProgressLabel(call.Name)
+		if label == "" || seen[label] {
+			continue
+		}
+		seen[label] = true
+		names = append(names, label)
+	}
+	if len(names) == 0 {
+		return "нужные разделы"
+	}
+	return strings.Join(names, ", ")
+}
+
+func aiToolProgressLabel(name aiToolName) string {
+	switch name {
+	case aiToolFinanceOverview, aiToolRecentTransactions:
+		return "финансы"
+	case aiToolProductivityOverview:
+		return "задачи"
+	case aiToolActivityOverview, aiToolRecentActivities:
+		return "активности"
+	case aiToolHealthOverview:
+		return "здоровье"
+	case aiToolWorkoutOverview, aiToolRecentWorkouts, aiToolRoutineOverview:
+		return "тренировки"
+	case aiToolHabitOverview:
+		return "привычки"
+	case aiToolNutritionOverview:
+		return "питание"
+	case aiToolJournalOverview:
+		return "заметки"
+	case aiToolCalendarOverview:
+		return "календарь"
+	case aiToolWeatherOverview:
+		return "погоду"
+	default:
+		return ""
+	}
 }
 
 func normalizeChatMessage(msg ChatMessage) *ChatMessage {

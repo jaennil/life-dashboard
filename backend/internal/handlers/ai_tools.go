@@ -45,7 +45,11 @@ type aiToolPlan struct {
 }
 
 func (h *AIHandler) buildChatContext(ctx context.Context, userID, message string, history []ChatMessage) (string, []string, error) {
-	toolCalls, err := h.planToolCalls(ctx, message, history)
+	return h.buildChatContextWithProgress(ctx, userID, message, history, nil)
+}
+
+func (h *AIHandler) buildChatContextWithProgress(ctx context.Context, userID, message string, history []ChatMessage, progress func(aiProgressUpdate) error) (string, []string, error) {
+	toolCalls, err := h.planToolCalls(ctx, message, history, progress)
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("ai planner failed, using fallback context")
 		scope := selectAIContextScope(message, history)
@@ -53,7 +57,7 @@ func (h *AIHandler) buildChatContext(ctx context.Context, userID, message string
 		return contextText, scope.sectionNames(), buildErr
 	}
 
-	run, err := h.runAITools(ctx, userID, h.chatToolExecutions(ctx, userID, toolCalls))
+	run, err := h.runAITools(ctx, userID, h.chatToolExecutions(ctx, userID, toolCalls), progress)
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("ai tool execution failed, using fallback context")
 		scope := selectAIContextScope(message, history)
@@ -76,7 +80,7 @@ func (h *AIHandler) buildChatContext(ctx context.Context, userID, message string
 	return contextText, run.Sections, nil
 }
 
-func (h *AIHandler) planToolCalls(ctx context.Context, message string, history []ChatMessage) ([]aiToolCall, error) {
+func (h *AIHandler) planToolCalls(ctx context.Context, message string, history []ChatMessage, progress func(aiProgressUpdate) error) ([]aiToolCall, error) {
 	recentHistory := recentHistoryText(history, aiPlannerHistoryLimit)
 	plannerMessages := []ChatMessage{
 		{
@@ -91,6 +95,13 @@ func (h *AIHandler) planToolCalls(ctx context.Context, message string, history [
 		},
 	}
 
+	if progress != nil {
+		_ = progress(aiProgressUpdate{
+			Stage:   "planning",
+			Message: "Определяю, какие разделы данных нужны для ответа",
+		})
+	}
+
 	rawPlan, err := h.complete(ctx, "tool_planner", plannerMessages)
 	if err != nil {
 		return nil, err
@@ -101,7 +112,13 @@ func (h *AIHandler) planToolCalls(ctx context.Context, message string, history [
 		return nil, err
 	}
 	if len(toolCalls) == 0 {
-		return fallbackToolPlan(message, history), nil
+		toolCalls = fallbackToolPlan(message, history)
+	}
+	if progress != nil {
+		_ = progress(aiProgressUpdate{
+			Stage:   "planning",
+			Message: "Загружу: " + formatAIProgressToolList(toolCalls),
+		})
 	}
 	return toolCalls, nil
 }
