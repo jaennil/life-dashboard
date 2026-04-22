@@ -416,7 +416,12 @@ export const api = {
     }).then(async r => {
       if (!r.ok) throw new Error(await r.text())
     }),
-  getSpendingByCategory: (from?: string) => get<CategoryStat[]>('/finance/categories' + (from ? '?from=' + from : '')),
+  getSpendingByCategory: (from?: string, to?: string) => {
+    const p = new URLSearchParams()
+    if (from) p.set('from', from)
+    if (to) p.set('to', to)
+    return get<CategoryStat[]>('/finance/categories?' + p.toString())
+  },
   getDailyTotals: (from?: string, to?: string) => {
     const p = new URLSearchParams()
     if (from) p.set('from', from)

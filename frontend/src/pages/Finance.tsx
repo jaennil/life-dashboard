@@ -83,6 +83,12 @@ function fmt(amount: number, currency = 'RUB') {
   }).format(amount)
 }
 
+function fmtSigned(amount: number, currency = 'RUB') {
+  if (amount === 0) return fmt(0, currency)
+  const abs = fmt(Math.abs(amount), currency)
+  return amount > 0 ? `+${abs}` : `−${abs}`
+}
+
 function fmtShort(value: number) {
   if (value >= 1000000) return `${(value / 1000000).toFixed(1)}М`
   if (value >= 1000) return `${(value / 1000).toFixed(0)}к`
@@ -117,6 +123,32 @@ function formatRangeLabel(from: string, to?: string) {
 function formatPercent(part: number, total: number) {
   if (total <= 0) return '0%'
   return `${Math.round((part / total) * 100)}%`
+}
+
+function formatRatioPercent(ratio: number | null) {
+  if (ratio == null || !Number.isFinite(ratio)) return '—'
+  return `${Math.round(ratio * 100)}%`
+}
+
+function parseDateOnly(value: string) {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, (month || 1) - 1, day || 1)
+}
+
+function daysInclusive(from: string, to: string) {
+  const start = parseDateOnly(from)
+  const end = parseDateOnly(to)
+  const diff = end.getTime() - start.getTime()
+  return Math.max(1, Math.floor(diff / (24 * 60 * 60 * 1000)) + 1)
+}
+
+function formatRunway(days: number | null) {
+  if (days == null) return '—'
+  if (!Number.isFinite(days)) return '∞'
+  if (days <= 0) return '0 дн'
+  if (days >= 180) return `${Math.round(days / 30)} мес`
+  if (days >= 45) return `${(days / 30).toFixed(1)} мес`
+  return `${Math.round(days)} дн`
 }
 
 function formatAccountCount(count: number) {
@@ -563,12 +595,12 @@ export function Finance() {
     setLoading(true)
     try {
       const [m, a, c, d, t, cl] = await Promise.all([
-      api.getMonthlyStats(),
-      api.getAccounts(),
-      api.getSpendingByCategory(from),
-      api.getDailyTotals(from, to),
-      api.getTopExpenses(from, to),
-      api.getCategoryList(),
+        api.getMonthlyStats(),
+        api.getAccounts(),
+        api.getSpendingByCategory(from, to),
+        api.getDailyTotals(from, to),
+        api.getTopExpenses(from, to),
+        api.getCategoryList(),
       ])
 
       setMonthly(m); setAccounts(a); setCategories(c)
@@ -631,22 +663,33 @@ export function Finance() {
   const excludedBalance = excludedAccounts
     .filter(a => a.currency === 'RUB')
     .reduce((sum, a) => sum + a.balance, 0)
-  const currentNet = currentMonth ? currentMonth.income - currentMonth.spending : 0
   const hasCustomRange = Boolean(customFrom || customTo)
+  const effectiveTo = to || new Date().toISOString().split('T')[0]
   const rangeLabel = formatRangeLabel(from, to)
   const activePeriodLabel = hasCustomRange
     ? 'Произвольный диапазон'
     : PERIODS.find(item => item.days === period)?.label ?? 'Месяц'
   const totalCategorySpend = categories.reduce((sum, category) => sum + category.amount, 0)
   const topCategory = categories[0]
+  const topThreeCategories = categories.slice(0, 3)
   const totalDailySpending = daily.reduce((sum, day) => sum + day.spending, 0)
-  const avgDailySpending = daily.length > 0 ? totalDailySpending / daily.length : 0
+  const totalDailyIncome = daily.reduce((sum, day) => sum + day.income, 0)
+  const rangeDays = daysInclusive(from, effectiveTo)
+  const avgDailySpending = rangeDays > 0 ? totalDailySpending / rangeDays : 0
+  const periodNet = totalDailyIncome - totalDailySpending
+  const savingsRate = totalDailyIncome > 0 ? periodNet / totalDailyIncome : null
+  const monthlyBurnProjection = avgDailySpending * 30
+  const runwayDays = avgDailySpending > 0 ? totalBalance / avgDailySpending : Number.POSITIVE_INFINITY
+  const topThreeShare = totalCategorySpend > 0
+    ? topThreeCategories.reduce((sum, category) => sum + category.amount, 0) / totalCategorySpend
+    : null
   const peakExpenseDay = daily.reduce<DailyTotal | null>((peak, day) => {
     if (!peak || day.spending > peak.spending) return day
     return peak
   }, null)
   const topPayee = topExpenses[0]
   const activeTransactionFilters = [filter, search, catFilter, sort].filter(Boolean).length
+  const concentrationLeaders = topThreeCategories.map(category => category.category).join(' • ')
 
   useEffect(() => {
     if (hasCustomRange) setShowRangePanel(true)
@@ -671,11 +714,12 @@ export function Finance() {
         <PageHeader
           eyebrow="Finance"
           title="Финансы"
-          description="Баланс, cashflow и структура расходов в одном рабочем срезе. Детальные диапазоны и календарные фильтры раскрываются только когда нужны."
+          description="Сначала ключевые сигналы: баланс, net cashflow, savings rate, burn rate и runway. Ниже — структура расходов и детализация по транзакциям."
           badges={[
             { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
             { label: zenmoneyIntegration?.enabled ? 'ZenMoney подключён' : 'ZenMoney не подключён', tone: zenmoneyIntegration?.enabled ? 'success' : 'warning' },
             { label: formatAccountCount(includedAccounts.length), tone: 'muted' },
+            ...(totalDailyIncome > 0 ? [{ label: `Savings rate · ${formatRatioPercent(savingsRate)}`, tone: savingsRate != null && savingsRate >= 0.2 ? 'success' as const : savingsRate != null && savingsRate >= 0 ? 'warning' as const : 'danger' as const }] : []),
             ...(topCategory ? [{ label: `Топ: ${topCategory.category} · ${formatPercent(topCategory.amount, totalCategorySpend)}`, tone: 'muted' as const }] : []),
           ]}
           actions={(
@@ -771,47 +815,92 @@ export function Finance() {
         </ExpandablePanel>
       </div>
 
+      <div className="rounded-2xl border bg-card/70 px-5 py-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wider text-foreground">Golden Metrics</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Верхняя линия теперь считает не только баланс, а реальное состояние периода: сколько ты сохранил, как быстро сжигаешь деньги и на сколько хватит ликвидного остатка.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              Период: {activePeriodLabel}
+            </span>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              Диапазон: {rangeLabel}
+            </span>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              Дней в окне: {rangeDays}
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <FinanceSummaryCard
-          title="Баланс"
+          title="Ликвидный баланс"
           icon={Wallet}
           iconClassName="bg-blue-500"
           loading={loading}
           value={fmt(totalBalance)}
-          caption={`${formatAccountCount(includedAccounts.length)} в балансе`}
-          hint={currentNet >= 0 ? `Результат месяца: +${fmt(currentNet)}` : `Результат месяца: ${fmt(currentNet)}`}
+          caption={`${formatAccountCount(includedAccounts.length)} участвуют в общем балансе`}
+          hint={excludedAccounts.length > 0 ? `${fmt(excludedBalance)} ещё лежит вне общего баланса` : 'Счета вне баланса сейчас не влияют на цифру сверху'}
         />
 
         <FinanceSummaryCard
-          title="Вне баланса"
-          icon={EyeOff}
-          iconClassName="bg-amber-500"
-          panelClassName="border-amber-500/20 bg-amber-500/5"
+          title="Net cashflow"
+          icon={periodNet >= 0 ? TrendingUp : TrendingDown}
+          iconClassName={periodNet >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}
           loading={loading}
-          value={fmt(excludedBalance)}
-          caption={`${formatAccountCount(excludedAccounts.length)} исключено из общего баланса`}
-          hint="Не участвуют в общей карточке баланса"
+          value={fmtSigned(periodNet)}
+          valueClassName={periodNet >= 0 ? 'text-emerald-300' : 'text-rose-300'}
+          caption={`${activePeriodLabel} · ${rangeLabel}`}
+          hint={`Доходы ${fmt(totalDailyIncome)} • расходы ${fmt(totalDailySpending)}`}
         />
 
         <FinanceSummaryCard
-          title="Расходы"
+          title="Savings rate"
+          icon={PiggyBank}
+          iconClassName={savingsRate != null && savingsRate >= 0.2 ? 'bg-emerald-500' : savingsRate != null && savingsRate >= 0 ? 'bg-amber-500' : 'bg-rose-500'}
+          loading={loading}
+          value={formatRatioPercent(savingsRate)}
+          valueClassName={savingsRate != null && savingsRate >= 0.2 ? 'text-emerald-300' : savingsRate != null && savingsRate >= 0 ? 'text-amber-200' : 'text-rose-300'}
+          caption="доля дохода, которую ты сохранил"
+          hint={totalDailyIncome > 0 ? `Если опускаться ниже 0%, ты уже проедаешь доход` : 'В выбранном диапазоне нет доходов, savings rate не считается'}
+        />
+
+        <FinanceSummaryCard
+          title="Burn rate"
           icon={TrendingDown}
-          iconClassName="bg-rose-500"
+          iconClassName="bg-orange-500"
           loading={loading}
-          value={currentMonth ? fmt(currentMonth.spending) : '—'}
-          caption="текущий месяц"
-          hint={peakExpenseDay ? `Пиковый день: ${fmtDate(peakExpenseDay.date)} · ${fmt(peakExpenseDay.spending)}` : 'Пиковый день появится после загрузки данных'}
+          value={fmt(avgDailySpending)}
+          caption="средний расход в день"
+          hint={`За ${rangeDays} дн. это даёт темп ${fmt(monthlyBurnProjection)} / 30 дн.`}
         />
 
         <FinanceSummaryCard
-          title="Доходы"
-          icon={TrendingUp}
-          iconClassName="bg-emerald-500"
+          title="Runway"
+          icon={Landmark}
+          iconClassName={Number.isFinite(runwayDays) && runwayDays >= 90 ? 'bg-violet-500' : Number.isFinite(runwayDays) && runwayDays >= 30 ? 'bg-amber-500' : 'bg-rose-500'}
           loading={loading}
-          value={currentMonth ? fmt(currentMonth.income) : '—'}
-          caption="текущий месяц"
-          hint={avgDailySpending > 0 ? `Средний расход/день: ${fmt(avgDailySpending)}` : 'Средний расход появится после загрузки данных'}
+          value={formatRunway(runwayDays)}
+          valueClassName={Number.isFinite(runwayDays) && runwayDays >= 90 ? 'text-violet-200' : Number.isFinite(runwayDays) && runwayDays >= 30 ? 'text-amber-200' : 'text-rose-300'}
+          caption="на сколько хватит ликвидного баланса"
+          hint={avgDailySpending > 0 ? 'Расчёт по текущему burn rate, без новых доходов' : 'Расходов в диапазоне нет, runway не ограничен'}
+        />
+
+        <FinanceSummaryCard
+          title="Концентрация расходов"
+          icon={EyeOff}
+          iconClassName={topThreeShare != null && topThreeShare > 0.7 ? 'bg-rose-500' : topThreeShare != null && topThreeShare > 0.55 ? 'bg-amber-500' : 'bg-cyan-500'}
+          loading={loading}
+          value={formatRatioPercent(topThreeShare)}
+          valueClassName={topThreeShare != null && topThreeShare > 0.7 ? 'text-rose-300' : topThreeShare != null && topThreeShare > 0.55 ? 'text-amber-200' : 'text-cyan-200'}
+          caption="топ-3 категории в выбранном периоде"
+          hint={topThreeCategories.length > 0 ? `${concentrationLeaders} формируют основную массу трат` : 'Появится, когда в диапазоне будут категории расходов'}
         />
       </div>
 
@@ -1200,6 +1289,7 @@ function FinanceSummaryCard({
   value,
   caption,
   hint,
+  valueClassName,
   icon: Icon,
   iconClassName,
   loading,
@@ -1209,6 +1299,7 @@ function FinanceSummaryCard({
   value: string
   caption: string
   hint?: string
+  valueClassName?: string
   icon: LucideIcon
   iconClassName: string
   loading: boolean
@@ -1222,7 +1313,7 @@ function FinanceSummaryCard({
           {loading ? (
             <div className="h-8 w-28 animate-pulse rounded bg-muted" />
           ) : (
-            <p className="text-3xl font-semibold tracking-tight text-foreground">{value}</p>
+            <p className={cn('text-3xl font-semibold tracking-tight text-foreground', valueClassName)}>{value}</p>
           )}
         </div>
         <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-sm', iconClassName)}>

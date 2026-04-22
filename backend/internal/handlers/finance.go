@@ -139,12 +139,16 @@ func (h *FinanceHandler) GetSpendingByCategory(w http.ResponseWriter, r *http.Re
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 	q := r.URL.Query()
 	from := q.Get("from")
+	to := q.Get("to")
 	var monthStart time.Time
 	if from != "" {
 		monthStart, _ = time.Parse("2006-01-02", from)
 	}
 	if monthStart.IsZero() {
 		monthStart = time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.Local)
+	}
+	if to == "" {
+		to = time.Now().Format("2006-01-02")
 	}
 
 	rows, err := h.db.Query(ctx, `
@@ -155,12 +159,13 @@ func (h *FinanceHandler) GetSpendingByCategory(w http.ResponseWriter, r *http.Re
 		  AND t.is_transfer = false
 		  AND t.currency = 'RUB'
 		  AND t.occurred_at >= $1
-		  AND t.user_id = $2
+		  AND t.occurred_at < ($2::date + INTERVAL '1 day')
+		  AND t.user_id = $3
 		  AND COALESCE(a.in_balance, TRUE) = TRUE
 		GROUP BY category
 		ORDER BY total DESC
 		LIMIT 15
-	`, monthStart, userID)
+	`, monthStart, to, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query categories")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -230,7 +235,7 @@ func (h *FinanceHandler) GetTransactions(w http.ResponseWriter, r *http.Request)
 		argN++
 	}
 	if to != "" {
-		conditions += fmt.Sprintf(" AND t.occurred_at <= $%d", argN)
+		conditions += fmt.Sprintf(" AND t.occurred_at < ($%d::date + INTERVAL '1 day')", argN)
 		args = append(args, to)
 		argN++
 	}
@@ -301,7 +306,7 @@ func (h *FinanceHandler) GetDailyTotals(w http.ResponseWriter, r *http.Request) 
 		WHERE t.is_transfer = false
 			AND t.currency = 'RUB'
 			AND t.occurred_at >= $1
-			AND t.occurred_at <= $2
+			AND t.occurred_at < ($2::date + INTERVAL '1 day')
 			AND t.user_id = $3
 			AND COALESCE(a.in_balance, TRUE) = TRUE
 		GROUP BY t.occurred_at::date
@@ -347,7 +352,7 @@ func (h *FinanceHandler) GetTopExpenses(w http.ResponseWriter, r *http.Request) 
 			AND t.is_transfer = false
 			AND t.currency = 'RUB'
 			AND t.occurred_at >= $1
-			AND t.occurred_at <= $2
+			AND t.occurred_at < ($2::date + INTERVAL '1 day')
 			AND t.user_id = $3
 			AND COALESCE(a.in_balance, TRUE) = TRUE
 		GROUP BY COALESCE(NULLIF(t.payee,''), NULLIF(t.comment,''), 'Без описания')
