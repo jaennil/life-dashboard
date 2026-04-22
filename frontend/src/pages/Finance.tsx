@@ -1,12 +1,15 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   BadgeRussianRuble,
+  CalendarClock,
   CreditCard,
   EyeOff,
   HandCoins,
   Landmark,
   PiggyBank,
   Search,
+  ShieldAlert,
+  ShieldCheck,
   TrendingDown,
   TrendingUp,
   Wallet,
@@ -22,7 +25,7 @@ import { cn, syncCaptionForSources } from '@/lib/utils'
 import {
   api,
   type MonthStat, type Account, type FinanceTransaction,
-  type CategoryStat, type DailyTotal, type TopExpense, type Integration,
+  type CategoryStat, type DailyTotal, type TopExpense, type Integration, type FinanceObligationsSummary,
 } from '@/lib/api'
 
 const CATEGORY_COLORS = [
@@ -149,6 +152,14 @@ function formatRunway(days: number | null) {
   if (days >= 180) return `${Math.round(days / 30)} мес`
   if (days >= 45) return `${(days / 30).toFixed(1)} мес`
   return `${Math.round(days)} дн`
+}
+
+function formatCoverageMultiple(ratio: number | null) {
+  if (ratio == null) return '∞'
+  if (!Number.isFinite(ratio)) return '∞'
+  if (ratio < 0) return '0x'
+  if (ratio >= 10) return `${ratio.toFixed(0)}x`
+  return `${ratio.toFixed(1)}x`
 }
 
 function formatAccountCount(count: number) {
@@ -571,6 +582,7 @@ export function Finance() {
   const [categories, setCategories] = useState<CategoryStat[]>([])
   const [daily, setDaily] = useState<DailyTotal[]>([])
   const [topExpenses, setTopExpenses] = useState<TopExpense[]>([])
+  const [obligations, setObligations] = useState<FinanceObligationsSummary | null>(null)
   const [categoryList, setCategoryList] = useState<string[]>([])
   const [txs, setTxs] = useState<FinanceTransaction[]>([])
   const [filter, setFilter] = useState<FilterType>('')
@@ -594,17 +606,18 @@ export function Finance() {
   const loadPageData = useCallback(async () => {
     setLoading(true)
     try {
-      const [m, a, c, d, t, cl] = await Promise.all([
+      const [m, a, c, d, t, o, cl] = await Promise.all([
         api.getMonthlyStats(),
         api.getAccounts(),
         api.getSpendingByCategory(from, to),
         api.getDailyTotals(from, to),
         api.getTopExpenses(from, to),
+        api.getFinanceObligations(30),
         api.getCategoryList(),
       ])
 
       setMonthly(m); setAccounts(a); setCategories(c)
-      setDaily(d); setTopExpenses(t); setCategoryList(cl)
+      setDaily(d); setTopExpenses(t); setObligations(o); setCategoryList(cl)
     } catch (error) {
       console.error(error)
     } finally {
@@ -690,6 +703,17 @@ export function Finance() {
   const topPayee = topExpenses[0]
   const activeTransactionFilters = [filter, search, catFilter, sort].filter(Boolean).length
   const concentrationLeaders = topThreeCategories.map(category => category.category).join(' • ')
+  const obligationsWindowDays = obligations?.window_days ?? 30
+  const obligationItems = obligations?.items ?? []
+  const upcomingObligationsTotal = obligations?.upcoming_total ?? 0
+  const nextObligation = obligationItems[0]
+  const obligationCoverageRatio = upcomingObligationsTotal > 0 ? totalBalance / upcomingObligationsTotal : null
+  const obligationCoverageGap = totalBalance - upcomingObligationsTotal
+  const coverageTone = obligationCoverageRatio == null || !Number.isFinite(obligationCoverageRatio) || obligationCoverageRatio >= 1.5
+    ? 'safe'
+    : obligationCoverageRatio >= 1
+      ? 'tight'
+      : 'shortfall'
 
   useEffect(() => {
     if (hasCustomRange) setShowRangePanel(true)
@@ -720,6 +744,7 @@ export function Finance() {
             { label: zenmoneyIntegration?.enabled ? 'ZenMoney подключён' : 'ZenMoney не подключён', tone: zenmoneyIntegration?.enabled ? 'success' : 'warning' },
             { label: formatAccountCount(includedAccounts.length), tone: 'muted' },
             ...(totalDailyIncome > 0 ? [{ label: `Savings rate · ${formatRatioPercent(savingsRate)}`, tone: savingsRate != null && savingsRate >= 0.2 ? 'success' as const : savingsRate != null && savingsRate >= 0 ? 'warning' as const : 'danger' as const }] : []),
+            ...(upcomingObligationsTotal > 0 ? [{ label: `Обязательства 30д · ${fmt(upcomingObligationsTotal)}`, tone: coverageTone === 'safe' ? 'success' as const : coverageTone === 'tight' ? 'warning' as const : 'danger' as const }] : []),
             ...(topCategory ? [{ label: `Топ: ${topCategory.category} · ${formatPercent(topCategory.amount, totalCategorySpend)}`, tone: 'muted' as const }] : []),
           ]}
           actions={(
@@ -914,6 +939,131 @@ export function Finance() {
           </p>
         </div>
       ) : null}
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.92fr_1.38fr]">
+        <div className="space-y-4">
+          <div className="rounded-2xl border bg-card/70 px-5 py-4 shadow-sm">
+            <div className="flex flex-col gap-3">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wider text-foreground">Обязательные платежи</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Смотрим вперёд на {obligationsWindowDays} дней и автодетектим recurring списания по истории транзакций:
+                  подписки, кредиты, связь, аренду и похожие платежи. Это прогноз по паттернам, а не данные банка о будущих списаниях.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                  Окно прогноза: {obligationsWindowDays} дней
+                </span>
+                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                  Найдено: {obligationItems.length}
+                </span>
+                {nextObligation ? (
+                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                    Следующий платёж: {fmtDate(nextObligation.next_due_at)}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-1">
+            <FinanceSummaryCard
+              title={`Обязательства ${obligationsWindowDays}д`}
+              icon={CalendarClock}
+              iconClassName={upcomingObligationsTotal > 0 ? 'bg-rose-500' : 'bg-slate-500'}
+              loading={loading}
+              value={fmt(upcomingObligationsTotal)}
+              caption="прогноз recurring списаний от сегодня"
+              hint={nextObligation
+                ? `${nextObligation.name} придёт ${fmtDate(nextObligation.next_due_at)} и даст ${fmt(nextObligation.projected_total)} в окне`
+                : 'Пока не нашли устойчивых recurring списаний в истории транзакций'}
+            />
+
+            <FinanceSummaryCard
+              title={`Coverage ${obligationsWindowDays}д`}
+              icon={coverageTone === 'shortfall' ? ShieldAlert : ShieldCheck}
+              iconClassName={coverageTone === 'safe' ? 'bg-emerald-500' : coverageTone === 'tight' ? 'bg-amber-500' : 'bg-rose-500'}
+              loading={loading}
+              value={formatCoverageMultiple(obligationCoverageRatio)}
+              valueClassName={coverageTone === 'safe' ? 'text-emerald-300' : coverageTone === 'tight' ? 'text-amber-200' : 'text-rose-300'}
+              caption="ликвидный баланс / обязательства ближайших 30 дней"
+              hint={upcomingObligationsTotal > 0
+                ? `Баланс ${fmt(totalBalance)} против обязательств ${fmt(upcomingObligationsTotal)} → ${obligationCoverageGap >= 0 ? `запас ${fmt(obligationCoverageGap)}` : `дефицит ${fmt(Math.abs(obligationCoverageGap))}`}`
+                : 'Обязательства не найдены, поэтому coverage сейчас не ограничен'}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border bg-card p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Что именно попадёт в ближайшие {obligationsWindowDays} дней</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Список отсортирован по ближайшей дате списания. Если регулярный платёж будет повторяться несколько раз за окно, это видно в projected total.
+              </p>
+            </div>
+            {obligationItems.length > 0 ? (
+              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                Всего: {fmt(upcomingObligationsTotal)}
+              </span>
+            ) : null}
+          </div>
+
+          {loading ? (
+            <div className="space-y-3">
+              <div className="h-20 animate-pulse rounded-xl bg-muted" />
+              <div className="h-20 animate-pulse rounded-xl bg-muted" />
+              <div className="h-20 animate-pulse rounded-xl bg-muted" />
+            </div>
+          ) : obligationItems.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border/80 bg-background/40 px-5 py-6 text-sm text-muted-foreground">
+              Пока не нашли recurring платежей с достаточно устойчивым ритмом. Когда в истории появятся повторяющиеся подписки, кредиты или коммуналка, они окажутся здесь.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {obligationItems.map(item => (
+                <div key={`${item.name}-${item.next_due_at}`} className="rounded-2xl border border-border/80 bg-background/50 px-4 py-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">{item.name}</p>
+                      <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                        <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                          {item.cadence_label}
+                        </span>
+                        {item.category ? (
+                          <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                            {item.category}
+                          </span>
+                        ) : null}
+                        <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                          История: {item.occurrences} списания
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 text-left sm:text-right">
+                      <p className="text-base font-semibold text-foreground">{fmt(item.projected_total)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        ≈ {fmt(item.amount)} × {item.expected_occurrences}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                    <span>Следующее: {fmtDate(item.next_due_at)}</span>
+                    {item.expected_occurrences > 1 ? (
+                      <span>В окне повторится {item.expected_occurrences} раза</span>
+                    ) : (
+                      <span>В окне один платёж</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Charts row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

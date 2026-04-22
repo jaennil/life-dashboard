@@ -75,6 +75,25 @@ export interface TopExpense {
   count: number
 }
 
+export interface FinanceObligation {
+  name: string
+  category?: string
+  amount: number
+  projected_total: number
+  next_due_at: string
+  cadence_days: number
+  cadence_label: string
+  occurrences: number
+  expected_occurrences: number
+}
+
+export interface FinanceObligationsSummary {
+  window_days: number
+  upcoming_total: number
+  count: number
+  items: FinanceObligation[]
+}
+
 export interface Account {
   id: string
   title: string
@@ -434,6 +453,8 @@ export const api = {
     if (to) p.set('to', to)
     return get<TopExpense[]>('/finance/top-expenses?' + p.toString())
   },
+  getFinanceObligations: (days = 30) =>
+    get<FinanceObligationsSummary>('/finance/obligations?days=' + encodeURIComponent(String(days))),
   getCategoryList: () => get<string[]>('/finance/category-list'),
   getNutritionSummary: () => get<NutritionSummary>('/nutrition/summary'),
   getNutritionDaily: (days = 14) => get<NutritionDay[]>(`/nutrition/daily?days=${days}`),
