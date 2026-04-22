@@ -234,11 +234,32 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 	}
 
 	today := time.Now().Truncate(24 * time.Hour)
+	recentFailures := make([]string, 0, fatSecretCriticalSyncDays)
+	recentSuccesses := 0
+	stoppedOnRateLimit := false
 	for i := 0; i < nutritionSyncDays; i++ {
 		date := today.AddDate(0, 0, -i)
 		if err := c.syncDay(ctx, userID, token, secret, date); err != nil {
 			c.logger.Warn().Err(err).Str("date", date.Format("2006-01-02")).Msg("failed to sync day")
+			if i < fatSecretCriticalSyncDays {
+				recentFailures = append(recentFailures, date.Format("2006-01-02"))
+			}
+			if isFatSecretRateLimitError(err) {
+				stoppedOnRateLimit = true
+				break
+			}
+			continue
 		}
+		if i < fatSecretCriticalSyncDays {
+			recentSuccesses++
+		}
+	}
+
+	if err := fatSecretRecentSyncError(recentFailures, recentSuccesses); err != nil {
+		return err
+	}
+	if stoppedOnRateLimit {
+		c.logger.Warn().Str("user_id", userID).Msg("fatsecret sync stopped early after rate limit; recent days already refreshed")
 	}
 
 	_, err = c.db.Exec(ctx, `
@@ -283,18 +304,18 @@ type fsFoodEntry struct {
 }
 
 type fsProfile struct {
-	LastWeightKg        string `json:"last_weight_kg"`
-	LastWeightDateInt   string `json:"last_weight_date_int"`
-	LastWeightComment   string `json:"last_weight_comment"`
-	GoalWeightKg        string `json:"goal_weight_kg"`
-	HeightCm            string `json:"height_cm"`
-	WeightMeasure       string `json:"weight_measure"`
-	HeightMeasure       string `json:"height_measure"`
-	PreferredFoods      string `json:"preferred_foods"`
-	ExerciseLevel       string `json:"exercise_level"`
-	FoodDiaryPrivacy    string `json:"food_diary_privacy"`
-	WeightDiaryPrivacy  string `json:"weight_diary_privacy"`
-	CalendarSharingURL  string `json:"calendar_sharing_url"`
+	LastWeightKg       string `json:"last_weight_kg"`
+	LastWeightDateInt  string `json:"last_weight_date_int"`
+	LastWeightComment  string `json:"last_weight_comment"`
+	GoalWeightKg       string `json:"goal_weight_kg"`
+	HeightCm           string `json:"height_cm"`
+	WeightMeasure      string `json:"weight_measure"`
+	HeightMeasure      string `json:"height_measure"`
+	PreferredFoods     string `json:"preferred_foods"`
+	ExerciseLevel      string `json:"exercise_level"`
+	FoodDiaryPrivacy   string `json:"food_diary_privacy"`
+	WeightDiaryPrivacy string `json:"weight_diary_privacy"`
+	CalendarSharingURL string `json:"calendar_sharing_url"`
 }
 
 var fsMealNames = map[string]string{
@@ -303,6 +324,8 @@ var fsMealNames = map[string]string{
 	"2": "dinner",
 	"3": "snacks",
 }
+
+const fatSecretCriticalSyncDays = 3
 
 func normalizeFatSecretMealType(meal, mealID string) string {
 	switch strings.TrimSpace(strings.ToLower(meal)) {
@@ -323,6 +346,23 @@ func normalizeFatSecretMealType(meal, mealID string) string {
 	}
 
 	return "other"
+}
+
+func isFatSecretRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "too many actions")
+}
+
+func fatSecretRecentSyncError(recentFailures []string, recentSuccesses int) error {
+	if len(recentFailures) > 0 {
+		return fmt.Errorf("fatsecret recent days sync failed for %s", strings.Join(recentFailures, ", "))
+	}
+	if recentSuccesses == 0 {
+		return fmt.Errorf("fatsecret recent days sync did not refresh")
+	}
+	return nil
 }
 
 func (c *FatSecretConnector) syncProfile(ctx context.Context, userID, token, secret string) error {

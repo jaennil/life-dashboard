@@ -118,7 +118,61 @@ function sleep(ms: number) {
 
 interface AIStreamHandlers {
   onDelta: (content: string) => void
-  onStatus?: (status: string) => void
+  onStatus?: (event: AIStreamEvent) => void
+}
+
+type StreamStatusState = 'pending' | 'active' | 'done'
+
+interface StreamStatusItem {
+  key: string
+  label: string
+  state: StreamStatusState
+}
+
+const CHECKUP_STATUS_TEMPLATE: StreamStatusItem[] = [
+  { key: 'Готовлю данные для checkup', label: 'Готовлю данные для checkup', state: 'pending' },
+  { key: 'Загружаю финансы', label: 'Загружаю финансы', state: 'pending' },
+  { key: 'Загружаю задачи', label: 'Загружаю задачи', state: 'pending' },
+  { key: 'Загружаю здоровье', label: 'Загружаю здоровье', state: 'pending' },
+  { key: 'Загружаю активности', label: 'Загружаю активности', state: 'pending' },
+  { key: 'Загружаю тренировки', label: 'Загружаю тренировки', state: 'pending' },
+  { key: 'Загружаю питание', label: 'Загружаю питание', state: 'pending' },
+  { key: 'Загружаю привычки', label: 'Загружаю привычки', state: 'pending' },
+  { key: 'Загружаю заметки', label: 'Загружаю заметки', state: 'pending' },
+  { key: 'Загружаю календарь', label: 'Загружаю календарь', state: 'pending' },
+  { key: 'Собираю итоговый отчёт', label: 'Собираю итоговый отчёт', state: 'pending' },
+]
+
+function buildCheckupStatusItems() {
+  return CHECKUP_STATUS_TEMPLATE.map(item => ({ ...item }))
+}
+
+function activateStreamStatus(items: StreamStatusItem[], label: string) {
+  const normalized = label.trim()
+  if (!normalized) return items
+
+  const currentActive = items.find(item => item.state === 'active')?.key
+  if (currentActive === normalized) {
+    return items
+  }
+
+  let found = false
+  const next = items.map(item => {
+    if (item.state === 'active') {
+      return { ...item, state: 'done' as const }
+    }
+    if (item.key === normalized) {
+      found = true
+      return { ...item, label: normalized, state: 'active' as const }
+    }
+    return item
+  })
+
+  if (found) {
+    return next
+  }
+
+  return [...next, { key: normalized, label: normalized, state: 'active' as const }]
 }
 
 async function requestChatStream(message: string, history: Message[], handlers: AIStreamHandlers): Promise<SendResult> {
@@ -311,8 +365,8 @@ async function requestAIStream(url: string, payload: string, handlers: AIStreamH
           return
         }
 
-        if (event.type === 'status' && event.content) {
-          handlers.onStatus?.(event.content)
+        if (event.type === 'status') {
+          handlers.onStatus?.(event)
           return
         }
 
@@ -397,7 +451,7 @@ export function AiChat() {
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyError, setHistoryError] = useState('')
   const [latestCheckup, setLatestCheckup] = useState<AILatestCheckup | null>(null)
-  const [streamStatuses, setStreamStatuses] = useState<string[]>([])
+  const [streamStatusItems, setStreamStatusItems] = useState<StreamStatusItem[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -420,13 +474,10 @@ export function AiChat() {
     })
   }
 
-  function pushStreamStatus(status: string) {
-    const normalized = status.trim()
-    if (!normalized) return
-    setStreamStatuses(prev => {
-      if (prev[prev.length - 1] === normalized) return prev
-      return [...prev, normalized].slice(-6)
-    })
+  function pushStreamStatus(event: AIStreamEvent) {
+    const label = event.content?.trim()
+    if (!label) return
+    setStreamStatusItems(prev => activateStreamStatus(prev, label))
   }
 
   useEffect(() => {
@@ -464,7 +515,7 @@ export function AiChat() {
     const contextMessages = messages
     setInput('')
     setLoading(true)
-    setStreamStatuses([])
+    setStreamStatusItems([])
 
     const userMsg: Message = { role: 'user', content: text }
     const assistantMsg: Message = { role: 'assistant', content: '', loading: true }
@@ -477,7 +528,7 @@ export function AiChat() {
       })
       updatePendingAssistant(result.content, false)
     } finally {
-      setStreamStatuses([])
+      setStreamStatusItems([])
       setLoading(false)
     }
   }
@@ -485,7 +536,7 @@ export function AiChat() {
   async function sendCheckup(action: CheckupAction) {
     if (loading || historyLoading) return
     setLoading(true)
-    setStreamStatuses([])
+    setStreamStatusItems(buildCheckupStatusItems())
 
     const userMsg: Message = { role: 'user', content: action.userMessage }
     const assistantMsg: Message = { role: 'assistant', content: '', loading: true }
@@ -506,7 +557,7 @@ export function AiChat() {
         })
       }
     } finally {
-      setStreamStatuses([])
+      setStreamStatusItems([])
       setLoading(false)
     }
   }
@@ -624,7 +675,7 @@ export function AiChat() {
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
             {messages.map((msg, i) => {
-              const showLiveStatuses = msg.loading && i === messages.length - 1 && streamStatuses.length > 0
+              const showLiveStatuses = msg.loading && i === messages.length - 1 && streamStatusItems.length > 0
 
               return (
                 <div key={msg.id ?? `${msg.role}-${i}`} className={cn('flex gap-2 sm:gap-3', msg.role === 'user' && 'flex-row-reverse')}>
@@ -644,20 +695,29 @@ export function AiChat() {
                   )}>
                     {showLiveStatuses ? (
                       <div className="mb-3 rounded-2xl border border-white/10 bg-background/35 px-3 py-2 text-xs text-muted-foreground">
-                        <div className="mb-2 flex items-center gap-2 font-medium text-foreground/90">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          <span>{streamStatuses[streamStatuses.length - 1]}</span>
+                        <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground/80">
+                          Подготовка ответа
                         </div>
-                        {streamStatuses.length > 1 ? (
-                          <div className="space-y-1">
-                            {streamStatuses.slice(0, -1).map(status => (
-                              <div key={status} className="flex items-center gap-2">
+                        <div className="space-y-1.5">
+                          {streamStatusItems.map(item => (
+                            <div key={item.key} className="flex items-center gap-2">
+                              {item.state === 'done' ? (
                                 <span className="text-emerald-400">✓</span>
-                                <span>{status}</span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
+                              ) : item.state === 'active' ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground/90" />
+                              ) : (
+                                <span className="h-3.5 w-3.5 rounded-full border border-white/15 bg-white/5" />
+                              )}
+                              <span className={cn(
+                                item.state === 'active' && 'font-medium text-foreground/90',
+                                item.state === 'done' && 'text-muted-foreground',
+                                item.state === 'pending' && 'text-muted-foreground/70',
+                              )}>
+                                {item.label}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
                     {msg.loading && !msg.content && !showLiveStatuses

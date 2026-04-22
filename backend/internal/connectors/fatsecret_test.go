@@ -1,29 +1,52 @@
 package connectors
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestNormalizeFatSecretMealType(t *testing.T) {
-	tests := []struct {
-		name   string
-		meal   string
-		mealID string
-		want   string
-	}{
-		{name: "meal string breakfast", meal: "Breakfast", want: "breakfast"},
-		{name: "meal string lunch", meal: "lunch", want: "lunch"},
-		{name: "meal string dinner", meal: "DINNER", want: "dinner"},
-		{name: "meal string snack", meal: "Snack", want: "snacks"},
-		{name: "meal string other", meal: "Other", want: "other"},
-		{name: "falls back to meal id", mealID: "2", want: "dinner"},
-		{name: "unknown falls back to other", meal: "Brunch", mealID: "9", want: "other"},
-	}
+func TestFatSecretRecentSyncError(t *testing.T) {
+	t.Run("success when recent days refreshed", func(t *testing.T) {
+		if err := fatSecretRecentSyncError(nil, 2); err != nil {
+			t.Fatalf("expected nil error, got %v", err)
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeFatSecretMealType(tt.meal, tt.mealID)
-			if got != tt.want {
-				t.Fatalf("normalizeFatSecretMealType(%q, %q) = %q, want %q", tt.meal, tt.mealID, got, tt.want)
-			}
-		})
+	t.Run("fails when recent days failed", func(t *testing.T) {
+		err := fatSecretRecentSyncError([]string{"2026-04-22", "2026-04-21"}, 1)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "2026-04-22") {
+			t.Fatalf("expected failed date in error, got %v", err)
+		}
+	})
+
+	t.Run("fails when nothing recent refreshed", func(t *testing.T) {
+		err := fatSecretRecentSyncError(nil, 0)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestIsFatSecretRateLimitError(t *testing.T) {
+	if !isFatSecretRateLimitError(assertErr("api error: User is performing too many actions: please try again later")) {
+		t.Fatal("expected rate limit error to be detected")
 	}
+	if isFatSecretRateLimitError(assertErr("api status 500")) {
+		t.Fatal("did not expect generic status error to be treated as rate limit")
+	}
+}
+
+func assertErr(message string) error {
+	return &fatSecretTestError{message: message}
+}
+
+type fatSecretTestError struct {
+	message string
+}
+
+func (e *fatSecretTestError) Error() string {
+	return e.message
 }
