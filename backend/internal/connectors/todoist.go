@@ -30,6 +30,7 @@ const (
 )
 
 var errTodoistCompletedArchiveUnavailable = errors.New("todoist completed archive unavailable")
+var errTodoistCompletedArchiveTemporaryUnavailable = errors.New("todoist completed archive temporary unavailable")
 
 type todoistDB interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
@@ -215,6 +216,9 @@ func (t *TodoistConnector) Sync(ctx context.Context, userID string) error {
 		if errors.Is(err, errTodoistCompletedArchiveUnavailable) {
 			completedArchiveAvailable = false
 			t.logger.Warn().Str("user_id", userID).Msg("todoist completed archive not available on current plan; syncing active recurring tasks only")
+		} else if errors.Is(err, errTodoistCompletedArchiveTemporaryUnavailable) {
+			completedArchiveAvailable = false
+			t.logger.Warn().Str("user_id", userID).Msg("todoist completed archive temporarily unavailable; syncing active recurring tasks only")
 		} else {
 			return fmt.Errorf("fetch todoist completed items: %w", err)
 		}
@@ -430,6 +434,9 @@ func (t *TodoistConnector) do(req *http.Request, allowCompletedArchiveUnavailabl
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if allowCompletedArchiveUnavailable && (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusPaymentRequired) {
 		return nil, errTodoistCompletedArchiveUnavailable
+	}
+	if allowCompletedArchiveUnavailable && (resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout) {
+		return nil, errTodoistCompletedArchiveTemporaryUnavailable
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("todoist api returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))

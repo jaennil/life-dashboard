@@ -178,6 +178,9 @@ func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Req
 		}
 
 		enabled := ok && state.enabled
+		if enabled && personalIntegrations[name] && !hasIntegrationActivationState(ctx, h.db, name, userID) {
+			enabled = false
+		}
 		if !ok && (hasCredentials[name] || count > 0) {
 			enabled = true
 		}
@@ -373,6 +376,9 @@ func IsEnabled(ctx context.Context, db *pgxpool.Pool, source string, userID stri
 	err := db.QueryRow(ctx, `SELECT enabled FROM sync_state WHERE source = $1 AND user_id = $2`, source, userID).Scan(&enabled)
 	if err != nil {
 		return hasIntegrationActivationState(ctx, db, source, userID)
+	}
+	if enabled && personalIntegrations[source] && !hasIntegrationActivationState(ctx, db, source, userID) {
+		return false
 	}
 	return enabled
 }

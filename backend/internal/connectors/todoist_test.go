@@ -1,6 +1,9 @@
 package connectors
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -74,5 +77,26 @@ func TestTodoistSyncStart(t *testing.T) {
 	start = connector.syncStart(lastSync, now)
 	if start.Format("2006-01-02") != "2026-03-31" {
 		t.Fatalf("unexpected incremental lookback start %s", start.Format("2006-01-02"))
+	}
+}
+
+func TestTodoistDoTreatsCompletedArchive503AsTemporaryUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream temporary failure", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	connector := NewTodoist("", "", "", nil, zerolog.Nop())
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+
+	_, err = connector.do(req, true)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if err != errTodoistCompletedArchiveTemporaryUnavailable {
+		t.Fatalf("expected temporary unavailable error, got %v", err)
 	}
 }

@@ -166,15 +166,17 @@ func (n *NotionConnector) ExchangeCode(ctx context.Context, userID, code string)
 		return fmt.Errorf("save notion token: %w", err)
 	}
 
+	enabled := true
 	// Auto-discover journal database
 	if err := n.autoDiscoverDatabase(ctx, userID, result.AccessToken); err != nil {
+		enabled = false
 		n.logger.Warn().Err(err).Msg("auto-discover database failed, user can set manually")
 	}
 
 	_, err = n.db.Exec(ctx, `
-		INSERT INTO sync_state (source, enabled, updated_at, user_id) VALUES ('notion', true, NOW(), $1)
-		ON CONFLICT (source, user_id) DO UPDATE SET enabled = true, updated_at = NOW()
-	`, userID)
+		INSERT INTO sync_state (source, enabled, updated_at, user_id) VALUES ('notion', $1, NOW(), $2)
+		ON CONFLICT (source, user_id) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()
+	`, enabled, userID)
 
 	return err
 }
