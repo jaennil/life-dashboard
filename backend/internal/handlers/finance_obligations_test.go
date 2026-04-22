@@ -74,3 +74,17 @@ func TestDetectFinanceObligationsIgnoresNoisyHistory(t *testing.T) {
 		t.Fatalf("expected noisy history to be ignored, got %d obligations", summary.Count)
 	}
 }
+
+func TestDetectFinanceObligationsSkipsLowSignalGroceries(t *testing.T) {
+	now := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
+	records := []financeExpenseRecord{
+		{OccurredAt: time.Date(2026, 4, 2, 9, 0, 0, 0, time.UTC), Amount: 429, Payee: "MA0004883725", Category: "Groceries"},
+		{OccurredAt: time.Date(2026, 4, 9, 9, 0, 0, 0, time.UTC), Amount: 429, Payee: "MA0004883725", Category: "Groceries"},
+		{OccurredAt: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Amount: 429, Payee: "MA0004883725", Category: "Groceries"},
+	}
+
+	summary := detectFinanceObligations(records, now, 30)
+	if summary.Count != 0 {
+		t.Fatalf("expected low-signal groceries to be ignored, got %d obligations", summary.Count)
+	}
+}

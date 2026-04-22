@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	authmw "life-dashboard/internal/middleware"
 )
@@ -187,6 +188,9 @@ func financeBuildObligation(group *financeRecurringGroup, start, end time.Time) 
 	if len(group.Records) < minOccurrences {
 		return FinanceObligation{}, false
 	}
+	if !group.KnownLabel && financeCategoryLooksDiscretionary(group.Category) {
+		return FinanceObligation{}, false
+	}
 
 	intervals := financeIntervals(group.Records)
 	cadenceDays, cadenceLabel, ok := financeDetectCadence(intervals, group.KnownLabel)
@@ -269,6 +273,9 @@ func financeDetectCadence(intervals []int, knownLabel bool) (int, string, bool) 
 	bestDays := 0
 	bestLabel := ""
 	for _, option := range options {
+		if !knownLabel && option.days < 30 {
+			continue
+		}
 		matches := 0
 		for _, interval := range intervals {
 			if absInt(interval-option.days) <= option.tolerance {
@@ -327,6 +334,9 @@ func financeRecurringKey(record financeExpenseRecord) (key string, name string, 
 		strings.TrimSpace(record.Comment),
 	}
 	for _, candidate := range candidates {
+		if financeLowSignalRecurringName(candidate) && !financeLooksLikeMandatory(candidate, record.Category) {
+			continue
+		}
 		if normalized := financeNormalizeRecurringText(candidate); normalized != "" {
 			return normalized, candidate, false, true
 		}
@@ -390,6 +400,38 @@ func financeLooksLikeMandatory(name, category string) bool {
 		}
 	}
 	return false
+}
+
+func financeCategoryLooksDiscretionary(category string) bool {
+	source := strings.ToLower(strings.TrimSpace(category))
+	keywords := []string{
+		"shopping", "grocer", "eating out", "gifts", "sport", "entertain", "education",
+		"travel", "transport", "health", "auto",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(source, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func financeLowSignalRecurringName(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	letters := 0
+	digits := 0
+	for _, r := range value {
+		switch {
+		case unicode.IsLetter(r):
+			letters++
+		case unicode.IsDigit(r):
+			digits++
+		}
+	}
+	return digits >= 4 && letters <= 3
 }
 
 func financeStartOfDay(value time.Time) time.Time {
