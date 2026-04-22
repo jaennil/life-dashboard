@@ -144,7 +144,10 @@ const CHECKUP_STATUS_TEMPLATE: StreamStatusItem[] = [
 ]
 
 function buildCheckupStatusItems() {
-  return CHECKUP_STATUS_TEMPLATE.map(item => ({ ...item }))
+  return CHECKUP_STATUS_TEMPLATE.map<StreamStatusItem>((item, index) => ({
+    ...item,
+    state: index === 0 ? 'active' : 'pending',
+  }))
 }
 
 function activateStreamStatus(items: StreamStatusItem[], label: string) {
@@ -676,6 +679,9 @@ export function AiChat() {
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
             {messages.map((msg, i) => {
               const showLiveStatuses = msg.loading && i === messages.length - 1 && streamStatusItems.length > 0
+              const completedItems = streamStatusItems.filter(item => item.state === 'done')
+              const activeItem = streamStatusItems.find(item => item.state === 'active')
+              const pendingCount = streamStatusItems.filter(item => item.state === 'pending').length
 
               return (
                 <div key={msg.id ?? `${msg.role}-${i}`} className={cn('flex gap-2 sm:gap-3', msg.role === 'user' && 'flex-row-reverse')}>
@@ -695,29 +701,31 @@ export function AiChat() {
                   )}>
                     {showLiveStatuses ? (
                       <div className="mb-3 rounded-2xl border border-white/10 bg-background/35 px-3 py-2 text-xs text-muted-foreground">
-                        <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground/80">
-                          Подготовка ответа
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground/80">
+                            Подготовка ответа
+                          </div>
+                          <div className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-muted-foreground/80">
+                            {completedItems.length}/{streamStatusItems.length}
+                          </div>
                         </div>
-                        <div className="space-y-1.5">
-                          {streamStatusItems.map(item => (
-                            <div key={item.key} className="flex items-center gap-2">
-                              {item.state === 'done' ? (
-                                <span className="text-emerald-400">✓</span>
-                              ) : item.state === 'active' ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground/90" />
-                              ) : (
-                                <span className="h-3.5 w-3.5 rounded-full border border-white/15 bg-white/5" />
-                              )}
-                              <span className={cn(
-                                item.state === 'active' && 'font-medium text-foreground/90',
-                                item.state === 'done' && 'text-muted-foreground',
-                                item.state === 'pending' && 'text-muted-foreground/70',
-                              )}>
-                                {item.label}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                        {activeItem ? (
+                          <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-foreground/90">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground/90" />
+                            <span className="font-medium">{activeItem.label}</span>
+                          </div>
+                        ) : null}
+                        {completedItems.length > 0 ? (
+                          <div className="mt-2 text-[11px] leading-5 text-muted-foreground/85">
+                            Готово: {completedItems.slice(-3).map(item => item.label).join(' · ')}
+                            {completedItems.length > 3 ? ` · ещё ${completedItems.length - 3}` : ''}
+                          </div>
+                        ) : null}
+                        {pendingCount > 0 ? (
+                          <div className="mt-1 text-[11px] leading-5 text-muted-foreground/65">
+                            Осталось шагов: {pendingCount}
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                     {msg.loading && !msg.content && !showLiveStatuses
