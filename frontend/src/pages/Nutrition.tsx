@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { EChartsCoreOption } from 'echarts/core'
-import { Activity, ChevronDown, ChevronUp, Droplets, Flame, GlassWater, RotateCcw, Target, UtensilsCrossed } from 'lucide-react'
+import { Activity, Droplets, Flame, GlassWater, RotateCcw, Target, UtensilsCrossed } from 'lucide-react'
 import { EChart } from '@/components/EChart'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { PageSyncButton } from '@/components/PageSyncButton'
@@ -578,97 +578,184 @@ function filterNutritionDayByMeal(day: NutritionDay, mealType: string): Nutritio
   }
 }
 
-function DayRow({ day, calorieReference, calorieTarget }: { day: NutritionDay; calorieReference: number; calorieTarget?: number }) {
-  const [open, setOpen] = useState(false)
-  const hasMeals = day.meals.some(m => m.items.length > 0)
+function buildDailyNutritionTimelineOption(
+  data: NutritionDay[],
+  calorieReference: number,
+  calorieTarget: number | undefined,
+  selectedDate: string | null,
+): EChartsCoreOption {
+  const reference = Math.max(
+    calorieReference,
+    calorieTarget ?? 0,
+    ...data.map(day => day.calories),
+    1,
+  )
+  const roundedMax = Math.ceil(reference / 250) * 250
+
+  return {
+    animationDuration: 350,
+    grid: { top: 12, right: 84, bottom: 12, left: 12, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (params: unknown) => {
+        const points = toTooltipList(params)
+        const barPoint = points.find(item => isRecord(item) && readString(item.seriesName) === 'Калории')
+        const dataIndex = isRecord(barPoint) ? toNumber(readScalar(barPoint.dataIndex)) : 0
+        const day = data[dataIndex]
+        if (!day) return ''
+
+        const beverageLines = (day.beverages ?? []).map(beverage => {
+          const prefix = beverage.counts_toward_goal ? 'в цель' : 'отдельно'
+          return `${hydrationBeverageEmoji(beverage.beverage_type)} ${hydrationBeverageLabel(beverage.beverage_type)}: ${Math.round(beverage.amount_ml)} мл · ${prefix}`
+        })
+
+        return [
+          `<div>${fmtDate(day.date)}</div>`,
+          `<div style="margin-top:4px;font-weight:600">${Math.round(day.calories)} ккал</div>`,
+          `<div>Б ${Math.round(day.protein)} г · Ж ${Math.round(day.fat)} г · У ${Math.round(day.carbs)} г${day.fiber > 0 ? ` · К ${Math.round(day.fiber)} г` : ''}</div>`,
+          `<div>💧 Вода: ${Math.round(day.water_ml)} мл · гидратация: ${Math.round(day.hydration_ml)} мл</div>`,
+          ...beverageLines.map(line => `<div>${line}</div>`),
+          `<div style="margin-top:6px;color:${CHART_MUTED}">Кликни по дню, чтобы посмотреть состав ниже</div>`,
+        ].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'value',
+      max: roundedMax,
+      axisLabel: { color: CHART_MUTED, formatter: (value: number) => `${Math.round(value)}` },
+      splitLine: { lineStyle: { color: CHART_GRID } },
+    },
+    yAxis: {
+      type: 'category',
+      data: data.map(day => day.date),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: {
+        color: CHART_TEXT,
+        formatter: (value: string) => fmtDate(value),
+      },
+    },
+    series: [
+      {
+        name: 'Коридор',
+        type: 'bar',
+        silent: true,
+        barWidth: 12,
+        barGap: '-100%',
+        itemStyle: {
+          color: 'rgba(148, 163, 184, 0.12)',
+          borderRadius: 999,
+        },
+        data: data.map(() => calorieTarget ?? roundedMax),
+      },
+      {
+        name: 'Калории',
+        type: 'bar',
+        barWidth: 12,
+        z: 3,
+        label: {
+          show: true,
+          position: 'right',
+          distance: 10,
+          color: CHART_TEXT,
+          fontSize: 12,
+          formatter: ({ value }: { value: number }) => `${Math.round(value)} ккал`,
+        },
+        itemStyle: {
+          borderRadius: 999,
+          color: (params: { dataIndex: number }) => {
+            const day = data[params.dataIndex]
+            const isSelected = day?.date === selectedDate
+            const isOver = typeof calorieTarget === 'number' && day.calories > calorieTarget
+            if (isOver && isSelected) return '#fb7185'
+            if (isOver) return 'rgba(251, 113, 133, 0.72)'
+            if (isSelected) return '#7dd3fc'
+            return 'rgba(125, 211, 252, 0.72)'
+          },
+          shadowBlur: 12,
+          shadowColor: 'rgba(14, 165, 233, 0.14)',
+        },
+        emphasis: {
+          itemStyle: {
+            opacity: 1,
+          },
+        },
+        data: data.map(day => day.calories),
+      },
+    ],
+  }
+}
+
+function NutritionDayDetails({ day }: { day: NutritionDay }) {
   const beverages = day.beverages ?? []
-  const pct = calorieReference > 0 ? Math.min((day.calories / calorieReference) * 100, 100) : 0
-  const overTarget = typeof calorieTarget === 'number' && day.calories > calorieTarget
-  const calorieTone = overTarget
-    ? {
-      value: 'text-rose-200',
-      pill: 'border-rose-500/20 bg-rose-500/10 text-rose-200',
-      bar: 'bg-gradient-to-r from-rose-400/75 to-pink-400/75',
-    }
-    : {
-      value: 'text-foreground',
-      pill: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100',
-      bar: 'bg-gradient-to-r from-cyan-300/75 to-sky-300/75',
-    }
 
   return (
-    <div>
-      <button
-        onClick={() => setOpen(o => !o)}
-        disabled={!hasMeals}
-        className="w-full px-5 py-3 flex items-center gap-3 hover:bg-muted/40 transition-colors text-left disabled:cursor-default"
-      >
-        <div className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center text-base shrink-0">🍽️</div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-medium text-foreground">{fmtDate(day.date)}</p>
-            <div className="flex items-center gap-2">
-              {typeof calorieTarget === 'number' ? (
-                <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-medium', calorieTone.pill)}>
-                  {overTarget ? 'выше цели' : 'в коридоре'}
-                </span>
-              ) : null}
-              <span className={cn('text-sm font-semibold tabular-nums', calorieTone.value)}>
-                {day.calories.toFixed(0)} ккал
+    <div className="rounded-2xl border bg-background/35 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-foreground">{fmtDate(day.date)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Б {Math.round(day.protein)} г · Ж {Math.round(day.fat)} г · У {Math.round(day.carbs)} г{day.fiber > 0 ? ` · К ${Math.round(day.fiber)} г` : ''}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-lg font-semibold text-foreground">{Math.round(day.calories)} ккал</p>
+          <p className="mt-1 text-xs text-muted-foreground">гидратация {Math.round(day.hydration_ml)} мл</p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+        {day.water_ml > 0 ? <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2.5 py-1 text-cyan-100">💧 Вода {Math.round(day.water_ml)} мл</span> : null}
+        {beverages.map(beverage => (
+          <span
+            key={beverage.beverage_type}
+            className={cn(
+              'rounded-full border px-2.5 py-1',
+              beverage.counts_toward_goal
+                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-100'
+                : 'border-amber-500/20 bg-amber-500/10 text-amber-100',
+            )}
+          >
+            {hydrationBeverageEmoji(beverage.beverage_type)} {hydrationBeverageLabel(beverage.beverage_type)} {Math.round(beverage.amount_ml)} мл
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        {day.meals.map(meal => (
+          <div key={meal.meal_type} className="rounded-xl border bg-background/45 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-foreground">{MEAL_LABELS[meal.meal_type] ?? meal.meal_type}</p>
+              <span className="text-xs text-muted-foreground">
+                {Math.round(meal.items.reduce((sum, item) => sum + item.calories, 0))} ккал
               </span>
             </div>
-          </div>
-          <div className="flex items-center gap-3 mt-1.5">
-            <div className="flex-1 h-2 rounded-full bg-muted/70 overflow-hidden">
-              <div className={cn('h-full rounded-full shadow-[0_0_18px_rgba(56,189,248,0.12)]', calorieTone.bar)} style={{ width: `${pct}%` }} />
-            </div>
-            <div className="flex gap-2 text-xs text-muted-foreground shrink-0">
-              {day.water_ml > 0 && <span className="text-cyan-300">💧 {day.water_ml.toFixed(0)}мл</span>}
-              {beverages.map(beverage => (
-                <span key={beverage.beverage_type} className={cn(beverage.counts_toward_goal ? 'text-emerald-300' : 'text-amber-300')}>
-                  {hydrationBeverageEmoji(beverage.beverage_type)} {beverage.amount_ml.toFixed(0)}мл
-                </span>
-              ))}
-              <span className="text-blue-400">Б {day.protein.toFixed(0)}г</span>
-              <span className="text-orange-400">Ж {day.fat.toFixed(0)}г</span>
-              <span className="text-emerald-400">У {day.carbs.toFixed(0)}г</span>
-              {day.fiber > 0 && <span className="text-violet-400">К {day.fiber.toFixed(0)}г</span>}
-            </div>
-          </div>
-        </div>
-        {hasMeals && (open ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />)}
-      </button>
-
-      {open && hasMeals && (
-        <div className="px-5 pb-3 flex flex-col gap-3">
-          {day.meals.map(meal => (
-            <div key={meal.meal_type}>
-              <p className="text-xs font-semibold text-foreground mb-1">{MEAL_LABELS[meal.meal_type] ?? meal.meal_type}</p>
-              <div className="flex flex-col gap-1">
-                {meal.items.map((item, idx) => (
-                  <div key={idx} className="flex flex-col gap-0.5">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span className="truncate flex-1">{item.food_name}</span>
-                      <span className="ml-2 shrink-0 text-foreground/70">{item.serving}</span>
-                      <span className="ml-3 shrink-0 text-orange-400 tabular-nums">{item.calories.toFixed(0)} ккал</span>
-                    </div>
-                    {item.macros && (item.macros.protein > 0 || item.macros.carbs > 0 || item.macros.fat > 0) && (
-                      <div className="flex gap-3 text-[10px] text-muted-foreground/60 ml-1">
-                        <span>Б {item.macros.protein?.toFixed(1)}г</span>
-                        <span>Ж {item.macros.fat?.toFixed(1)}г</span>
-                        <span>У {item.macros.carbs?.toFixed(1)}г</span>
-                        {(item.macros.fiber ?? 0) > 0 && <span>Клетч {item.macros.fiber?.toFixed(1)}г</span>}
-                        {(item.macros.sugar ?? 0) > 0 && <span>Сахар {item.macros.sugar?.toFixed(1)}г</span>}
-                        {(item.macros.sodium ?? 0) > 0 && <span>Na {item.macros.sodium?.toFixed(0)}мг</span>}
-                      </div>
-                    )}
+            <div className="flex flex-col gap-2">
+              {meal.items.map((item, idx) => (
+                <div key={idx} className="rounded-lg border border-border/70 bg-background/60 px-3 py-2">
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="min-w-0 flex-1 truncate text-foreground">{item.food_name}</span>
+                    <span className="shrink-0 text-muted-foreground">{item.serving}</span>
+                    <span className="shrink-0 font-medium text-foreground">{Math.round(item.calories)} ккал</span>
                   </div>
-                ))}
-              </div>
+                  {item.macros && (item.macros.protein > 0 || item.macros.carbs > 0 || item.macros.fat > 0) ? (
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                      <span>Б {item.macros.protein?.toFixed(1)} г</span>
+                      <span>Ж {item.macros.fat?.toFixed(1)} г</span>
+                      <span>У {item.macros.carbs?.toFixed(1)} г</span>
+                      {(item.macros.fiber ?? 0) > 0 ? <span>Клетч {item.macros.fiber?.toFixed(1)} г</span> : null}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -693,6 +780,7 @@ export function Nutrition() {
   const [customHydrationType, setCustomHydrationType] = useState<HydrationBeverageType>('tea')
   const [customHydrationInput, setCustomHydrationInput] = useState('')
   const [hydrationMode, setHydrationMode] = useState<HydrationMode>('strict')
+  const [selectedDayDate, setSelectedDayDate] = useState<string | null>(null)
   const [targetsForm, setTargetsForm] = useState({
     targetWeightKg: '',
     targetCalories: '',
@@ -814,12 +902,27 @@ export function Nutrition() {
       .filter((day): day is NutritionDay => day !== null)
     : daily
   const goldenCards = golden?.cards ?? []
+  const selectedDay = useMemo(
+    () => filteredDaily.find(day => day.date === selectedDayDate) ?? filteredDaily[0] ?? null,
+    [filteredDaily, selectedDayDate],
+  )
 
   const calorieReference = Math.max(
     calorieTarget ?? 0,
     ...filteredDaily.map(day => day.calories),
     1,
   )
+
+  useEffect(() => {
+    if (filteredDaily.length === 0) {
+      setSelectedDayDate(null)
+      return
+    }
+
+    if (!selectedDayDate || !filteredDaily.some(day => day.date === selectedDayDate)) {
+      setSelectedDayDate(filteredDaily[0].date)
+    }
+  }, [filteredDaily, selectedDayDate])
 
   async function handleSyncNutrition() {
     if (enabledNutritionIntegrations.length === 0) return
@@ -1561,8 +1664,40 @@ export function Nutrition() {
         ) : filteredDaily.length === 0 ? (
           <div className="px-5 py-8 text-sm text-muted-foreground text-center">Нет данных. Подключи FatSecret в настройках.</div>
         ) : (
-          <div className="divide-y">
-            {filteredDaily.map(day => <DayRow key={day.date} day={day} calorieReference={calorieReference} calorieTarget={calorieTarget} />)}
+          <div className="p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Таймлайн по дням</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Кликни по бару, чтобы раскрыть состав конкретного дня ниже.
+                </p>
+              </div>
+              {selectedDay ? (
+                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-xs text-muted-foreground">
+                  Выбран день: {fmtDate(selectedDay.date)}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="mt-4">
+              <EChart
+                option={buildDailyNutritionTimelineOption(filteredDaily, calorieReference, calorieTarget, selectedDayDate)}
+                height={Math.max(280, filteredDaily.length * 44)}
+                onClick={(params) => {
+                  const dataIndex = typeof params.dataIndex === 'number' ? params.dataIndex : null
+                  if (dataIndex == null) return
+                  const day = filteredDaily[dataIndex]
+                  if (!day) return
+                  setSelectedDayDate(day.date)
+                }}
+              />
+            </div>
+
+            {selectedDay ? (
+              <div className="mt-5 border-t border-border/70 pt-5">
+                <NutritionDayDetails day={selectedDay} />
+              </div>
+            ) : null}
           </div>
         )}
       </div>

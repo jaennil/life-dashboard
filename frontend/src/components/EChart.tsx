@@ -12,6 +12,7 @@ import {
   init,
   use as registerECharts,
   type ECharts,
+  type ECElementEvent,
   type EChartsCoreOption,
   type SetOptionOpts,
 } from 'echarts/core'
@@ -34,9 +35,10 @@ type EChartProps = {
   width?: number | string
   className?: string
   settings?: SetOptionOpts
+  onClick?: (params: ECElementEvent) => void
 }
 
-export function EChart({ option, height, width = '100%', className, settings }: EChartProps) {
+export function EChart({ option, height, width = '100%', className, settings, onClick }: EChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<ECharts | null>(null)
 
@@ -64,6 +66,17 @@ export function EChart({ option, height, width = '100%', className, settings }: 
     if (!chartRef.current) return
     chartRef.current.setOption(option, settings ?? { notMerge: true })
   }, [option, settings])
+
+  useEffect(() => {
+    if (!chartRef.current || !onClick) return
+
+    const chart = chartRef.current
+    chart.on('click', onClick)
+
+    return () => {
+      chart.off('click', onClick)
+    }
+  }, [onClick])
 
   return (
     <div
