@@ -584,6 +584,17 @@ function DayRow({ day, calorieReference, calorieTarget }: { day: NutritionDay; c
   const beverages = day.beverages ?? []
   const pct = calorieReference > 0 ? Math.min((day.calories / calorieReference) * 100, 100) : 0
   const overTarget = typeof calorieTarget === 'number' && day.calories > calorieTarget
+  const calorieTone = overTarget
+    ? {
+      value: 'text-rose-200',
+      pill: 'border-rose-500/20 bg-rose-500/10 text-rose-200',
+      bar: 'bg-gradient-to-r from-rose-400/75 to-pink-400/75',
+    }
+    : {
+      value: 'text-foreground',
+      pill: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100',
+      bar: 'bg-gradient-to-r from-cyan-300/75 to-sky-300/75',
+    }
 
   return (
     <div>
@@ -596,13 +607,20 @@ function DayRow({ day, calorieReference, calorieTarget }: { day: NutritionDay; c
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-medium text-foreground">{fmtDate(day.date)}</p>
-            <span className={cn('text-sm font-semibold tabular-nums', overTarget ? 'text-rose-400' : 'text-orange-400')}>
-              {day.calories.toFixed(0)} ккал
-            </span>
+            <div className="flex items-center gap-2">
+              {typeof calorieTarget === 'number' ? (
+                <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-medium', calorieTone.pill)}>
+                  {overTarget ? 'выше цели' : 'в коридоре'}
+                </span>
+              ) : null}
+              <span className={cn('text-sm font-semibold tabular-nums', calorieTone.value)}>
+                {day.calories.toFixed(0)} ккал
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-3 mt-1.5">
-            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div className={cn('h-full rounded-full', overTarget ? 'bg-rose-400' : 'bg-orange-400')} style={{ width: `${pct}%` }} />
+            <div className="flex-1 h-2 rounded-full bg-muted/70 overflow-hidden">
+              <div className={cn('h-full rounded-full shadow-[0_0_18px_rgba(56,189,248,0.12)]', calorieTone.bar)} style={{ width: `${pct}%` }} />
             </div>
             <div className="flex gap-2 text-xs text-muted-foreground shrink-0">
               {day.water_ml > 0 && <span className="text-cyan-300">💧 {day.water_ml.toFixed(0)}мл</span>}
