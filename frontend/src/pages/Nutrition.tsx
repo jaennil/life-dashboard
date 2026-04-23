@@ -741,6 +741,7 @@ export function Nutrition() {
   const avgFat = chartData.length ? chartData.reduce((s, d) => s + d.fat, 0) / chartData.length : 0
   const avgCarbs = chartData.length ? chartData.reduce((s, d) => s + d.carbs, 0) / chartData.length : 0
   const hydrationTrackedDays = chartData.filter(day => day.hydration_ml > 0).length
+  const hasHydrationData = chartData.some(day => day.water_ml > 0 || day.counted_drinks_ml > 0 || day.other_drinks_ml > 0 || day.hydration_ml > 0)
   const avgHydration = hydrationTrackedDays > 0
     ? chartData.reduce((sum, day) => sum + day.hydration_ml, 0) / hydrationTrackedDays
     : 0
@@ -957,6 +958,8 @@ export function Nutrition() {
     setSavingTargets(true)
     setTargetsError('')
     setTargetsNotice('')
+    setWaterError('')
+    setWaterNotice('')
     try {
       await api.saveNutritionTargets(buildSavedTargetsPayload(nextMode))
       await loadData()
@@ -1015,7 +1018,7 @@ export function Nutrition() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.02fr_1.28fr]">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.06fr)_minmax(0,0.94fr)] xl:items-start">
         <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -1046,8 +1049,8 @@ export function Nutrition() {
             <span className="self-center text-xs text-muted-foreground">{HYDRATION_MODE_NOTES[hydrationMode]}</span>
           </div>
 
-          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="rounded-2xl border border-cyan-500/10 bg-cyan-500/5 p-4 sm:col-span-2">
+          <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.16fr)_minmax(300px,0.84fr)]">
+            <div className="rounded-2xl border border-cyan-500/10 bg-cyan-500/5 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] uppercase tracking-wide text-cyan-200/80">Сегодня в цель</p>
@@ -1094,7 +1097,7 @@ export function Nutrition() {
               </div>
             </div>
 
-            <div className="rounded-2xl border bg-background/45 p-4">
+            <div className="rounded-2xl border bg-background/45 p-4 xl:self-start">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Быстрый лог</p>
               <p className="mt-2 text-[11px] text-muted-foreground">Вода</p>
               <div className="mt-3 grid grid-cols-2 gap-2">
@@ -1124,7 +1127,7 @@ export function Nutrition() {
                   </button>
                 ))}
               </div>
-              <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
                 <select
                   value={customHydrationType}
                   onChange={e => setCustomHydrationType(e.target.value as HydrationBeverageType)}
@@ -1145,13 +1148,12 @@ export function Nutrition() {
                 <button
                   onClick={() => void handleSubmitCustomHydration()}
                   disabled={savingWater}
-                  className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-2"
                 >
                   Добавить
                 </button>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <div className="flex gap-2">
+              <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                   <input
                     type="text"
                     inputMode="decimal"
@@ -1167,7 +1169,6 @@ export function Nutrition() {
                   >
                     Задать воду
                   </button>
-                </div>
                 <button
                   onClick={() => void handleSetWaterAbsolute(0)}
                   disabled={savingWater}
@@ -1205,6 +1206,18 @@ export function Nutrition() {
           </div>
           {loading ? <div className="h-56 rounded bg-muted animate-pulse" /> : chartData.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">Нет данных</p>
+          ) : !hasHydrationData ? (
+            <div className="flex h-60 items-center justify-center rounded-2xl border border-dashed border-border/70 bg-background/35 px-6 text-center">
+              <div className="max-w-sm">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-500/10 text-cyan-200">
+                  <GlassWater className="h-5 w-5" />
+                </div>
+                <p className="mt-4 text-sm font-medium text-foreground">Пока нет логов по гидратации</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Добавь воду, чай или кофе в блоке слева. Когда появятся первые записи, здесь будет видно, что идёт в цель, а что считается отдельно.
+                </p>
+              </div>
+            </div>
           ) : (
             <EChart option={buildHydrationOption(chartData, waterTarget)} height={240} />
           )}
