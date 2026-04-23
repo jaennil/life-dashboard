@@ -150,6 +150,23 @@ export interface FitnessActivityTypeStat {
   count: number
 }
 
+export interface StravaGoldenWeek {
+  week: string
+  activity_days: number
+  activities_count: number
+  km: number
+}
+
+export interface HevyGoldenWeek {
+  week: string
+  workouts_count: number
+  sets_count: number
+  push_count: number
+  pull_count: number
+  legs_count: number
+  other_count: number
+}
+
 export interface FitnessSplitBucket {
   key: string
   label: string
@@ -167,11 +184,13 @@ export interface FitnessGoldenMetrics {
   strava: {
     cards: FitnessGoldenCard[]
     top_types: FitnessActivityTypeStat[]
+    weekly: StravaGoldenWeek[]
   }
   hevy: {
     cards: FitnessGoldenCard[]
     splits: FitnessSplitBucket[]
     progressions: FitnessProgressLift[]
+    weekly: HevyGoldenWeek[]
   }
 }
 

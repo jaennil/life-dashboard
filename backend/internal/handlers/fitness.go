@@ -98,6 +98,23 @@ type FitnessActivityTypeStat struct {
 	Count int    `json:"count"`
 }
 
+type StravaGoldenWeek struct {
+	Week            string  `json:"week"`
+	ActivityDays    int     `json:"activity_days"`
+	ActivitiesCount int     `json:"activities_count"`
+	KM              float64 `json:"km"`
+}
+
+type HevyGoldenWeek struct {
+	Week          string `json:"week"`
+	WorkoutsCount int    `json:"workouts_count"`
+	SetsCount     int    `json:"sets_count"`
+	PushCount     int    `json:"push_count"`
+	PullCount     int    `json:"pull_count"`
+	LegsCount     int    `json:"legs_count"`
+	OtherCount    int    `json:"other_count"`
+}
+
 type FitnessSplitBucket struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
@@ -114,12 +131,14 @@ type FitnessProgressLift struct {
 type StravaGoldenMetrics struct {
 	Cards    []FitnessGoldenCard       `json:"cards"`
 	TopTypes []FitnessActivityTypeStat `json:"top_types"`
+	Weekly   []StravaGoldenWeek        `json:"weekly"`
 }
 
 type HevyGoldenMetrics struct {
 	Cards        []FitnessGoldenCard   `json:"cards"`
 	Splits       []FitnessSplitBucket  `json:"splits"`
 	Progressions []FitnessProgressLift `json:"progressions"`
+	Weekly       []HevyGoldenWeek      `json:"weekly"`
 }
 
 type FitnessGoldenMetricsResponse struct {
@@ -644,6 +663,7 @@ func buildStravaGoldenMetrics(now time.Time, activities []Activity) StravaGolden
 	return StravaGoldenMetrics{
 		Cards:    cards,
 		TopTypes: topTypes,
+		Weekly:   buildStravaGoldenWeekly(now, activities, 8),
 	}
 }
 
@@ -770,7 +790,111 @@ func buildHevyGoldenMetrics(now time.Time, workouts []Workout) HevyGoldenMetrics
 		Cards:        cards,
 		Splits:       splits,
 		Progressions: progressions,
+		Weekly:       buildHevyGoldenWeekly(now, workouts, 8),
 	}
+}
+
+func buildStravaGoldenWeekly(now time.Time, activities []Activity, weeks int) []StravaGoldenWeek {
+	type weekAcc struct {
+		activities int
+		km         float64
+		days       map[string]struct{}
+	}
+
+	start := startOfLocalWeek(now).AddDate(0, 0, -7*(weeks-1))
+	byWeek := make(map[string]*weekAcc, weeks)
+	for i := 0; i < weeks; i++ {
+		weekStart := start.AddDate(0, 0, 7*i)
+		key := weekStart.Format("2006-01-02")
+		byWeek[key] = &weekAcc{days: make(map[string]struct{})}
+	}
+
+	for _, activity := range activities {
+		local := activity.StartedAt.In(aiDisplayLocation)
+		weekStart := startOfLocalWeek(local)
+		key := weekStart.Format("2006-01-02")
+		acc, ok := byWeek[key]
+		if !ok {
+			continue
+		}
+		acc.activities++
+		acc.days[local.Format("2006-01-02")] = struct{}{}
+		if activity.DistanceMeters != nil {
+			acc.km += *activity.DistanceMeters / 1000
+		}
+	}
+
+	result := make([]StravaGoldenWeek, 0, weeks)
+	for i := 0; i < weeks; i++ {
+		weekStart := start.AddDate(0, 0, 7*i)
+		key := weekStart.Format("2006-01-02")
+		acc := byWeek[key]
+		result = append(result, StravaGoldenWeek{
+			Week:            key,
+			ActivityDays:    len(acc.days),
+			ActivitiesCount: acc.activities,
+			KM:              acc.km,
+		})
+	}
+	return result
+}
+
+func buildHevyGoldenWeekly(now time.Time, workouts []Workout, weeks int) []HevyGoldenWeek {
+	type weekAcc struct {
+		workouts int
+		sets     int
+		push     int
+		pull     int
+		legs     int
+		other    int
+	}
+
+	start := startOfLocalWeek(now).AddDate(0, 0, -7*(weeks-1))
+	byWeek := make(map[string]*weekAcc, weeks)
+	for i := 0; i < weeks; i++ {
+		weekStart := start.AddDate(0, 0, 7*i)
+		key := weekStart.Format("2006-01-02")
+		byWeek[key] = &weekAcc{}
+	}
+
+	for _, workout := range workouts {
+		local := workout.StartedAt.In(aiDisplayLocation)
+		weekStart := startOfLocalWeek(local)
+		key := weekStart.Format("2006-01-02")
+		acc, ok := byWeek[key]
+		if !ok {
+			continue
+		}
+		acc.workouts++
+		acc.sets += countWorkoutSets(workout)
+		switch classifyWorkoutSplit(workout) {
+		case "push":
+			acc.push++
+		case "pull":
+			acc.pull++
+		case "legs":
+			acc.legs++
+		default:
+			acc.other++
+		}
+	}
+
+	result := make([]HevyGoldenWeek, 0, weeks)
+	for i := 0; i < weeks; i++ {
+		weekStart := start.AddDate(0, 0, 7*i)
+		key := weekStart.Format("2006-01-02")
+		acc := byWeek[key]
+		result = append(result, HevyGoldenWeek{
+			Week:          key,
+			WorkoutsCount: acc.workouts,
+			SetsCount:     acc.sets,
+			PushCount:     acc.push,
+			PullCount:     acc.pull,
+			LegsCount:     acc.legs,
+			OtherCount:    acc.other,
+		})
+	}
+	return result
 }
 
 func countWorkoutSets(workout Workout) int {
@@ -779,6 +903,15 @@ func countWorkoutSets(workout Workout) int {
 		total += len(exercise.Sets)
 	}
 	return total
+}
+
+func startOfLocalWeek(value time.Time) time.Time {
+	local := startOfLocalDay(value)
+	weekday := int(local.Weekday())
+	if weekday == 0 {
+		weekday = 7
+	}
+	return local.AddDate(0, 0, -(weekday - 1))
 }
 
 func startOfLocalDay(value time.Time) time.Time {

@@ -5,7 +5,7 @@ import { EChart } from '@/components/EChart'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
-import { api, type FitnessSummary, type FitnessGoldenMetrics, type FitnessGoldenCard, type WeekStat, type Activity, type Workout, type Integration } from '@/lib/api'
+import { api, type FitnessSummary, type FitnessGoldenMetrics, type FitnessGoldenCard, type Activity, type Workout, type Integration } from '@/lib/api'
 
 const ACTIVITY_ICONS: Record<string, string> = {
   Run: '🏃', Ride: '🚴', Swim: '🏊', Walk: '🚶', WeightTraining: '🏋️',
@@ -54,8 +54,12 @@ function fmtDateTime(iso: string) {
 }
 
 function fmtWeek(iso: string) {
+  const parts = iso.split('-').map(Number)
+  if (parts.length === 3 && parts.every(Number.isFinite)) {
+    return `${String(parts[2]).padStart(2, '0')}.${String(parts[1]).padStart(2, '0')}`
+  }
   const d = new Date(iso)
-  return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
 function fmtMetric(value: number | null) {
@@ -95,16 +99,16 @@ function toTooltipList(params: unknown) {
   return Array.isArray(params) ? params : [params]
 }
 
-function buildStravaWeeklyOption(data: Array<{ week: string; activities: number; km: number }>): EChartsCoreOption {
+function buildStravaGoldenTrendOption(data: FitnessGoldenMetrics['strava']['weekly']): EChartsCoreOption {
   return {
-    color: ['#f97316', '#3b82f6'],
+    color: ['#3b82f6', '#f97316', '#10b981'],
     animationDuration: 450,
     legend: {
       top: 0,
       itemWidth: 10,
       itemHeight: 10,
       textStyle: { color: CHART_MUTED, fontSize: 12 },
-      data: ['Активности', 'Км'],
+      data: ['Км', 'Активности', 'Активные дни'],
     },
     grid: { top: 40, right: 12, bottom: 12, left: 12, containLabel: true },
     tooltip: {
@@ -147,49 +151,63 @@ function buildStravaWeeklyOption(data: Array<{ week: string; activities: number;
     yAxis: [
       {
         type: 'value',
-        name: 'Активности',
+        name: 'Км',
         nameTextStyle: { color: CHART_MUTED, fontSize: 11, padding: [0, 0, 0, 8] },
-        axisLabel: { color: CHART_MUTED },
+        axisLabel: { color: CHART_MUTED, formatter: (value: number) => DECIMAL_FORMATTER.format(value) },
         splitLine: { lineStyle: { color: CHART_GRID } },
       },
       {
         type: 'value',
-        name: 'Км',
+        name: 'Сессии',
         nameTextStyle: { color: CHART_MUTED, fontSize: 11, padding: [0, 0, 0, 8] },
-        axisLabel: { color: CHART_MUTED, formatter: (value: number) => DECIMAL_FORMATTER.format(value) },
+        axisLabel: { color: CHART_MUTED },
         splitLine: { show: false },
       },
     ],
     series: [
       {
-        name: 'Активности',
-        type: 'line',
+        name: 'Км',
+        type: 'bar',
         yAxisIndex: 0,
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2 },
-        areaStyle: { color: 'rgba(249, 115, 22, 0.16)' },
-        data: data.map(point => point.activities),
+        barMaxWidth: 24,
+        itemStyle: { borderRadius: [8, 8, 0, 0] },
+        data: data.map(point => point.km),
       },
       {
-        name: 'Км',
+        name: 'Активности',
         type: 'line',
         yAxisIndex: 1,
         smooth: true,
         showSymbol: false,
         lineStyle: { width: 2 },
-        areaStyle: { color: 'rgba(59, 130, 246, 0.12)' },
-        data: data.map(point => point.km),
+        areaStyle: { color: 'rgba(249, 115, 22, 0.1)' },
+        data: data.map(point => point.activities_count),
+      },
+      {
+        name: 'Активные дни',
+        type: 'line',
+        yAxisIndex: 1,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2, type: 'dashed' },
+        data: data.map(point => point.activity_days),
       },
     ],
   }
 }
 
-function buildSimpleWeeklyOption(data: Array<{ week: string; workouts: number }>): EChartsCoreOption {
+function buildHevyLoadOption(data: FitnessGoldenMetrics['hevy']['weekly']): EChartsCoreOption {
   return {
-    color: ['#8b5cf6'],
+    color: ['#8b5cf6', '#22c55e'],
     animationDuration: 450,
-    grid: { top: 18, right: 12, bottom: 12, left: 12, containLabel: true },
+    legend: {
+      top: 0,
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: CHART_MUTED, fontSize: 12 },
+      data: ['Сеты', 'Тренировки'],
+    },
+    grid: { top: 40, right: 12, bottom: 12, left: 12, containLabel: true },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
@@ -197,17 +215,110 @@ function buildSimpleWeeklyOption(data: Array<{ week: string; workouts: number }>
       borderColor: CHART_GRID,
       textStyle: { color: CHART_TEXT },
       formatter: (params: unknown) => {
-        const point = toTooltipList(params)[0]
-        if (!isRecord(point)) return ''
-        return [
-          `<div>Неделя с ${fmtWeek(readString(point.axisValue) ?? '')}</div>`,
-          `${readString(point.marker) ?? ''}Тренировок: ${toNumber(readScalar(point.value))}`,
-        ].join('<br/>')
+        const points = toTooltipList(params)
+          .map(item => {
+            if (!isRecord(item)) return null
+            return {
+              marker: readString(item.marker) ?? '',
+              seriesName: readString(item.seriesName) ?? '',
+              value: readScalar(item.value),
+              axisValue: readString(item.axisValue) ?? '',
+            }
+          })
+          .filter(Boolean)
+
+        const axisValue = points[0]?.axisValue ?? ''
+        const lines = points.map(point => `${point!.marker}${point!.seriesName}: ${toNumber(point!.value)}`)
+        return [`<div>Неделя с ${fmtWeek(axisValue)}</div>`, ...lines].join('<br/>')
       },
     },
     xAxis: {
       type: 'category',
-      boundaryGap: false,
+      data: data.map(point => point.week),
+      axisLabel: { color: CHART_MUTED, formatter: (value: string) => fmtWeek(value) },
+      axisLine: { lineStyle: { color: CHART_GRID } },
+      axisTick: { show: false },
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: 'Сеты',
+        nameTextStyle: { color: CHART_MUTED, fontSize: 11, padding: [0, 0, 0, 8] },
+        axisLabel: { color: CHART_MUTED },
+        splitLine: { lineStyle: { color: CHART_GRID } },
+      },
+      {
+        type: 'value',
+        name: 'Тренировки',
+        nameTextStyle: { color: CHART_MUTED, fontSize: 11, padding: [0, 0, 0, 8] },
+        axisLabel: { color: CHART_MUTED },
+        splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: 'Сеты',
+        type: 'bar',
+        yAxisIndex: 0,
+        barMaxWidth: 24,
+        itemStyle: { borderRadius: [8, 8, 0, 0] },
+        data: data.map(point => point.sets_count),
+      },
+      {
+        name: 'Тренировки',
+        type: 'line',
+        yAxisIndex: 1,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2.5 },
+        areaStyle: { color: 'rgba(34, 197, 94, 0.14)' },
+        data: data.map(point => point.workouts_count),
+      },
+    ],
+  }
+}
+
+function buildHevySplitTimelineOption(data: FitnessGoldenMetrics['hevy']['weekly']): EChartsCoreOption {
+  return {
+    color: ['#fb7185', '#38bdf8', '#34d399', '#94a3b8'],
+    animationDuration: 450,
+    legend: {
+      top: 0,
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: CHART_MUTED, fontSize: 12 },
+      data: ['Push', 'Pull', 'Legs', 'Other'],
+    },
+    grid: { top: 40, right: 12, bottom: 12, left: 12, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (params: unknown) => {
+        const points = toTooltipList(params)
+          .map(item => {
+            if (!isRecord(item)) return null
+            return {
+              marker: readString(item.marker) ?? '',
+              seriesName: readString(item.seriesName) ?? '',
+              value: readScalar(item.value),
+              axisValue: readString(item.axisValue) ?? '',
+            }
+          })
+          .filter(Boolean)
+
+        const axisValue = points[0]?.axisValue ?? ''
+        const lines = points
+          .filter(point => toNumber(point!.value) > 0)
+          .map(point => `${point!.marker}${point!.seriesName}: ${toNumber(point!.value)}`)
+
+        return [`<div>Неделя с ${fmtWeek(axisValue)}</div>`, ...lines].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'category',
       data: data.map(point => point.week),
       axisLabel: { color: CHART_MUTED, formatter: (value: string) => fmtWeek(value) },
       axisLine: { lineStyle: { color: CHART_GRID } },
@@ -220,13 +331,32 @@ function buildSimpleWeeklyOption(data: Array<{ week: string; workouts: number }>
     },
     series: [
       {
-        name: 'Тренировки',
-        type: 'line',
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2.5 },
-        areaStyle: { color: 'rgba(139, 92, 246, 0.18)' },
-        data: data.map(point => point.workouts),
+        name: 'Push',
+        type: 'bar',
+        stack: 'split',
+        emphasis: { focus: 'series' },
+        data: data.map(point => point.push_count),
+      },
+      {
+        name: 'Pull',
+        type: 'bar',
+        stack: 'split',
+        emphasis: { focus: 'series' },
+        data: data.map(point => point.pull_count),
+      },
+      {
+        name: 'Legs',
+        type: 'bar',
+        stack: 'split',
+        emphasis: { focus: 'series' },
+        data: data.map(point => point.legs_count),
+      },
+      {
+        name: 'Other',
+        type: 'bar',
+        stack: 'split',
+        emphasis: { focus: 'series' },
+        data: data.map(point => point.other_count),
       },
     ],
   }
@@ -413,7 +543,6 @@ function WorkoutRow({ workout }: { workout: Workout }) {
 export function Fitness() {
   const [summary, setSummary] = useState<FitnessSummary | null>(null)
   const [golden, setGolden] = useState<FitnessGoldenMetrics | null>(null)
-  const [weekly, setWeekly] = useState<WeekStat[]>([])
   const [activities, setActivities] = useState<Activity[]>([])
   const [workouts, setWorkouts] = useState<Workout[]>([])
   const [loading, setLoading] = useState(true)
@@ -425,16 +554,14 @@ export function Fitness() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [nextSummary, nextGolden, nextWeekly, nextActivities, nextWorkouts] = await Promise.all([
+      const [nextSummary, nextGolden, nextActivities, nextWorkouts] = await Promise.all([
         api.getFitnessSummary(),
         api.getFitnessGolden(),
-        api.getFitnessWeekly(),
         api.getActivities(),
         api.getWorkouts(),
       ])
       setSummary(nextSummary)
       setGolden(nextGolden)
-      setWeekly(nextWeekly)
       setActivities(nextActivities)
       setWorkouts(nextWorkouts)
     } catch (error) {
@@ -505,20 +632,8 @@ export function Fitness() {
     })).sort((a, b) => b.value - a.value)
   }, [workouts])
 
-  const stravaWeekly = useMemo(() => {
-    return weekly.map(point => ({
-      week: point.week,
-      activities: point.activities_count,
-      km: point.km,
-    }))
-  }, [weekly])
-
-  const hevyWeekly = useMemo(() => {
-    return weekly.map(point => ({
-      week: point.week,
-      workouts: point.workouts_count,
-    }))
-  }, [weekly])
+  const stravaGoldenWeekly = golden?.strava.weekly ?? []
+  const hevyGoldenWeekly = golden?.hevy.weekly ?? []
 
   const cards = sourceTab === 'strava' ? golden?.strava.cards ?? [] : golden?.hevy.cards ?? []
 
@@ -598,11 +713,14 @@ export function Fitness() {
         <>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Strava по неделям</h2>
-              {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : stravaWeekly.length === 0 ? (
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Consistency и объём</h2>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Километры, количество сессий и активных дней по неделям. Это быстрее показывает просадку режима, чем голый total.</p>
+              </div>
+              {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : stravaGoldenWeekly.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
               ) : (
-                <EChart option={buildStravaWeeklyOption(stravaWeekly)} height={200} />
+                <EChart option={buildStravaGoldenTrendOption(stravaGoldenWeekly)} height={240} />
               )}
             </div>
 
@@ -725,45 +843,38 @@ export function Fitness() {
 
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <div className="mb-4">
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Баланс сплита</h2>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">Последние 30 дней по `push / pull / legs`. Так сразу видно, что выпало и где верх тела начинает доминировать.</p>
+                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Баланс сплита по неделям</h2>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Не просто итоговый `push / pull / legs`, а как сплит складывался неделя за неделей. Так видно перекос, а не только финальную сумму.</p>
               </div>
-              <div className="space-y-3">
-                {(golden?.hevy.splits ?? []).filter(split => split.count > 0 || split.key !== 'other').map(split => {
-                  const total = (golden?.hevy.splits ?? []).reduce((sum, item) => sum + item.count, 0)
-                  const width = total > 0 ? Math.max((split.count / total) * 100, split.count > 0 ? 8 : 0) : 0
-                  return (
-                    <div key={split.key} className="space-y-2">
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="font-medium text-foreground">{split.label}</span>
-                        <span className="text-muted-foreground">{split.count}</span>
+              {loading ? <div className="h-64 bg-muted rounded animate-pulse" /> : hevyGoldenWeekly.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border/80 bg-background/30 px-4 py-8 text-sm text-muted-foreground">
+                  Пока не хватает данных, чтобы показать ритм сплита по неделям.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <EChart option={buildHevySplitTimelineOption(hevyGoldenWeekly)} height={260} />
+                  <div className="flex flex-wrap gap-2">
+                    {(golden?.hevy.splits ?? []).filter(split => split.count > 0 || split.key !== 'other').map(split => (
+                      <div key={split.key} className="rounded-full border border-border/80 bg-background/60 px-3 py-1.5 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{split.label}</span> · {split.count}
                       </div>
-                      <div className="h-2 rounded-full bg-muted/70 overflow-hidden">
-                        <div
-                          className={cn(
-                            'h-full rounded-full transition-all',
-                            split.key === 'push' && 'bg-rose-400',
-                            split.key === 'pull' && 'bg-sky-400',
-                            split.key === 'legs' && 'bg-emerald-400',
-                            split.key === 'other' && 'bg-slate-400',
-                          )}
-                          style={{ width: `${width}%` }}
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Hevy по неделям</h2>
-              {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : hevyWeekly.length === 0 ? (
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Нагрузка по неделям</h2>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Количество тренировок само по себе слабо говорит о нагрузке. Здесь видно, сколько сетов реально набежало за неделю.</p>
+              </div>
+              {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : hevyGoldenWeekly.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
               ) : (
-                <EChart option={buildSimpleWeeklyOption(hevyWeekly)} height={200} />
+                <EChart option={buildHevyLoadOption(hevyGoldenWeekly)} height={240} />
               )}
             </div>
 

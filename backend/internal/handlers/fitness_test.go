@@ -159,5 +159,48 @@ func TestClassifyWorkoutSplitPrefersLegsSignals(t *testing.T) {
 	}
 }
 
+func TestStartOfLocalWeekUsesMondayInMoscow(t *testing.T) {
+	got := startOfLocalWeek(time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC))
+	want := time.Date(2026, 4, 20, 0, 0, 0, 0, aiDisplayLocation)
+	if !got.Equal(want) {
+		t.Fatalf("expected week start %s, got %s", want, got)
+	}
+}
+
+func TestBuildHevyGoldenWeeklyAggregatesByWeek(t *testing.T) {
+	now := time.Date(2026, 4, 23, 12, 0, 0, 0, aiDisplayLocation)
+	workouts := []Workout{
+		{
+			StartedAt: time.Date(2026, 4, 22, 7, 0, 0, 0, aiDisplayLocation),
+			Title:     "Push day",
+			Exercises: []WorkoutExercise{
+				{Name: "Bench Press", Sets: []WorkoutSet{{}, {}, {}}},
+				{Name: "Triceps Rope Pushdown", Sets: []WorkoutSet{{}, {}}},
+			},
+		},
+		{
+			StartedAt: time.Date(2026, 4, 15, 7, 0, 0, 0, aiDisplayLocation),
+			Title:     "Legs day",
+			Exercises: []WorkoutExercise{
+				{Name: "Leg Press", Sets: []WorkoutSet{{}, {}, {}, {}}},
+			},
+		},
+	}
+
+	weekly := buildHevyGoldenWeekly(now, workouts, 2)
+	if len(weekly) != 2 {
+		t.Fatalf("expected 2 weekly buckets, got %d", len(weekly))
+	}
+	if weekly[0].Week != "2026-04-13" || weekly[1].Week != "2026-04-20" {
+		t.Fatalf("unexpected week starts: %+v", weekly)
+	}
+	if weekly[0].WorkoutsCount != 1 || weekly[0].SetsCount != 4 || weekly[0].LegsCount != 1 {
+		t.Fatalf("unexpected older bucket: %+v", weekly[0])
+	}
+	if weekly[1].WorkoutsCount != 1 || weekly[1].SetsCount != 5 || weekly[1].PushCount != 1 {
+		t.Fatalf("unexpected latest bucket: %+v", weekly[1])
+	}
+}
+
 func float64Ptr(value float64) *float64 { return &value }
 func intValuePtr(value int) *int        { return &value }
