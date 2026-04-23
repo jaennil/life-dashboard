@@ -80,7 +80,7 @@ type NutritionDay struct {
 	HydrationML     float64                      `json:"hydration_ml"`
 	CountedDrinksML float64                      `json:"counted_drinks_ml"`
 	OtherDrinksML   float64                      `json:"other_drinks_ml"`
-	Beverages       []NutritionHydrationBeverage `json:"beverages,omitempty"`
+	Beverages       []NutritionHydrationBeverage `json:"beverages"`
 	Meals           []NutritionMeal              `json:"meals"`
 }
 

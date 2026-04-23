@@ -573,7 +573,7 @@ function filterNutritionDayByMeal(day: NutritionDay, mealType: string): Nutritio
     hydration_ml: day.hydration_ml,
     counted_drinks_ml: day.counted_drinks_ml,
     other_drinks_ml: day.other_drinks_ml,
-    beverages: day.beverages,
+    beverages: day.beverages ?? [],
     meals,
   }
 }
@@ -581,6 +581,7 @@ function filterNutritionDayByMeal(day: NutritionDay, mealType: string): Nutritio
 function DayRow({ day, calorieReference, calorieTarget }: { day: NutritionDay; calorieReference: number; calorieTarget?: number }) {
   const [open, setOpen] = useState(false)
   const hasMeals = day.meals.some(m => m.items.length > 0)
+  const beverages = day.beverages ?? []
   const pct = calorieReference > 0 ? Math.min((day.calories / calorieReference) * 100, 100) : 0
   const overTarget = typeof calorieTarget === 'number' && day.calories > calorieTarget
 
@@ -605,7 +606,7 @@ function DayRow({ day, calorieReference, calorieTarget }: { day: NutritionDay; c
             </div>
             <div className="flex gap-2 text-xs text-muted-foreground shrink-0">
               {day.water_ml > 0 && <span className="text-cyan-300">💧 {day.water_ml.toFixed(0)}мл</span>}
-              {day.beverages.map(beverage => (
+              {beverages.map(beverage => (
                 <span key={beverage.beverage_type} className={cn(beverage.counts_toward_goal ? 'text-emerald-300' : 'text-amber-300')}>
                   {hydrationBeverageEmoji(beverage.beverage_type)} {beverage.amount_ml.toFixed(0)}мл
                 </span>

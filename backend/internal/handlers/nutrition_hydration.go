@@ -41,7 +41,7 @@ type NutritionHydrationState struct {
 	CountedDrinksML float64                      `json:"counted_drinks_ml"`
 	OtherDrinksML   float64                      `json:"other_drinks_ml"`
 	HydrationMode   string                       `json:"hydration_mode"`
-	Beverages       []NutritionHydrationBeverage `json:"beverages,omitempty"`
+	Beverages       []NutritionHydrationBeverage `json:"beverages"`
 }
 
 type nutritionHydrationAggregate struct {
