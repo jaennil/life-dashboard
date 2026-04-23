@@ -76,6 +76,7 @@ export interface TopExpense {
 }
 
 export interface FinanceObligation {
+  key: string
   name: string
   category?: string
   amount: number
@@ -85,6 +86,15 @@ export interface FinanceObligation {
   cadence_label: string
   occurrences: number
   expected_occurrences: number
+  rule_action?: 'ignore' | 'force'
+}
+
+export interface FinanceObligationRule {
+  key: string
+  label: string
+  action: 'ignore' | 'force'
+  created_at: string
+  updated_at: string
 }
 
 export interface FinanceObligationsSummary {
@@ -92,6 +102,7 @@ export interface FinanceObligationsSummary {
   upcoming_total: number
   count: number
   items: FinanceObligation[]
+  rules: FinanceObligationRule[]
 }
 
 export interface Account {
@@ -455,6 +466,20 @@ export const api = {
   },
   getFinanceObligations: (days = 30) =>
     get<FinanceObligationsSummary>('/finance/obligations?days=' + encodeURIComponent(String(days))),
+  saveFinanceObligationRule: (input: { key?: string; label: string; action: 'ignore' | 'force' }) =>
+    fetch(BASE + '/finance/obligation-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+    }),
+  deleteFinanceObligationRule: (key: string) =>
+    fetch(BASE + '/finance/obligation-rules/' + encodeURIComponent(key), {
+      method: 'DELETE',
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+    }),
   getCategoryList: () => get<string[]>('/finance/category-list'),
   getNutritionSummary: () => get<NutritionSummary>('/nutrition/summary'),
   getNutritionDaily: (days = 14) => get<NutritionDay[]>(`/nutrition/daily?days=${days}`),

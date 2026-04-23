@@ -282,6 +282,8 @@ func main() {
 		r.Get("/api/v1/finance/daily", financeHandler.GetDailyTotals)
 		r.Get("/api/v1/finance/top-expenses", financeHandler.GetTopExpenses)
 		r.Get("/api/v1/finance/obligations", financeHandler.GetObligations)
+		r.Post("/api/v1/finance/obligation-rules", financeHandler.SaveObligationRule)
+		r.Delete("/api/v1/finance/obligation-rules/{key}", financeHandler.DeleteObligationRule)
 		r.Get("/api/v1/finance/category-list", financeHandler.GetCategoryList)
 
 		fitnessHandler := handlers.NewFitness(pool, log.Logger)

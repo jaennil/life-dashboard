@@ -1,12 +1,15 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   BadgeRussianRuble,
+  Ban,
   CalendarClock,
   CreditCard,
   EyeOff,
   HandCoins,
   Landmark,
+  Pin,
   PiggyBank,
+  RotateCcw,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -25,7 +28,7 @@ import { cn, syncCaptionForSources } from '@/lib/utils'
 import {
   api,
   type MonthStat, type Account, type FinanceTransaction,
-  type CategoryStat, type DailyTotal, type TopExpense, type Integration, type FinanceObligationsSummary,
+  type CategoryStat, type DailyTotal, type TopExpense, type Integration, type FinanceObligationsSummary, type FinanceObligationRule,
 } from '@/lib/api'
 
 const CATEGORY_COLORS = [
@@ -598,6 +601,8 @@ export function Finance() {
   const [loading, setLoading] = useState(true)
   const [txLoading, setTxLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [ruleSavingKey, setRuleSavingKey] = useState<string | null>(null)
+  const [ruleError, setRuleError] = useState('')
   const [integrations, setIntegrations] = useState<Integration[]>([])
 
   const from = customFrom || dateOffset(period)
@@ -705,6 +710,7 @@ export function Finance() {
   const concentrationLeaders = topThreeCategories.map(category => category.category).join(' • ')
   const obligationsWindowDays = obligations?.window_days ?? 30
   const obligationItems = obligations?.items ?? []
+  const obligationRules = obligations?.rules ?? []
   const upcomingObligationsTotal = obligations?.upcoming_total ?? 0
   const nextObligation = obligationItems[0]
   const obligationCoverageRatio = upcomingObligationsTotal > 0 ? totalBalance / upcomingObligationsTotal : null
@@ -729,6 +735,32 @@ export function Finance() {
       console.error(error)
     } finally {
       setSyncing(false)
+    }
+  }
+
+  async function handleSaveObligationRule(input: { key: string; label: string; action: 'ignore' | 'force' }) {
+    setRuleSavingKey(`${input.action}:${input.key}`)
+    setRuleError('')
+    try {
+      await api.saveFinanceObligationRule(input)
+      await loadPageData()
+    } catch (error) {
+      setRuleError(error instanceof Error ? error.message : 'Не удалось сохранить правило')
+    } finally {
+      setRuleSavingKey(null)
+    }
+  }
+
+  async function handleDeleteObligationRule(rule: FinanceObligationRule) {
+    setRuleSavingKey(`delete:${rule.key}`)
+    setRuleError('')
+    try {
+      await api.deleteFinanceObligationRule(rule.key)
+      await loadPageData()
+    } catch (error) {
+      setRuleError(error instanceof Error ? error.message : 'Не удалось удалить правило')
+    } finally {
+      setRuleSavingKey(null)
     }
   }
 
@@ -958,6 +990,9 @@ export function Finance() {
                 <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
                   Найдено: {obligationItems.length}
                 </span>
+                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                  Ручных правил: {obligationRules.length}
+                </span>
                 {nextObligation ? (
                   <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
                     Следующий платёж: {fmtDate(nextObligation.next_due_at)}
@@ -992,6 +1027,59 @@ export function Finance() {
                 ? `Баланс ${fmt(totalBalance)} против обязательств ${fmt(upcomingObligationsTotal)} → ${obligationCoverageGap >= 0 ? `запас ${fmt(obligationCoverageGap)}` : `дефицит ${fmt(Math.abs(obligationCoverageGap))}`}`
                 : 'Обязательства не найдены, поэтому coverage сейчас не ограничен'}
             />
+          </div>
+
+          <div className="rounded-2xl border bg-card/70 p-5 shadow-sm">
+            <div className="flex flex-col gap-3">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wider text-foreground">Ручные правила</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Если эвристика ошиблась, можно закрепить recurring-платёж или навсегда выкинуть шумный merchant из прогноза.
+                </p>
+              </div>
+              {ruleError ? (
+                <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                  {ruleError}
+                </div>
+              ) : null}
+              {obligationRules.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border/80 bg-background/40 px-4 py-4 text-sm text-muted-foreground">
+                  Пока нет ручных правил. Если увидишь шум или захочешь зафиксировать recurring-платёж, управление появится прямо на карточках ниже.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {obligationRules.map(rule => (
+                    <div key={rule.key} className="flex flex-col gap-3 rounded-xl border border-border/80 bg-background/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-foreground">{rule.label}</p>
+                        <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                          <span className={cn(
+                            'rounded-full border px-2.5 py-1',
+                            rule.action === 'force'
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                              : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+                          )}>
+                            {rule.action === 'force' ? 'Зафиксирован' : 'Игнорируется'}
+                          </span>
+                          <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                            обновлено {fmtDate(rule.updated_at)}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteObligationRule(rule)}
+                        disabled={ruleSavingKey === `delete:${rule.key}`}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        {ruleSavingKey === `delete:${rule.key}` ? 'Убираю…' : 'Убрать правило'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1039,6 +1127,15 @@ export function Finance() {
                         <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
                           История: {item.occurrences} списания
                         </span>
+                        {item.rule_action === 'force' ? (
+                          <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-emerald-200">
+                            Зафиксирован вручную
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                            Автоэвристика
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -1057,6 +1154,29 @@ export function Finance() {
                     ) : (
                       <span>В окне один платёж</span>
                     )}
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {item.rule_action === 'force' ? null : (
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveObligationRule({ key: item.key, label: item.name, action: 'force' })}
+                        disabled={ruleSavingKey === `force:${item.key}` || ruleSavingKey === `ignore:${item.key}`}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-100 transition-colors hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Pin className="h-3.5 w-3.5" />
+                        {ruleSavingKey === `force:${item.key}` ? 'Фиксирую…' : 'Зафиксировать'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveObligationRule({ key: item.key, label: item.name, action: 'ignore' })}
+                      disabled={ruleSavingKey === `force:${item.key}` || ruleSavingKey === `ignore:${item.key}`}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Ban className="h-3.5 w-3.5" />
+                      {ruleSavingKey === `ignore:${item.key}` ? 'Исключаю…' : 'Игнорировать'}
+                    </button>
                   </div>
                 </div>
               ))}

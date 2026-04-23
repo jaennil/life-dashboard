@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -11,10 +12,12 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/go-chi/chi/v5"
 	authmw "life-dashboard/internal/middleware"
 )
 
 type FinanceObligation struct {
+	Key                 string    `json:"key"`
 	Name                string    `json:"name"`
 	Category            string    `json:"category,omitempty"`
 	Amount              float64   `json:"amount"`
@@ -24,13 +27,23 @@ type FinanceObligation struct {
 	CadenceLabel        string    `json:"cadence_label"`
 	Occurrences         int       `json:"occurrences"`
 	ExpectedOccurrences int       `json:"expected_occurrences"`
+	RuleAction          string    `json:"rule_action,omitempty"`
+}
+
+type FinanceObligationRule struct {
+	Key       string    `json:"key"`
+	Label     string    `json:"label"`
+	Action    string    `json:"action"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type FinanceObligationsSummary struct {
-	WindowDays    int                 `json:"window_days"`
-	UpcomingTotal float64             `json:"upcoming_total"`
-	Count         int                 `json:"count"`
-	Items         []FinanceObligation `json:"items"`
+	WindowDays    int                     `json:"window_days"`
+	UpcomingTotal float64                 `json:"upcoming_total"`
+	Count         int                     `json:"count"`
+	Items         []FinanceObligation     `json:"items"`
+	Rules         []FinanceObligationRule `json:"rules"`
 }
 
 type financeExpenseRecord struct {
@@ -47,7 +60,14 @@ type financeRecurringGroup struct {
 	Category   string
 	Fallback   bool
 	KnownLabel bool
+	RuleAction string
 	Records    []financeExpenseRecord
+}
+
+type saveFinanceObligationRuleRequest struct {
+	Key    string `json:"key"`
+	Label  string `json:"label"`
+	Action string `json:"action"`
 }
 
 var (
@@ -116,17 +136,128 @@ func (h *FinanceHandler) GetObligations(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	summary := detectFinanceObligations(records, now, windowDays)
+	rules, err := h.loadFinanceObligationRules(ctx, userID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("load finance obligation rules")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	summary := detectFinanceObligations(records, now, windowDays, rules)
+	summary.Rules = rules
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(summary)
 }
 
-func detectFinanceObligations(records []financeExpenseRecord, now time.Time, windowDays int) FinanceObligationsSummary {
+func (h *FinanceHandler) SaveObligationRule(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := ctx.Value(authmw.UserIDKey).(string)
+
+	var req saveFinanceObligationRuleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	action := strings.TrimSpace(strings.ToLower(req.Action))
+	if action != "ignore" && action != "force" {
+		http.Error(w, "invalid action", http.StatusBadRequest)
+		return
+	}
+
+	label := strings.TrimSpace(req.Label)
+	key := strings.TrimSpace(req.Key)
+	if key == "" {
+		key = financeNormalizeRecurringText(label)
+	}
+	if key == "" {
+		http.Error(w, "missing rule key", http.StatusBadRequest)
+		return
+	}
+	if label == "" {
+		label = key
+	}
+
+	_, err := h.db.Exec(ctx, `
+		INSERT INTO finance_obligation_rules (user_id, match_key, match_label, action)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id, match_key)
+		DO UPDATE SET
+			match_label = EXCLUDED.match_label,
+			action = EXCLUDED.action,
+			updated_at = NOW()
+	`, userID, key, label, action)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("save finance obligation rule")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *FinanceHandler) DeleteObligationRule(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := ctx.Value(authmw.UserIDKey).(string)
+	key := financeNormalizeRecurringText(chi.URLParam(r, "key"))
+	if key == "" {
+		http.Error(w, "missing rule key", http.StatusBadRequest)
+		return
+	}
+
+	tag, err := h.db.Exec(ctx, `
+		DELETE FROM finance_obligation_rules
+		WHERE user_id = $1 AND match_key = $2
+	`, userID, key)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("delete finance obligation rule")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		http.Error(w, "rule not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *FinanceHandler) loadFinanceObligationRules(ctx context.Context, userID string) ([]FinanceObligationRule, error) {
+	rows, err := h.db.Query(ctx, `
+		SELECT match_key, match_label, action, created_at, updated_at
+		FROM finance_obligation_rules
+		WHERE user_id = $1
+		ORDER BY updated_at DESC, match_label ASC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rules := make([]FinanceObligationRule, 0, 8)
+	for rows.Next() {
+		var item FinanceObligationRule
+		if err := rows.Scan(&item.Key, &item.Label, &item.Action, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		rules = append(rules, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
+func detectFinanceObligations(records []financeExpenseRecord, now time.Time, windowDays int, rules []FinanceObligationRule) FinanceObligationsSummary {
 	if windowDays <= 0 {
 		windowDays = 30
 	}
 	start := financeStartOfDay(now)
 	end := start.AddDate(0, 0, windowDays)
+	rulesByKey := make(map[string]FinanceObligationRule, len(rules))
+	for _, rule := range rules {
+		rulesByKey[rule.Key] = rule
+	}
 
 	groups := make(map[string]*financeRecurringGroup)
 	for _, record := range records {
@@ -134,14 +265,26 @@ func detectFinanceObligations(records []financeExpenseRecord, now time.Time, win
 		if !ok {
 			continue
 		}
+		if rule, ok := rulesByKey[key]; ok && rule.Action == "ignore" {
+			continue
+		}
 		group := groups[key]
 		if group == nil {
+			ruleAction := ""
+			knownLabel := financeLooksLikeMandatory(name, record.Category)
+			if rule, ok := rulesByKey[key]; ok {
+				ruleAction = rule.Action
+				if rule.Action == "force" {
+					knownLabel = true
+				}
+			}
 			group = &financeRecurringGroup{
 				Key:        key,
 				Name:       name,
 				Category:   strings.TrimSpace(record.Category),
 				Fallback:   fallback,
-				KnownLabel: financeLooksLikeMandatory(name, record.Category),
+				KnownLabel: knownLabel,
+				RuleAction: ruleAction,
 				Records:    make([]financeExpenseRecord, 0, 8),
 			}
 			groups[key] = group
@@ -227,6 +370,7 @@ func financeBuildObligation(group *financeRecurringGroup, start, end time.Time) 
 	}
 
 	return FinanceObligation{
+		Key:                 group.Key,
 		Name:                group.Name,
 		Category:            group.Category,
 		Amount:              medianAmount,
@@ -236,6 +380,7 @@ func financeBuildObligation(group *financeRecurringGroup, start, end time.Time) 
 		CadenceLabel:        cadenceLabel,
 		Occurrences:         len(group.Records),
 		ExpectedOccurrences: expectedOccurrences,
+		RuleAction:          group.RuleAction,
 	}, true
 }
 

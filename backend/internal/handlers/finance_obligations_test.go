@@ -16,7 +16,7 @@ func TestDetectFinanceObligationsMonthly(t *testing.T) {
 		{OccurredAt: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Amount: 340, Payee: "Кофе", Category: "Eating out"},
 	}
 
-	summary := detectFinanceObligations(records, now, 30)
+	summary := detectFinanceObligations(records, now, 30, nil)
 	if summary.Count != 1 {
 		t.Fatalf("expected 1 obligation, got %d", summary.Count)
 	}
@@ -44,7 +44,7 @@ func TestDetectFinanceObligationsWeeklyProjectedMultipleTimes(t *testing.T) {
 		{OccurredAt: time.Date(2026, 4, 22, 9, 0, 0, 0, time.UTC), Amount: 890, Payee: "Спортзал", Category: "Fitness"},
 	}
 
-	summary := detectFinanceObligations(records, now, 30)
+	summary := detectFinanceObligations(records, now, 30, nil)
 	if summary.Count != 1 {
 		t.Fatalf("expected 1 obligation, got %d", summary.Count)
 	}
@@ -69,7 +69,7 @@ func TestDetectFinanceObligationsIgnoresNoisyHistory(t *testing.T) {
 		{OccurredAt: time.Date(2026, 4, 11, 9, 0, 0, 0, time.UTC), Amount: 4500, Payee: "Маркет", Category: "Shopping"},
 	}
 
-	summary := detectFinanceObligations(records, now, 30)
+	summary := detectFinanceObligations(records, now, 30, nil)
 	if summary.Count != 0 {
 		t.Fatalf("expected noisy history to be ignored, got %d obligations", summary.Count)
 	}
@@ -83,8 +83,45 @@ func TestDetectFinanceObligationsSkipsLowSignalGroceries(t *testing.T) {
 		{OccurredAt: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Amount: 429, Payee: "MA0004883725", Category: "Groceries"},
 	}
 
-	summary := detectFinanceObligations(records, now, 30)
+	summary := detectFinanceObligations(records, now, 30, nil)
 	if summary.Count != 0 {
 		t.Fatalf("expected low-signal groceries to be ignored, got %d obligations", summary.Count)
+	}
+}
+
+func TestDetectFinanceObligationsAppliesIgnoreRule(t *testing.T) {
+	now := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
+	records := []financeExpenseRecord{
+		{OccurredAt: time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC), Amount: 499, Payee: "Яндекс Плюс", Category: "Subscriptions"},
+		{OccurredAt: time.Date(2026, 2, 4, 9, 0, 0, 0, time.UTC), Amount: 499, Payee: "Яндекс Плюс", Category: "Subscriptions"},
+		{OccurredAt: time.Date(2026, 3, 6, 9, 0, 0, 0, time.UTC), Amount: 499, Payee: "Яндекс Плюс", Category: "Subscriptions"},
+	}
+	rules := []FinanceObligationRule{
+		{Key: "яндекс плюс", Label: "Яндекс Плюс", Action: "ignore"},
+	}
+
+	summary := detectFinanceObligations(records, now, 30, rules)
+	if summary.Count != 0 {
+		t.Fatalf("expected ignore rule to hide obligation, got %d", summary.Count)
+	}
+}
+
+func TestDetectFinanceObligationsMarksForcedRule(t *testing.T) {
+	now := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
+	records := []financeExpenseRecord{
+		{OccurredAt: time.Date(2026, 3, 25, 9, 0, 0, 0, time.UTC), Amount: 890, Payee: "Спортзал", Category: "Fitness"},
+		{OccurredAt: time.Date(2026, 4, 1, 9, 0, 0, 0, time.UTC), Amount: 890, Payee: "Спортзал", Category: "Fitness"},
+		{OccurredAt: time.Date(2026, 4, 8, 9, 0, 0, 0, time.UTC), Amount: 890, Payee: "Спортзал", Category: "Fitness"},
+	}
+	rules := []FinanceObligationRule{
+		{Key: "спортзал", Label: "Спортзал", Action: "force"},
+	}
+
+	summary := detectFinanceObligations(records, now, 30, rules)
+	if summary.Count != 1 {
+		t.Fatalf("expected forced rule to keep obligation, got %d", summary.Count)
+	}
+	if summary.Items[0].RuleAction != "force" {
+		t.Fatalf("expected force action to be reflected in item, got %q", summary.Items[0].RuleAction)
 	}
 }
