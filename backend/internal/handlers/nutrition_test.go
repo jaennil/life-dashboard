@@ -30,3 +30,42 @@ func TestParseNutritionWindowDays(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildNutritionGoldenMetricsUsesTargets(t *testing.T) {
+	targetCalories := 3000.0
+	targetProtein := 180.0
+	targetWater := 2500.0
+
+	resp := buildNutritionGoldenMetrics(7, []nutritionGoldenDay{
+		{Calories: 2900, Protein: 185, WaterML: 2600, MealTypeCount: 3},
+		{Calories: 3100, Protein: 170, WaterML: 2400, MealTypeCount: 4},
+		{Calories: 1500, Protein: 90, WaterML: 0, MealTypeCount: 2},
+	}, &NutritionTargets{
+		TargetCalories: &targetCalories,
+		TargetProteinG: &targetProtein,
+		TargetWaterML:  &targetWater,
+	}, map[string]int{
+		"breakfast": 2,
+		"lunch":     3,
+		"dinner":    2,
+	})
+
+	if len(resp.Cards) != 5 {
+		t.Fatalf("expected 5 golden cards, got %d", len(resp.Cards))
+	}
+	if resp.Cards[0].Value != "3/7 дн" {
+		t.Fatalf("unexpected consistency card: %+v", resp.Cards[0])
+	}
+	if resp.Cards[1].Value != "−500 ккал" {
+		t.Fatalf("unexpected calories card: %+v", resp.Cards[1])
+	}
+	if resp.Cards[2].Value != "82% цели" {
+		t.Fatalf("unexpected protein card: %+v", resp.Cards[2])
+	}
+	if resp.Cards[3].Value != "100% цели" {
+		t.Fatalf("unexpected hydration card: %+v", resp.Cards[3])
+	}
+	if resp.Cards[4].Value != "3.0 приёма" {
+		t.Fatalf("unexpected structure card: %+v", resp.Cards[4])
+	}
+}

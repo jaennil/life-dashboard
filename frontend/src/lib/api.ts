@@ -288,6 +288,18 @@ export interface NutritionSummary {
   targets?: NutritionTargets
 }
 
+export interface NutritionGoldenCard {
+  key: string
+  title: string
+  value: string
+  detail: string
+  tone: 'success' | 'warning' | 'danger' | 'muted'
+}
+
+export interface NutritionGoldenMetrics {
+  cards: NutritionGoldenCard[]
+}
+
 export interface NutritionTargets {
   source: string
   current_weight_kg?: number
@@ -553,6 +565,7 @@ export const api = {
     }),
   getCategoryList: () => get<string[]>('/finance/category-list'),
   getNutritionSummary: () => get<NutritionSummary>('/nutrition/summary'),
+  getNutritionGolden: (days = 14) => get<NutritionGoldenMetrics>(`/nutrition/golden?days=${days}`),
   getNutritionDaily: (days = 14) => get<NutritionDay[]>(`/nutrition/daily?days=${days}`),
   saveNutritionTargets: (input: NutritionTargetsInput) =>
     fetch(BASE + '/nutrition/targets', {

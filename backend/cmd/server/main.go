@@ -295,6 +295,7 @@ func main() {
 
 		nutritionHandler := handlers.NewNutrition(pool, log.Logger)
 		r.Get("/api/v1/nutrition/summary", nutritionHandler.GetSummary)
+		r.Get("/api/v1/nutrition/golden", nutritionHandler.GetGoldenMetrics)
 		r.Get("/api/v1/nutrition/daily", nutritionHandler.GetDaily)
 		r.Post("/api/v1/nutrition/targets", nutritionHandler.SaveTargets)
 		r.Post("/api/v1/nutrition/water", nutritionHandler.SaveWater)

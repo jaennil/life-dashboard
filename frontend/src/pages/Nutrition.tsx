@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { EChartsCoreOption } from 'echarts/core'
-import { ChevronDown, ChevronUp, Droplets, GlassWater, RotateCcw } from 'lucide-react'
+import { Activity, ChevronDown, ChevronUp, Droplets, Flame, GlassWater, RotateCcw, Target, UtensilsCrossed } from 'lucide-react'
 import { EChart } from '@/components/EChart'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
-import { api, type NutritionSummary, type NutritionDay, type Integration, type NutritionTargetsInput } from '@/lib/api'
+import { api, type NutritionSummary, type NutritionDay, type Integration, type NutritionTargetsInput, type NutritionGoldenMetrics, type NutritionGoldenCard } from '@/lib/api'
 
 const MEAL_LABELS: Record<string, string> = {
   breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', snacks: 'Перекус', other: 'Прочее',
@@ -413,6 +413,49 @@ function buildMealsTimelineOption(
   }
 }
 
+const GOLDEN_TONE_STYLES: Record<NutritionGoldenCard['tone'], string> = {
+  success: 'border-emerald-500/20 bg-emerald-500/[0.08]',
+  warning: 'border-amber-500/20 bg-amber-500/[0.08]',
+  danger: 'border-rose-500/20 bg-rose-500/[0.08]',
+  muted: 'border-border bg-card/90',
+}
+
+const GOLDEN_ICONS: Record<string, typeof Activity> = {
+  consistency: Activity,
+  calories: Flame,
+  protein: Target,
+  hydration: Droplets,
+  structure: UtensilsCrossed,
+}
+
+function NutritionGoldenMetricCard({
+  card,
+  loading,
+}: {
+  card: NutritionGoldenCard
+  loading: boolean
+}) {
+  const Icon = GOLDEN_ICONS[card.key] ?? Target
+  return (
+    <div className={cn('rounded-2xl border p-4 shadow-sm flex min-h-[148px] flex-col gap-3', GOLDEN_TONE_STYLES[card.tone])}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <span className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">{card.title}</span>
+          {loading ? <div className="h-7 w-24 bg-muted rounded animate-pulse" /> : (
+            <div className="text-2xl font-semibold tracking-tight text-foreground">{card.value}</div>
+          )}
+        </div>
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-background/60">
+          <Icon className="h-4 w-4 text-foreground/80" />
+        </div>
+      </div>
+      {loading ? <div className="h-4 w-full bg-muted rounded animate-pulse" /> : (
+        <p className="text-sm leading-6 text-muted-foreground">{card.detail}</p>
+      )}
+    </div>
+  )
+}
+
 function filterNutritionDayByMeal(day: NutritionDay, mealType: string): NutritionDay | null {
   if (!mealType) return day
 
@@ -520,6 +563,7 @@ function DayRow({ day, calorieReference, calorieTarget }: { day: NutritionDay; c
 
 export function Nutrition() {
   const [summary, setSummary] = useState<NutritionSummary | null>(null)
+  const [golden, setGolden] = useState<NutritionGoldenMetrics | null>(null)
   const [daily, setDaily] = useState<NutritionDay[]>([])
   const [loading, setLoading] = useState(true)
   const [period, setPeriod] = useState(14)
@@ -546,8 +590,9 @@ export function Nutrition() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [s, d] = await Promise.all([api.getNutritionSummary(), api.getNutritionDaily(period)])
+      const [s, g, d] = await Promise.all([api.getNutritionSummary(), api.getNutritionGolden(period), api.getNutritionDaily(period)])
       setSummary(s)
+      setGolden(g)
       setDaily(d)
     } catch (error) {
       console.error(error)
@@ -597,7 +642,6 @@ export function Nutrition() {
   const avgProtein = chartData.length ? chartData.reduce((s, d) => s + d.protein, 0) / chartData.length : 0
   const avgFat = chartData.length ? chartData.reduce((s, d) => s + d.fat, 0) / chartData.length : 0
   const avgCarbs = chartData.length ? chartData.reduce((s, d) => s + d.carbs, 0) / chartData.length : 0
-  const avgCalories = chartData.length ? chartData.reduce((s, d) => s + d.calories, 0) / chartData.length : 0
   const waterTrackedDays = chartData.filter(day => day.water_ml > 0).length
   const avgWater = waterTrackedDays > 0
     ? chartData.reduce((sum, day) => sum + day.water_ml, 0) / waterTrackedDays
@@ -649,6 +693,7 @@ export function Nutrition() {
       .map(day => filterNutritionDayByMeal(day, mealFilter))
       .filter((day): day is NutritionDay => day !== null)
     : daily
+  const goldenCards = golden?.cards ?? []
 
   const calorieReference = Math.max(
     calorieTarget ?? 0,
@@ -793,22 +838,16 @@ export function Nutrition() {
         )}
       />
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-        {[
-          { label: 'Сегодня', value: summary ? `${summary.today_kcal.toFixed(0)}` : '—', unit: 'ккал', color: 'bg-orange-500' },
-          { label: 'Вода сегодня', value: fmtWaterMl(todayWater), unit: '', color: 'bg-cyan-500' },
-          { label: `Ср. ккал/${period}д`, value: avgCalories.toFixed(0), unit: 'ккал', color: 'bg-amber-500' },
-          { label: 'Ср. белки', value: avgProtein.toFixed(0), unit: 'г', color: 'bg-blue-500' },
-          { label: 'Ср. жиры', value: avgFat.toFixed(0), unit: 'г', color: 'bg-orange-500' },
-          { label: 'Ср. углеводы', value: avgCarbs.toFixed(0), unit: 'г', color: 'bg-emerald-500' },
-        ].map(card => (
-          <div key={card.label} className="rounded-2xl border bg-card/90 p-4 shadow-sm flex flex-col gap-1">
-            <span className="text-[10px] text-muted-foreground">{card.label}</span>
-            {loading ? <div className="h-6 w-12 bg-muted rounded animate-pulse" /> : (
-              <div className="text-lg font-bold text-foreground">{card.value} <span className="text-xs font-normal text-muted-foreground">{card.unit}</span></div>
-            )}
-          </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        {(loading && goldenCards.length === 0
+          ? Array.from({ length: 5 }).map((_, index) => ({ key: `skeleton-${index}`, title: '—', value: '—', detail: '—', tone: 'muted' as const }))
+          : goldenCards
+        ).map(card => (
+          <NutritionGoldenMetricCard
+            key={card.key}
+            card={card}
+            loading={loading}
+          />
         ))}
       </div>
 

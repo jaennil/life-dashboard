@@ -39,6 +39,18 @@ type NutritionSummary struct {
 	Targets     *NutritionTargets `json:"targets,omitempty"`
 }
 
+type NutritionGoldenCard struct {
+	Key    string `json:"key"`
+	Title  string `json:"title"`
+	Value  string `json:"value"`
+	Detail string `json:"detail"`
+	Tone   string `json:"tone"`
+}
+
+type NutritionGoldenMetrics struct {
+	Cards []NutritionGoldenCard `json:"cards"`
+}
+
 type NutritionMealItem struct {
 	FoodName string             `json:"food_name"`
 	Serving  string             `json:"serving"`
@@ -82,6 +94,13 @@ type NutritionWaterState struct {
 	WaterML float64 `json:"water_ml"`
 }
 
+type nutritionGoldenDay struct {
+	Calories      float64
+	Protein       float64
+	WaterML       float64
+	MealTypeCount int
+}
+
 func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
@@ -118,6 +137,88 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s)
+}
+
+func (h *NutritionHandler) GetGoldenMetrics(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
+	windowDays := parseNutritionWindowDays(r, defaultNutritionWindowDays)
+	now := time.Now().In(aiDisplayLocation)
+	startDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation).AddDate(0, 0, -(windowDays - 1))
+
+	rows, err := h.db.Query(ctx, `
+		SELECT
+			COALESCE(d.calories_total, 0),
+			COALESCE(d.protein_g, 0),
+			COALESCE(d.water_ml, 0),
+			COALESCE((
+				SELECT COUNT(DISTINCT i.meal_type)
+				FROM nutrition_items i
+				WHERE i.daily_id = d.id
+			), 0)
+		FROM nutrition_daily d
+		WHERE d.date >= $1 AND d.user_id = $2
+	`, startDate, userID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("query nutrition golden days")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	days := make([]nutritionGoldenDay, 0)
+	for rows.Next() {
+		var day nutritionGoldenDay
+		if err := rows.Scan(&day.Calories, &day.Protein, &day.WaterML, &day.MealTypeCount); err != nil {
+			h.logger.Warn().Err(err).Msg("scan nutrition golden day")
+			continue
+		}
+		days = append(days, day)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error().Err(err).Msg("iterate nutrition golden days")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	mealPresence := map[string]int{}
+	presenceRows, err := h.db.Query(ctx, `
+		SELECT i.meal_type, COUNT(DISTINCT i.daily_id)
+		FROM nutrition_items i
+		JOIN nutrition_daily d ON d.id = i.daily_id
+		WHERE d.date >= $1 AND d.user_id = $2
+		GROUP BY i.meal_type
+	`, startDate, userID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("query nutrition meal presence")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer presenceRows.Close()
+
+	for presenceRows.Next() {
+		var mealType string
+		var count int
+		if err := presenceRows.Scan(&mealType, &count); err != nil {
+			h.logger.Warn().Err(err).Msg("scan nutrition meal presence")
+			continue
+		}
+		mealPresence[mealType] = count
+	}
+	if err := presenceRows.Err(); err != nil {
+		h.logger.Error().Err(err).Msg("iterate nutrition meal presence")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	targets, err := loadNutritionTargets(ctx, h.db, userID)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load nutrition golden targets")
+	}
+
+	resp := buildNutritionGoldenMetrics(windowDays, days, targets, mealPresence)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (h *NutritionHandler) SaveTargets(w http.ResponseWriter, r *http.Request) {
@@ -321,6 +422,238 @@ func (h *NutritionHandler) SaveWater(w http.ResponseWriter, r *http.Request) {
 		Date:    targetDate.Format("2006-01-02"),
 		WaterML: currentWater,
 	})
+}
+
+func buildNutritionGoldenMetrics(windowDays int, days []nutritionGoldenDay, targets *NutritionTargets, mealPresence map[string]int) NutritionGoldenMetrics {
+	nutritionDays := make([]nutritionGoldenDay, 0, len(days))
+	waterDays := make([]nutritionGoldenDay, 0, len(days))
+	fullMealDays := 0
+	totalMealTypes := 0
+
+	for _, day := range days {
+		if day.Calories > 0 || day.MealTypeCount > 0 {
+			nutritionDays = append(nutritionDays, day)
+			totalMealTypes += day.MealTypeCount
+			if day.MealTypeCount >= 3 {
+				fullMealDays++
+			}
+		}
+		if day.WaterML > 0 {
+			waterDays = append(waterDays, day)
+		}
+	}
+
+	loggedDays := len(nutritionDays)
+	waterTrackedDays := len(waterDays)
+	avgCalories := averageNutritionField(nutritionDays, func(day nutritionGoldenDay) float64 { return day.Calories })
+	avgProtein := averageNutritionField(nutritionDays, func(day nutritionGoldenDay) float64 { return day.Protein })
+	avgWater := averageNutritionField(waterDays, func(day nutritionGoldenDay) float64 { return day.WaterML })
+	avgMealTypes := 0.0
+	if loggedDays > 0 {
+		avgMealTypes = float64(totalMealTypes) / float64(loggedDays)
+	}
+
+	calorieTarget := nutritionTargetValue(targets, func(t *NutritionTargets) *float64 { return t.TargetCalories })
+	proteinTarget := nutritionTargetValue(targets, func(t *NutritionTargets) *float64 { return t.TargetProteinG })
+	waterTarget := nutritionTargetValue(targets, func(t *NutritionTargets) *float64 { return t.TargetWaterML })
+
+	calorieHitDays := 0
+	if calorieTarget != nil && *calorieTarget > 0 {
+		for _, day := range nutritionDays {
+			if nutritionWithinBand(day.Calories, *calorieTarget, 0.10) {
+				calorieHitDays++
+			}
+		}
+	}
+
+	proteinHitDays := 0
+	if proteinTarget != nil && *proteinTarget > 0 {
+		for _, day := range nutritionDays {
+			if day.Protein >= *proteinTarget {
+				proteinHitDays++
+			}
+		}
+	}
+
+	waterHitDays := 0
+	if waterTarget != nil && *waterTarget > 0 {
+		for _, day := range waterDays {
+			if day.WaterML >= *waterTarget {
+				waterHitDays++
+			}
+		}
+	}
+
+	regimeTone := nutritionToneForMinimumRatio(float64(loggedDays), float64(windowDays), 0.85, 0.5)
+	calorieTone := "muted"
+	calorieValue := "—"
+	calorieDetail := "нужна цель по калориям и хотя бы один залоганный день"
+	if loggedDays > 0 {
+		if calorieTarget != nil && *calorieTarget > 0 {
+			avgDelta := avgCalories - *calorieTarget
+			calorieTone = nutritionToneForDistance(avgDelta, *calorieTarget, 0.10, 0.20)
+			calorieValue = formatNutritionSignedDelta(avgDelta, "ккал")
+			calorieDetail = fmt.Sprintf("%d/%d дней в коридоре ±10%% от %d ккал", calorieHitDays, loggedDays, int(*calorieTarget))
+		} else {
+			calorieTone = nutritionToneForMinimumRatio(float64(loggedDays), float64(windowDays), 0.85, 0.5)
+			calorieValue = fmt.Sprintf("%.0f ккал", avgCalories)
+			calorieDetail = fmt.Sprintf("среднее за %d залоганных дней", loggedDays)
+		}
+	}
+
+	proteinTone := "muted"
+	proteinValue := "—"
+	proteinDetail := "нужна цель по белку и залоганные дни"
+	if loggedDays > 0 {
+		if proteinTarget != nil && *proteinTarget > 0 {
+			coverage := avgProtein / *proteinTarget
+			proteinTone = nutritionToneForMinimumRatio(avgProtein, *proteinTarget, 0.95, 0.75)
+			proteinValue = fmt.Sprintf("%.0f%% цели", coverage*100)
+			proteinDetail = fmt.Sprintf("%d/%d дней ≥ %.0f г", proteinHitDays, loggedDays, *proteinTarget)
+		} else {
+			proteinTone = nutritionToneForMinimumRatio(float64(loggedDays), float64(windowDays), 0.85, 0.5)
+			proteinValue = fmt.Sprintf("%.0f г", avgProtein)
+			proteinDetail = fmt.Sprintf("среднее за %d залоганных дней", loggedDays)
+		}
+	}
+
+	waterTone := "muted"
+	waterValue := "—"
+	waterDetail := "цель воды не задана или вода ещё не логировалась"
+	if waterTrackedDays > 0 {
+		if waterTarget != nil && *waterTarget > 0 {
+			coverage := avgWater / *waterTarget
+			waterTone = nutritionToneForMinimumRatio(avgWater, *waterTarget, 0.95, 0.65)
+			waterValue = fmt.Sprintf("%.0f%% цели", coverage*100)
+			waterDetail = fmt.Sprintf("%d/%d дней закрыто ≥ %.0f мл", waterHitDays, waterTrackedDays, *waterTarget)
+		} else {
+			waterTone = nutritionToneForMinimumRatio(float64(waterTrackedDays), float64(windowDays), 0.7, 0.35)
+			waterValue = fmt.Sprintf("%.0f мл", avgWater)
+			waterDetail = fmt.Sprintf("вода есть в %d/%d дней периода", waterTrackedDays, windowDays)
+		}
+	}
+
+	structureTone := "muted"
+	structureValue := "—"
+	structureDetail := "нет данных по приёмам пищи"
+	if loggedDays > 0 {
+		structureTone = nutritionToneForMinimumRatio(avgMealTypes, 3, 1, 0.66)
+		structureValue = fmt.Sprintf("%.1f приёма", avgMealTypes)
+		structureDetail = fmt.Sprintf("З %d · О %d · У %d · %d полных дней", mealPresence["breakfast"], mealPresence["lunch"], mealPresence["dinner"], fullMealDays)
+	}
+
+	return NutritionGoldenMetrics{
+		Cards: []NutritionGoldenCard{
+			{
+				Key:    "consistency",
+				Title:  "Режим",
+				Value:  fmt.Sprintf("%d/%d дн", loggedDays, windowDays),
+				Detail: fmt.Sprintf("%d дней с полным логом · вода %d/%d", fullMealDays, waterTrackedDays, windowDays),
+				Tone:   regimeTone,
+			},
+			{
+				Key:    "calories",
+				Title:  "Калории",
+				Value:  calorieValue,
+				Detail: calorieDetail,
+				Tone:   calorieTone,
+			},
+			{
+				Key:    "protein",
+				Title:  "Белок",
+				Value:  proteinValue,
+				Detail: proteinDetail,
+				Tone:   proteinTone,
+			},
+			{
+				Key:    "hydration",
+				Title:  "Вода",
+				Value:  waterValue,
+				Detail: waterDetail,
+				Tone:   waterTone,
+			},
+			{
+				Key:    "structure",
+				Title:  "Приёмы",
+				Value:  structureValue,
+				Detail: structureDetail,
+				Tone:   structureTone,
+			},
+		},
+	}
+}
+
+func averageNutritionField(days []nutritionGoldenDay, pick func(nutritionGoldenDay) float64) float64 {
+	if len(days) == 0 {
+		return 0
+	}
+	total := 0.0
+	for _, day := range days {
+		total += pick(day)
+	}
+	return total / float64(len(days))
+}
+
+func nutritionTargetValue(targets *NutritionTargets, pick func(*NutritionTargets) *float64) *float64 {
+	if targets == nil {
+		return nil
+	}
+	return pick(targets)
+}
+
+func nutritionWithinBand(value, target, band float64) bool {
+	if target <= 0 {
+		return false
+	}
+	delta := value - target
+	if delta < 0 {
+		delta = -delta
+	}
+	return delta/target <= band
+}
+
+func nutritionToneForMinimumRatio(value, target, successRatio, warningRatio float64) string {
+	if target <= 0 {
+		return "muted"
+	}
+	ratio := value / target
+	switch {
+	case ratio >= successRatio:
+		return "success"
+	case ratio >= warningRatio:
+		return "warning"
+	default:
+		return "danger"
+	}
+}
+
+func nutritionToneForDistance(delta, target, successRatio, warningRatio float64) string {
+	if target <= 0 {
+		return "muted"
+	}
+	absDelta := delta
+	if absDelta < 0 {
+		absDelta = -absDelta
+	}
+	ratio := absDelta / target
+	switch {
+	case ratio <= successRatio:
+		return "success"
+	case ratio <= warningRatio:
+		return "warning"
+	default:
+		return "danger"
+	}
+}
+
+func formatNutritionSignedDelta(value float64, unit string) string {
+	if value > -5 && value < 5 {
+		return "в цель"
+	}
+	if value > 0 {
+		return fmt.Sprintf("+%.0f %s", value, unit)
+	}
+	return fmt.Sprintf("−%.0f %s", -value, unit)
 }
 
 func parseNutritionWindowDays(r *http.Request, fallback int) int {
