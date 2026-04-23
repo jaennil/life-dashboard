@@ -288,6 +288,7 @@ func main() {
 
 		fitnessHandler := handlers.NewFitness(pool, log.Logger)
 		r.Get("/api/v1/fitness/summary", fitnessHandler.GetSummary)
+		r.Get("/api/v1/fitness/golden", fitnessHandler.GetGoldenMetrics)
 		r.Get("/api/v1/fitness/weekly", fitnessHandler.GetWeeklyStats)
 		r.Get("/api/v1/fitness/activities", fitnessHandler.GetActivities)
 		r.Get("/api/v1/fitness/workouts", fitnessHandler.GetWorkouts)

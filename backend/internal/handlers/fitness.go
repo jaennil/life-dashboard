@@ -3,7 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"math"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -81,6 +85,48 @@ type FitnessSummaryResponse struct {
 	TotalDistanceKm    float64 `json:"total_distance_km"`
 }
 
+type FitnessGoldenCard struct {
+	Key    string `json:"key"`
+	Title  string `json:"title"`
+	Value  string `json:"value"`
+	Detail string `json:"detail"`
+	Tone   string `json:"tone"`
+}
+
+type FitnessActivityTypeStat struct {
+	Type  string `json:"type"`
+	Count int    `json:"count"`
+}
+
+type FitnessSplitBucket struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+type FitnessProgressLift struct {
+	Exercise string `json:"exercise"`
+	Latest   string `json:"latest"`
+	Previous string `json:"previous"`
+	Delta    string `json:"delta"`
+}
+
+type StravaGoldenMetrics struct {
+	Cards    []FitnessGoldenCard       `json:"cards"`
+	TopTypes []FitnessActivityTypeStat `json:"top_types"`
+}
+
+type HevyGoldenMetrics struct {
+	Cards        []FitnessGoldenCard   `json:"cards"`
+	Splits       []FitnessSplitBucket  `json:"splits"`
+	Progressions []FitnessProgressLift `json:"progressions"`
+}
+
+type FitnessGoldenMetricsResponse struct {
+	Strava StravaGoldenMetrics `json:"strava"`
+	Hevy   HevyGoldenMetrics   `json:"hevy"`
+}
+
 func (h *FitnessHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
@@ -99,6 +145,34 @@ func (h *FitnessHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s)
+}
+
+func (h *FitnessHandler) GetGoldenMetrics(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
+	now := time.Now().In(aiDisplayLocation)
+
+	activities, err := h.loadActivitiesInRange(ctx, userID, now.AddDate(0, 0, -56))
+	if err != nil {
+		h.logger.Error().Err(err).Msg("query fitness golden activities")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	workouts, err := h.loadHevyWorkoutsInRange(ctx, userID, now.AddDate(0, 0, -90))
+	if err != nil {
+		h.logger.Error().Err(err).Msg("query fitness golden workouts")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := FitnessGoldenMetricsResponse{
+		Strava: buildStravaGoldenMetrics(now, activities),
+		Hevy:   buildHevyGoldenMetrics(now, workouts),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +232,33 @@ func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(stats)
 }
 
+func (h *FitnessHandler) loadActivitiesInRange(ctx context.Context, userID string, since time.Time) ([]Activity, error) {
+	rows, err := h.db.Query(ctx, `
+		SELECT id, type, COALESCE(name,''), started_at,
+			duration_seconds, distance_meters, calories, avg_heart_rate
+		FROM activities
+		WHERE user_id = $1
+			AND started_at >= $2
+		ORDER BY started_at DESC
+	`, userID, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	activities := make([]Activity, 0)
+	for rows.Next() {
+		var a Activity
+		if err := rows.Scan(&a.ID, &a.Type, &a.Name, &a.StartedAt,
+			&a.DurationSeconds, &a.DistanceMeters, &a.Calories, &a.AvgHeartRate); err != nil {
+			continue
+		}
+		activities = append(activities, a)
+	}
+
+	return activities, rows.Err()
+}
+
 func (h *FitnessHandler) GetActivities(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
@@ -195,22 +296,42 @@ func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 
+	workouts, err := h.loadHevyWorkoutsInRange(ctx, userID, time.Time{})
+	if err != nil {
+		h.logger.Error().Err(err).Msg("query workouts")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if len(workouts) > 30 {
+		workouts = workouts[:30]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(workouts)
+}
+
+func (h *FitnessHandler) loadHevyWorkoutsInRange(ctx context.Context, userID string, since time.Time) ([]Workout, error) {
+	args := []any{userID}
+	query := `
+		SELECT id, source, COALESCE(title,''), COALESCE(notes,''), started_at, ended_at, raw_payload
+		FROM workouts
+		WHERE user_id = $1
+			AND source = 'hevy'
+	`
+	if !since.IsZero() {
+		query += ` AND started_at >= $2`
+		args = append(args, since)
+	}
+	query += ` ORDER BY started_at DESC`
+
 	type workoutRow struct {
 		workout    Workout
 		rawPayload []byte
 	}
 
-	rows, err := h.db.Query(ctx, `
-		SELECT id, source, COALESCE(title,''), COALESCE(notes,''), started_at, ended_at, raw_payload
-		FROM workouts
-		WHERE user_id = $1
-		ORDER BY started_at DESC
-		LIMIT 30
-	`, userID)
+	rows, err := h.db.Query(ctx, query, args...)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("query workouts")
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -230,7 +351,6 @@ func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 		}
 		workoutRows = append(workoutRows, row)
 	}
-	rows.Close()
 
 	workouts := make([]Workout, 0, len(workoutRows))
 	for i := range workoutRows {
@@ -251,8 +371,7 @@ func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 		workouts = append(workouts, wk)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(workouts)
+	return workouts, rows.Err()
 }
 
 func (h *FitnessHandler) loadNormalizedWorkoutExercises(ctx context.Context, workout *Workout) error {
@@ -368,4 +487,598 @@ func coalesceWorkoutSetType(value string) string {
 		return "normal"
 	}
 	return value
+}
+
+func buildStravaGoldenMetrics(now time.Time, activities []Activity) StravaGoldenMetrics {
+	start7 := startOfLocalDay(now).AddDate(0, 0, -6)
+	start28 := startOfLocalDay(now).AddDate(0, 0, -27)
+	prev28Start := start28.AddDate(0, 0, -28)
+
+	var activities7 int
+	var distance7Km float64
+	var duration7Seconds int
+	activeDays7 := make(map[string]struct{})
+	typeCounts := make(map[string]int)
+	var last28DistanceKm float64
+	var prev28DistanceKm float64
+
+	for _, activity := range activities {
+		startedAt := activity.StartedAt.In(aiDisplayLocation)
+		dayKey := startedAt.Format("2006-01-02")
+		typeCounts[activity.Type]++
+
+		if !startedAt.Before(start7) {
+			activities7++
+			activeDays7[dayKey] = struct{}{}
+			if activity.DistanceMeters != nil {
+				distance7Km += *activity.DistanceMeters / 1000
+			}
+			if activity.DurationSeconds != nil {
+				duration7Seconds += *activity.DurationSeconds
+			}
+		}
+
+		if !startedAt.Before(start28) {
+			if activity.DistanceMeters != nil {
+				last28DistanceKm += *activity.DistanceMeters / 1000
+			}
+			continue
+		}
+		if !startedAt.Before(prev28Start) {
+			if activity.DistanceMeters != nil {
+				prev28DistanceKm += *activity.DistanceMeters / 1000
+			}
+		}
+	}
+
+	topTypes := make([]FitnessActivityTypeStat, 0, len(typeCounts))
+	for activityType, count := range typeCounts {
+		topTypes = append(topTypes, FitnessActivityTypeStat{Type: activityType, Count: count})
+	}
+	sort.Slice(topTypes, func(i, j int) bool {
+		if topTypes[i].Count == topTypes[j].Count {
+			return topTypes[i].Type < topTypes[j].Type
+		}
+		return topTypes[i].Count > topTypes[j].Count
+	})
+	if len(topTypes) > 4 {
+		topTypes = topTypes[:4]
+	}
+
+	var lastActivity *Activity
+	if len(activities) > 0 {
+		lastActivity = &activities[0]
+	}
+
+	trendValue := "—"
+	trendDetail := "недостаточно истории для сравнения 28д"
+	trendTone := "muted"
+	if last28DistanceKm > 0 || prev28DistanceKm > 0 {
+		changePct := percentDelta(last28DistanceKm, prev28DistanceKm)
+		trendValue = formatSignedPercent(changePct)
+		trendDetail = fmt.Sprintf("%s км vs %s км за прошлые 28д", formatCompactFloat(last28DistanceKm), formatCompactFloat(prev28DistanceKm))
+		switch {
+		case changePct >= 10:
+			trendTone = "success"
+		case changePct <= -10:
+			trendTone = "danger"
+		default:
+			trendTone = "warning"
+		}
+	}
+
+	varietyValue := fmt.Sprintf("%d типа", len(typeCounts))
+	varietyDetail := "активностей пока нет"
+	varietyTone := "muted"
+	if len(topTypes) > 0 {
+		topParts := make([]string, 0, len(topTypes))
+		for _, item := range topTypes {
+			topParts = append(topParts, fmt.Sprintf("%s %d", item.Type, item.Count))
+		}
+		varietyDetail = strings.Join(topParts, " · ")
+		switch {
+		case len(typeCounts) >= 3:
+			varietyTone = "success"
+		case len(typeCounts) == 2:
+			varietyTone = "warning"
+		default:
+			varietyTone = "danger"
+		}
+	}
+
+	recencyValue := "нет данных"
+	recencyDetail := "активности ещё не синхронизированы"
+	recencyTone := "muted"
+	if lastActivity != nil {
+		days := daysSince(now, lastActivity.StartedAt)
+		recencyValue = formatDaysSince(days)
+		recencyDetail = fmt.Sprintf("последняя активность %s", lastActivity.StartedAt.In(aiDisplayLocation).Format("02.01 15:04"))
+		switch {
+		case days <= 2:
+			recencyTone = "success"
+		case days <= 5:
+			recencyTone = "warning"
+		default:
+			recencyTone = "danger"
+		}
+	}
+
+	cards := []FitnessGoldenCard{
+		{
+			Key:    "consistency",
+			Title:  "Режим",
+			Value:  fmt.Sprintf("%d д/7", len(activeDays7)),
+			Detail: fmt.Sprintf("%d активностей · %s км за 7д", activities7, formatCompactFloat(distance7Km)),
+			Tone:   toneForThreshold(len(activeDays7), 4, 2),
+		},
+		{
+			Key:    "volume",
+			Title:  "Объём",
+			Value:  fmt.Sprintf("%s км", formatCompactFloat(distance7Km)),
+			Detail: fmt.Sprintf("%s ч движения за 7д", formatCompactFloat(float64(duration7Seconds)/3600)),
+			Tone:   toneForFloat(distance7Km, 15, 5),
+		},
+		{
+			Key:    "trend",
+			Title:  "Тренд",
+			Value:  trendValue,
+			Detail: trendDetail,
+			Tone:   trendTone,
+		},
+		{
+			Key:    "variety",
+			Title:  "Разнообразие",
+			Value:  varietyValue,
+			Detail: varietyDetail,
+			Tone:   varietyTone,
+		},
+		{
+			Key:    "recency",
+			Title:  "Свежесть",
+			Value:  recencyValue,
+			Detail: recencyDetail,
+			Tone:   recencyTone,
+		},
+	}
+
+	return StravaGoldenMetrics{
+		Cards:    cards,
+		TopTypes: topTypes,
+	}
+}
+
+func buildHevyGoldenMetrics(now time.Time, workouts []Workout) HevyGoldenMetrics {
+	start7 := startOfLocalDay(now).AddDate(0, 0, -6)
+	start30 := startOfLocalDay(now).AddDate(0, 0, -29)
+	prev7Start := start7.AddDate(0, 0, -7)
+
+	var workouts7, workouts30 int
+	var sets7, prevSets7 int
+	activeDays7 := make(map[string]struct{})
+	splitCounts := map[string]int{"push": 0, "pull": 0, "legs": 0, "other": 0}
+	latestLegDays := -1
+
+	progressions := buildExerciseProgressions(workouts)
+
+	for _, workout := range workouts {
+		startedAt := workout.StartedAt.In(aiDisplayLocation)
+		if !startedAt.Before(start7) {
+			workouts7++
+			activeDays7[startedAt.Format("2006-01-02")] = struct{}{}
+			sets7 += countWorkoutSets(workout)
+		} else if !startedAt.Before(prev7Start) {
+			prevSets7 += countWorkoutSets(workout)
+		}
+
+		if !startedAt.Before(start30) {
+			workouts30++
+			split := classifyWorkoutSplit(workout)
+			splitCounts[split]++
+			if split == "legs" {
+				days := daysSince(now, workout.StartedAt)
+				if latestLegDays == -1 || days < latestLegDays {
+					latestLegDays = days
+				}
+			}
+		}
+	}
+
+	splits := []FitnessSplitBucket{
+		{Key: "push", Label: "Push", Count: splitCounts["push"]},
+		{Key: "pull", Label: "Pull", Count: splitCounts["pull"]},
+		{Key: "legs", Label: "Legs", Count: splitCounts["legs"]},
+		{Key: "other", Label: "Other", Count: splitCounts["other"]},
+	}
+
+	avgSetsPerWorkout := 0.0
+	if workouts7 > 0 {
+		avgSetsPerWorkout = float64(sets7) / float64(workouts7)
+	}
+
+	progressDetail := "недостаточно истории по рабочим сетам"
+	progressValue := "—"
+	progressTone := "muted"
+	if len(progressions) > 0 {
+		progressValue = fmt.Sprintf("%d в росте", len(progressions))
+		progressDetail = fmt.Sprintf("%s %s", progressions[0].Exercise, progressions[0].Delta)
+		progressTone = "success"
+	}
+
+	balanceValue := fmt.Sprintf("%d·%d·%d", splitCounts["push"], splitCounts["pull"], splitCounts["legs"])
+	balanceDetail, balanceTone := describeSplitBalance(splitCounts)
+
+	recencyValue := "нет данных"
+	recencyDetail := "силовые тренировки ещё не синхронизированы"
+	recencyTone := "muted"
+	if len(workouts) > 0 {
+		lastWorkoutDays := daysSince(now, workouts[0].StartedAt)
+		recencyValue = formatDaysSince(lastWorkoutDays)
+		if latestLegDays >= 0 {
+			recencyDetail = fmt.Sprintf("последняя тренировка %s · ноги %s", workouts[0].StartedAt.In(aiDisplayLocation).Format("02.01"), formatDaysSince(latestLegDays))
+		} else {
+			recencyDetail = fmt.Sprintf("последняя тренировка %s · ноги не найдены", workouts[0].StartedAt.In(aiDisplayLocation).Format("02.01"))
+		}
+		switch {
+		case lastWorkoutDays <= 2:
+			recencyTone = "success"
+		case lastWorkoutDays <= 5:
+			recencyTone = "warning"
+		default:
+			recencyTone = "danger"
+		}
+	}
+
+	cards := []FitnessGoldenCard{
+		{
+			Key:    "consistency",
+			Title:  "Режим",
+			Value:  fmt.Sprintf("%d трен./7д", workouts7),
+			Detail: fmt.Sprintf("%d активных дней · %d тренировок за 30д", len(activeDays7), workouts30),
+			Tone:   toneForThreshold(workouts7, 3, 1),
+		},
+		{
+			Key:    "volume",
+			Title:  "Объём",
+			Value:  fmt.Sprintf("%d сетов", sets7),
+			Detail: fmt.Sprintf("%s сет./трен. · %s к прошлой неделе", formatCompactFloat(avgSetsPerWorkout), formatSignedInt(sets7-prevSets7)),
+			Tone:   toneForThreshold(sets7, 36, 18),
+		},
+		{
+			Key:    "progression",
+			Title:  "Прогресс",
+			Value:  progressValue,
+			Detail: progressDetail,
+			Tone:   progressTone,
+		},
+		{
+			Key:    "balance",
+			Title:  "Баланс",
+			Value:  balanceValue,
+			Detail: balanceDetail,
+			Tone:   balanceTone,
+		},
+		{
+			Key:    "recency",
+			Title:  "Свежесть",
+			Value:  recencyValue,
+			Detail: recencyDetail,
+			Tone:   recencyTone,
+		},
+	}
+
+	return HevyGoldenMetrics{
+		Cards:        cards,
+		Splits:       splits,
+		Progressions: progressions,
+	}
+}
+
+func countWorkoutSets(workout Workout) int {
+	total := 0
+	for _, exercise := range workout.Exercises {
+		total += len(exercise.Sets)
+	}
+	return total
+}
+
+func startOfLocalDay(value time.Time) time.Time {
+	local := value.In(aiDisplayLocation)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, aiDisplayLocation)
+}
+
+func daysSince(now, then time.Time) int {
+	nowDay := startOfLocalDay(now)
+	thenDay := startOfLocalDay(then)
+	return int(nowDay.Sub(thenDay).Hours() / 24)
+}
+
+func formatDaysSince(days int) string {
+	switch days {
+	case 0:
+		return "сегодня"
+	case 1:
+		return "1 д"
+	default:
+		return fmt.Sprintf("%d д", days)
+	}
+}
+
+func formatCompactFloat(value float64) string {
+	if math.Abs(value-math.Round(value)) < 0.05 {
+		return fmt.Sprintf("%.0f", value)
+	}
+	return fmt.Sprintf("%.1f", value)
+}
+
+func formatSignedPercent(value float64) string {
+	if math.Abs(value) < 0.5 {
+		return "0%"
+	}
+	if value > 0 {
+		return fmt.Sprintf("+%.0f%%", value)
+	}
+	return fmt.Sprintf("%.0f%%", value)
+}
+
+func formatSignedInt(value int) string {
+	if value > 0 {
+		return fmt.Sprintf("+%d", value)
+	}
+	return fmt.Sprintf("%d", value)
+}
+
+func toneForThreshold(value, success, warning int) string {
+	switch {
+	case value >= success:
+		return "success"
+	case value >= warning:
+		return "warning"
+	case value == 0:
+		return "danger"
+	default:
+		return "danger"
+	}
+}
+
+func toneForFloat(value, success, warning float64) string {
+	switch {
+	case value >= success:
+		return "success"
+	case value >= warning:
+		return "warning"
+	case value == 0:
+		return "danger"
+	default:
+		return "danger"
+	}
+}
+
+func percentDelta(current, previous float64) float64 {
+	if previous <= 0 {
+		if current <= 0 {
+			return 0
+		}
+		return 100
+	}
+	return ((current - previous) / previous) * 100
+}
+
+type exerciseSnapshot struct {
+	DisplayName string
+	StartedAt   time.Time
+	Score       float64
+	WeightKg    float64
+	Reps        int
+}
+
+func buildExerciseProgressions(workouts []Workout) []FitnessProgressLift {
+	byExercise := make(map[string][]exerciseSnapshot)
+
+	for _, workout := range workouts {
+		for _, exercise := range workout.Exercises {
+			best, ok := bestWorkingSet(exercise)
+			if !ok {
+				continue
+			}
+			key := normalizeExerciseName(exercise.Name)
+			if key == "" {
+				continue
+			}
+			byExercise[key] = append(byExercise[key], exerciseSnapshot{
+				DisplayName: exercise.Name,
+				StartedAt:   workout.StartedAt,
+				Score:       best.WeightKg * (1 + float64(best.Reps)/30),
+				WeightKg:    best.WeightKg,
+				Reps:        best.Reps,
+			})
+		}
+	}
+
+	progressions := make([]struct {
+		FitnessProgressLift
+		deltaScore float64
+	}, 0)
+
+	for _, sessions := range byExercise {
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].StartedAt.After(sessions[j].StartedAt)
+		})
+		if len(sessions) < 2 {
+			continue
+		}
+		latest := sessions[0]
+		var previous *exerciseSnapshot
+		for i := 1; i < len(sessions); i++ {
+			if !sameLocalDay(sessions[i].StartedAt, latest.StartedAt) {
+				previous = &sessions[i]
+				break
+			}
+		}
+		if previous == nil {
+			continue
+		}
+		if latest.Score <= previous.Score*1.015 && latest.WeightKg <= previous.WeightKg && latest.Reps <= previous.Reps {
+			continue
+		}
+
+		delta := describeLiftDelta(latest, *previous)
+		progressions = append(progressions, struct {
+			FitnessProgressLift
+			deltaScore float64
+		}{
+			FitnessProgressLift: FitnessProgressLift{
+				Exercise: latest.DisplayName,
+				Latest:   formatLift(latest.WeightKg, latest.Reps),
+				Previous: formatLift(previous.WeightKg, previous.Reps),
+				Delta:    delta,
+			},
+			deltaScore: latest.Score - previous.Score,
+		})
+	}
+
+	sort.Slice(progressions, func(i, j int) bool {
+		if math.Abs(progressions[i].deltaScore-progressions[j].deltaScore) < 0.01 {
+			return progressions[i].Exercise < progressions[j].Exercise
+		}
+		return progressions[i].deltaScore > progressions[j].deltaScore
+	})
+
+	result := make([]FitnessProgressLift, 0, min(4, len(progressions)))
+	for _, item := range progressions {
+		result = append(result, item.FitnessProgressLift)
+		if len(result) == 4 {
+			break
+		}
+	}
+	return result
+}
+
+type workingSet struct {
+	WeightKg float64
+	Reps     int
+	Score    float64
+}
+
+func bestWorkingSet(exercise WorkoutExercise) (workingSet, bool) {
+	best := workingSet{}
+	found := false
+	for _, set := range exercise.Sets {
+		if set.WeightKg == nil || set.Reps == nil || *set.Reps <= 0 {
+			continue
+		}
+		if strings.EqualFold(set.SetType, "warm-up") {
+			continue
+		}
+		score := *set.WeightKg * (1 + float64(*set.Reps)/30)
+		if !found || score > best.Score {
+			best = workingSet{
+				WeightKg: *set.WeightKg,
+				Reps:     *set.Reps,
+				Score:    score,
+			}
+			found = true
+		}
+	}
+	return best, found
+}
+
+func sameLocalDay(a, b time.Time) bool {
+	aa := a.In(aiDisplayLocation)
+	bb := b.In(aiDisplayLocation)
+	return aa.Year() == bb.Year() && aa.YearDay() == bb.YearDay()
+}
+
+func formatLift(weightKg float64, reps int) string {
+	return fmt.Sprintf("%s×%d", formatCompactFloat(weightKg), reps)
+}
+
+func describeLiftDelta(latest, previous exerciseSnapshot) string {
+	if latest.WeightKg > previous.WeightKg {
+		return fmt.Sprintf("+%s кг", formatCompactFloat(latest.WeightKg-previous.WeightKg))
+	}
+	if latest.Reps > previous.Reps {
+		return fmt.Sprintf("+%d повт.", latest.Reps-previous.Reps)
+	}
+	return fmt.Sprintf("+%s%%", formatCompactFloat(percentDelta(latest.Score, previous.Score)))
+}
+
+func normalizeExerciseName(name string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(name))), " ")
+}
+
+func classifyWorkoutSplit(workout Workout) string {
+	texts := []string{strings.ToLower(workout.Title)}
+	for _, exercise := range workout.Exercises {
+		texts = append(texts, strings.ToLower(exercise.Name))
+		texts = append(texts, strings.ToLower(exercise.Category))
+	}
+	text := strings.Join(texts, " ")
+
+	switch {
+	case fitnessContainsAny(text, "legs", "leg", "squat", "lunge", "rdl", "deadlift", "hamstring", "quad", "calf", "glute", "hip thrust"):
+		return "legs"
+	case fitnessContainsAny(text, "push", "chest", "shoulder", "tricep", "bench", "press", "fly", "dip", "lateral raise", "arnold"):
+		if !fitnessContainsAny(text, "pull", "row", "curl", "lat pulldown") {
+			return "push"
+		}
+	case fitnessContainsAny(text, "pull", "back", "bicep", "row", "curl", "pulldown", "face pull", "shrug"):
+		if !fitnessContainsAny(text, "squat", "leg", "hamstring", "quad", "rdl") {
+			return "pull"
+		}
+	}
+
+	pushScore := countMatches(text, "push", "chest", "shoulder", "tricep", "bench", "press", "fly", "dip", "lateral raise", "arnold")
+	pullScore := countMatches(text, "pull", "back", "bicep", "row", "curl", "pulldown", "face pull", "shrug")
+	legsScore := countMatches(text, "legs", "leg", "squat", "lunge", "rdl", "deadlift", "hamstring", "quad", "calf", "glute", "hip thrust")
+
+	switch max(pushScore, pullScore, legsScore) {
+	case 0:
+		return "other"
+	case pushScore:
+		return "push"
+	case pullScore:
+		return "pull"
+	default:
+		return "legs"
+	}
+}
+
+func describeSplitBalance(counts map[string]int) (string, string) {
+	push := counts["push"]
+	pull := counts["pull"]
+	legs := counts["legs"]
+	minCount := min(push, pull, legs)
+	maxCount := max(push, pull, legs)
+
+	switch {
+	case push == 0 && pull == 0 && legs == 0:
+		return "сплит ещё не накопился", "muted"
+	case legs == 0:
+		return "ноги выпали из сплита", "danger"
+	case maxCount-minCount <= 1:
+		return "push / pull / legs держатся ровно", "success"
+	case legs < push || legs < pull:
+		return "ноги отстают от верха", "warning"
+	default:
+		return "есть перекос по сплиту", "warning"
+	}
+}
+
+func fitnessContainsAny(text string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func countMatches(text string, needles ...string) int {
+	total := 0
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			total++
+		}
+	}
+	return total
 }

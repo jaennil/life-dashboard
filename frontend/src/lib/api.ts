@@ -137,6 +137,44 @@ export interface FitnessSummary {
   total_distance_km: number
 }
 
+export interface FitnessGoldenCard {
+  key: string
+  title: string
+  value: string
+  detail: string
+  tone: 'success' | 'warning' | 'danger' | 'muted'
+}
+
+export interface FitnessActivityTypeStat {
+  type: string
+  count: number
+}
+
+export interface FitnessSplitBucket {
+  key: string
+  label: string
+  count: number
+}
+
+export interface FitnessProgressLift {
+  exercise: string
+  latest: string
+  previous: string
+  delta: string
+}
+
+export interface FitnessGoldenMetrics {
+  strava: {
+    cards: FitnessGoldenCard[]
+    top_types: FitnessActivityTypeStat[]
+  }
+  hevy: {
+    cards: FitnessGoldenCard[]
+    splits: FitnessSplitBucket[]
+    progressions: FitnessProgressLift[]
+  }
+}
+
 export interface WeekStat {
   week: string
   activities_count: number
@@ -422,6 +460,7 @@ export const api = {
     return get<FinanceTransaction[]>('/finance/transactions?' + p.toString())
   },
   getFitnessSummary: () => get<FitnessSummary>('/fitness/summary'),
+  getFitnessGolden: () => get<FitnessGoldenMetrics>('/fitness/golden'),
   getFitnessWeekly: () => get<WeekStat[]>('/fitness/weekly'),
   getActivities: () => get<Activity[]>('/fitness/activities'),
   getWorkouts: () => get<Workout[]>('/fitness/workouts'),

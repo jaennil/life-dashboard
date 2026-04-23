@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { EChartsCoreOption } from 'echarts/core'
-import { Route, Dumbbell, Flame, Heart, ChevronDown, ChevronUp, Timer } from 'lucide-react'
+import { Dumbbell, Flame, Heart, ChevronDown, ChevronUp, Timer, TrendingUp, Scale, Activity as ActivityIcon, Clock3, Layers3 } from 'lucide-react'
 import { EChart } from '@/components/EChart'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { cn, syncCaptionForSources } from '@/lib/utils'
-import { api, type FitnessSummary, type WeekStat, type Activity, type Workout, type Integration } from '@/lib/api'
+import { api, type FitnessSummary, type FitnessGoldenMetrics, type FitnessGoldenCard, type WeekStat, type Activity, type Workout, type Integration } from '@/lib/api'
 
 const ACTIVITY_ICONS: Record<string, string> = {
   Run: '🏃', Ride: '🚴', Swim: '🏊', Walk: '🚶', WeightTraining: '🏋️',
@@ -279,29 +279,46 @@ function buildDonutOption(data: Array<{ name: string; value: number; color: stri
   }
 }
 
-function StatCard({
-  label,
-  value,
+const GOLDEN_TONE_STYLES: Record<FitnessGoldenCard['tone'], string> = {
+  success: 'border-emerald-500/20 bg-emerald-500/[0.08]',
+  warning: 'border-amber-500/20 bg-amber-500/[0.08]',
+  danger: 'border-rose-500/20 bg-rose-500/[0.08]',
+  muted: 'border-border bg-card/90',
+}
+
+const GOLDEN_ICONS: Record<string, typeof TrendingUp> = {
+  consistency: ActivityIcon,
+  volume: Layers3,
+  progression: TrendingUp,
+  trend: TrendingUp,
+  variety: Scale,
+  balance: Scale,
+  recency: Clock3,
+}
+
+function GoldenMetricCard({
+  card,
   loading,
-  icon: Icon,
-  color,
 }: {
-  label: string
-  value: string
+  card: FitnessGoldenCard
   loading: boolean
-  icon: typeof Route
-  color: string
 }) {
+  const Icon = GOLDEN_ICONS[card.key] ?? Dumbbell
   return (
-    <div className="rounded-2xl border bg-card/90 p-4 shadow-sm flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground">{label}</span>
-        <div className={cn('flex items-center justify-center w-6 h-6 rounded-md', color)}>
-          <Icon className="w-3 h-3 text-white" />
+    <div className={cn('rounded-2xl border p-4 shadow-sm flex min-h-[148px] flex-col gap-3', GOLDEN_TONE_STYLES[card.tone])}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <span className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">{card.title}</span>
+          {loading ? <div className="h-7 w-24 bg-muted rounded animate-pulse" /> : (
+            <div className="text-2xl font-semibold tracking-tight text-foreground">{card.value}</div>
+          )}
+        </div>
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-background/60">
+          <Icon className="h-4 w-4 text-foreground/80" />
         </div>
       </div>
-      {loading ? <div className="h-6 w-12 bg-muted rounded animate-pulse" /> : (
-        <div className="text-lg font-bold text-foreground">{value}</div>
+      {loading ? <div className="h-4 w-full bg-muted rounded animate-pulse" /> : (
+        <p className="text-sm leading-6 text-muted-foreground">{card.detail}</p>
       )}
     </div>
   )
@@ -395,6 +412,7 @@ function WorkoutRow({ workout }: { workout: Workout }) {
 
 export function Fitness() {
   const [summary, setSummary] = useState<FitnessSummary | null>(null)
+  const [golden, setGolden] = useState<FitnessGoldenMetrics | null>(null)
   const [weekly, setWeekly] = useState<WeekStat[]>([])
   const [activities, setActivities] = useState<Activity[]>([])
   const [workouts, setWorkouts] = useState<Workout[]>([])
@@ -407,13 +425,15 @@ export function Fitness() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [nextSummary, nextWeekly, nextActivities, nextWorkouts] = await Promise.all([
+      const [nextSummary, nextGolden, nextWeekly, nextActivities, nextWorkouts] = await Promise.all([
         api.getFitnessSummary(),
+        api.getFitnessGolden(),
         api.getFitnessWeekly(),
         api.getActivities(),
         api.getWorkouts(),
       ])
       setSummary(nextSummary)
+      setGolden(nextGolden)
       setWeekly(nextWeekly)
       setActivities(nextActivities)
       setWorkouts(nextWorkouts)
@@ -500,27 +520,7 @@ export function Fitness() {
     }))
   }, [weekly])
 
-  const hevyExerciseStats = useMemo(() => {
-    const totalExercises = workouts.reduce((sum, workout) => sum + workout.exercises.length, 0)
-    return {
-      totalExercises,
-      avgExercises: workouts.length > 0 ? (totalExercises / workouts.length).toFixed(1) : '—',
-    }
-  }, [workouts])
-
-  const cards = sourceTab === 'strava'
-    ? [
-        { label: 'Активн./нед', value: summary ? String(summary.activities_this_week) : '—', icon: Route, color: 'bg-orange-500' },
-        { label: 'Км/нед', value: summary ? summary.distance_km_this_week.toFixed(1) : '—', icon: Route, color: 'bg-blue-500' },
-        { label: 'Всего активн.', value: summary ? String(summary.activities_total) : '—', icon: Route, color: 'bg-violet-500' },
-        { label: 'Всего км', value: summary ? `${Math.round(summary.total_distance_km)}` : '—', icon: Flame, color: 'bg-emerald-500' },
-      ]
-    : [
-        { label: 'Трен./нед', value: summary ? String(summary.workouts_this_week) : '—', icon: Dumbbell, color: 'bg-violet-500' },
-        { label: 'Всего трен.', value: summary ? String(summary.workouts_total) : '—', icon: Dumbbell, color: 'bg-cyan-500' },
-        { label: 'Упр. в ленте', value: String(hevyExerciseStats.totalExercises), icon: Dumbbell, color: 'bg-amber-500' },
-        { label: 'Ср. упр./трен.', value: hevyExerciseStats.avgExercises, icon: Dumbbell, color: 'bg-emerald-500' },
-      ]
+  const cards = sourceTab === 'strava' ? golden?.strava.cards ?? [] : golden?.hevy.cards ?? []
 
   async function handleSyncFitness() {
     if (!activeIntegration?.enabled) return
@@ -581,15 +581,15 @@ export function Fitness() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {cards.map(card => (
-          <StatCard
-            key={card.label}
-            label={card.label}
-            value={card.value}
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        {(loading && cards.length === 0
+          ? Array.from({ length: 5 }).map((_, index) => ({ key: `skeleton-${index}`, title: '—', value: '—', detail: '—', tone: 'muted' as const }))
+          : cards
+        ).map(card => (
+          <GoldenMetricCard
+            key={card.key}
+            card={card}
             loading={loading}
-            icon={card.icon}
-            color={card.color}
           />
         ))}
       </div>
@@ -690,6 +690,73 @@ export function Fitness() {
         </>
       ) : (
         <>
+          <div className="grid gap-6 lg:grid-cols-[1.2fr,0.8fr] lg:items-start">
+            <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Прогресс по упражнениям</h2>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Смотрим последние рабочие сеты по одним и тем же упражнениям и показываем, где вес или повторы реально выросли.</p>
+              </div>
+              {loading ? (
+                <div className="space-y-3">
+                  {Array.from({ length: 3 }).map((_, index) => <div key={index} className="h-16 rounded-xl bg-muted animate-pulse" />)}
+                </div>
+              ) : (golden?.hevy.progressions.length ?? 0) === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border/80 bg-background/30 px-4 py-8 text-sm text-muted-foreground">
+                  Пока не хватает повторяющихся рабочих сетов, чтобы честно показать progression.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {golden?.hevy.progressions.map((progress) => (
+                    <div key={`${progress.exercise}-${progress.latest}`} className="rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.06] px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{progress.exercise}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{progress.previous} → {progress.latest}</p>
+                        </div>
+                        <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+                          {progress.delta}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Баланс сплита</h2>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Последние 30 дней по `push / pull / legs`. Так сразу видно, что выпало и где верх тела начинает доминировать.</p>
+              </div>
+              <div className="space-y-3">
+                {(golden?.hevy.splits ?? []).filter(split => split.count > 0 || split.key !== 'other').map(split => {
+                  const total = (golden?.hevy.splits ?? []).reduce((sum, item) => sum + item.count, 0)
+                  const width = total > 0 ? Math.max((split.count / total) * 100, split.count > 0 ? 8 : 0) : 0
+                  return (
+                    <div key={split.key} className="space-y-2">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="font-medium text-foreground">{split.label}</span>
+                        <span className="text-muted-foreground">{split.count}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-muted/70 overflow-hidden">
+                        <div
+                          className={cn(
+                            'h-full rounded-full transition-all',
+                            split.key === 'push' && 'bg-rose-400',
+                            split.key === 'pull' && 'bg-sky-400',
+                            split.key === 'legs' && 'bg-emerald-400',
+                            split.key === 'other' && 'bg-slate-400',
+                          )}
+                          style={{ width: `${width}%` }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Hevy по неделям</h2>

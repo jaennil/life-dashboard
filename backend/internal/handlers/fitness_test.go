@@ -105,3 +105,59 @@ func TestHydrateHevyWorkoutPreservesRichFieldsAndOrder(t *testing.T) {
 		t.Fatalf("expected set type to be preserved, got %q", second.Sets[1].SetType)
 	}
 }
+
+func TestBuildExerciseProgressionsDetectsImprovement(t *testing.T) {
+	workouts := []Workout{
+		{
+			StartedAt: time.Date(2026, 4, 20, 8, 0, 0, 0, time.UTC),
+			Exercises: []WorkoutExercise{
+				{
+					Name: "Incline Bench Press",
+					Sets: []WorkoutSet{
+						{SetType: "normal", WeightKg: float64Ptr(42), Reps: intValuePtr(8)},
+					},
+				},
+			},
+		},
+		{
+			StartedAt: time.Date(2026, 4, 13, 8, 0, 0, 0, time.UTC),
+			Exercises: []WorkoutExercise{
+				{
+					Name: "Incline Bench Press",
+					Sets: []WorkoutSet{
+						{SetType: "normal", WeightKg: float64Ptr(38), Reps: intValuePtr(8)},
+					},
+				},
+			},
+		},
+	}
+
+	progressions := buildExerciseProgressions(workouts)
+	if len(progressions) != 1 {
+		t.Fatalf("expected one progression, got %d", len(progressions))
+	}
+	if progressions[0].Exercise != "Incline Bench Press" {
+		t.Fatalf("unexpected exercise: %+v", progressions[0])
+	}
+	if progressions[0].Delta != "+4 кг" {
+		t.Fatalf("expected weight delta, got %+v", progressions[0])
+	}
+}
+
+func TestClassifyWorkoutSplitPrefersLegsSignals(t *testing.T) {
+	workout := Workout{
+		Title: "Lower Strength",
+		Exercises: []WorkoutExercise{
+			{Name: "Back Squat"},
+			{Name: "Romanian Deadlift"},
+			{Name: "Leg Press"},
+		},
+	}
+
+	if got := classifyWorkoutSplit(workout); got != "legs" {
+		t.Fatalf("expected legs split, got %q", got)
+	}
+}
+
+func float64Ptr(value float64) *float64 { return &value }
+func intValuePtr(value int) *int        { return &value }
