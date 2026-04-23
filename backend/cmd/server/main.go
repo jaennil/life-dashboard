@@ -296,6 +296,7 @@ func main() {
 		r.Get("/api/v1/nutrition/summary", nutritionHandler.GetSummary)
 		r.Get("/api/v1/nutrition/daily", nutritionHandler.GetDaily)
 		r.Post("/api/v1/nutrition/targets", nutritionHandler.SaveTargets)
+		r.Post("/api/v1/nutrition/water", nutritionHandler.SaveWater)
 
 		productivityHandler := handlers.NewProductivity(pool, log.Logger)
 		r.Get("/api/v1/productivity/summary", productivityHandler.GetSummary)

@@ -905,11 +905,12 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 			sb.WriteString("\n")
 		}
 		sb.WriteString("=== ПИТАНИЕ ===\n")
+		sb.WriteString("Это лог питания и воды. Отсутствие ужина, перекуса или воды в логах не доказывает, что их не было.\n")
 		if targets, err := loadNutritionTargets(ctx, h.db, userID); err == nil {
 			sb.WriteString(renderNutritionTargetsForAI(targets))
 		}
 		nutritionRows, err := h.db.Query(ctx, `
-			SELECT date, calories_total, protein_g, carbs_g, fat_g, fiber_g
+			SELECT date, COALESCE(calories_total, 0), COALESCE(protein_g, 0), COALESCE(carbs_g, 0), COALESCE(fat_g, 0), COALESCE(fiber_g, 0), COALESCE(water_ml, 0)
 			FROM nutrition_daily
 			WHERE user_id = $1
 			ORDER BY date DESC LIMIT 14
@@ -917,10 +918,14 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 		if err == nil {
 			for nutritionRows.Next() {
 				var date time.Time
-				var cal, protein, carbs, fat, fiber float64
-				if err := nutritionRows.Scan(&date, &cal, &protein, &carbs, &fat, &fiber); err == nil {
-					sb.WriteString(fmt.Sprintf("  %s: %.0f ккал | Б:%.0fг Ж:%.0fг У:%.0fг Клетч:%.0fг\n",
+				var cal, protein, carbs, fat, fiber, waterML float64
+				if err := nutritionRows.Scan(&date, &cal, &protein, &carbs, &fat, &fiber, &waterML); err == nil {
+					sb.WriteString(fmt.Sprintf("  %s: %.0f ккал | Б:%.0fг Ж:%.0fг У:%.0fг Клетч:%.0fг",
 						date.Format("02.01"), cal, protein, fat, carbs, fiber))
+					if waterML > 0 {
+						sb.WriteString(fmt.Sprintf(" | Вода:%.0fмл", waterML))
+					}
+					sb.WriteString("\n")
 				}
 			}
 			nutritionRows.Close()
@@ -1114,7 +1119,7 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	workoutKeywords := []string{"тренир", "упражнен", "жим", "тяга", "присед", "гантел", "штанг", "блин", "гриф", "подход", "повтор", "hevy", "workout", "pull", "push", "legs", "зал", "вес"}
 	routineKeywords := []string{"routine", "routines", "рутин", "шаблон", "сплит", "программ", "план трениров", "template"}
 	habitKeywords := []string{"привыч", "habit", "habitify", "todoist", "зуб", "умы", "лиц", "уход", "skincare", "cleanser", "чеклист", "дейли", "daily"}
-	nutritionKeywords := []string{"питан", "калор", "кбжу", "бжу", "еда", "ккал", "углев", "белк", "жир", "fatsecret", "myfitnesspal", "mfp"}
+	nutritionKeywords := []string{"питан", "калор", "кбжу", "бжу", "еда", "ккал", "углев", "белк", "жир", "fatsecret", "myfitnesspal", "mfp", "вода", "воды", "hydration", "hydrated"}
 	journalKeywords := []string{"дневник", "journal", "ноушн", "notion", "настроен", "рефлекс", "запис"}
 	calendarKeywords := []string{"календар", "встреч", "событи", "созвон", "митинг", "расписан", "план"}
 	weatherKeywords := []string{"погод", "температ", "дожд", "ветер", "на улице"}

@@ -17,6 +17,7 @@ type NutritionManualTargets struct {
 	TargetProteinG *float64   `json:"target_protein_g,omitempty"`
 	TargetCarbsG   *float64   `json:"target_carbs_g,omitempty"`
 	TargetFatG     *float64   `json:"target_fat_g,omitempty"`
+	TargetWaterML  *float64   `json:"target_water_ml,omitempty"`
 	UpdatedAt      *time.Time `json:"updated_at,omitempty"`
 }
 
@@ -31,6 +32,7 @@ type NutritionTargets struct {
 	TargetProteinG       *float64                `json:"target_protein_g,omitempty"`
 	TargetCarbsG         *float64                `json:"target_carbs_g,omitempty"`
 	TargetFatG           *float64                `json:"target_fat_g,omitempty"`
+	TargetWaterML        *float64                `json:"target_water_ml,omitempty"`
 	WeightMeasure        string                  `json:"weight_measure,omitempty"`
 	HeightMeasure        string                  `json:"height_measure,omitempty"`
 	APINotes             []string                `json:"api_notes,omitempty"`
@@ -49,6 +51,7 @@ type nutritionTargetsRow struct {
 	TargetProteinG       sql.NullFloat64
 	TargetCarbsG         sql.NullFloat64
 	TargetFatG           sql.NullFloat64
+	TargetWaterML        sql.NullFloat64
 	WeightMeasure        sql.NullString
 	HeightMeasure        sql.NullString
 	SyncedAt             time.Time
@@ -67,6 +70,7 @@ func loadNutritionTargets(ctx context.Context, db *pgxpool.Pool, userID string) 
 			target_protein_g,
 			target_carbs_g,
 			target_fat_g,
+			target_water_ml,
 			weight_measure,
 			height_measure,
 			synced_at
@@ -118,6 +122,7 @@ func scanNutritionTargetsRow(row pgx.Row) (*nutritionTargetsRow, error) {
 		&result.TargetProteinG,
 		&result.TargetCarbsG,
 		&result.TargetFatG,
+		&result.TargetWaterML,
 		&result.WeightMeasure,
 		&result.HeightMeasure,
 		&result.SyncedAt,
@@ -144,6 +149,7 @@ func mergeNutritionTargets(fatsecretRow, manualRow *nutritionTargetsRow) *Nutrit
 		result.TargetProteinG = floatPtr(fatsecretRow.TargetProteinG)
 		result.TargetCarbsG = floatPtr(fatsecretRow.TargetCarbsG)
 		result.TargetFatG = floatPtr(fatsecretRow.TargetFatG)
+		result.TargetWaterML = floatPtr(fatsecretRow.TargetWaterML)
 		result.WeightMeasure = stringValueFromNull(fatsecretRow.WeightMeasure)
 		result.HeightMeasure = stringValueFromNull(fatsecretRow.HeightMeasure)
 		result.SyncedAt = &fatsecretRow.SyncedAt
@@ -161,6 +167,7 @@ func mergeNutritionTargets(fatsecretRow, manualRow *nutritionTargetsRow) *Nutrit
 			TargetProteinG: floatPtr(manualRow.TargetProteinG),
 			TargetCarbsG:   floatPtr(manualRow.TargetCarbsG),
 			TargetFatG:     floatPtr(manualRow.TargetFatG),
+			TargetWaterML:  floatPtr(manualRow.TargetWaterML),
 			UpdatedAt:      &manualRow.SyncedAt,
 		}
 		if result.SyncedAt == nil || manualRow.SyncedAt.After(*result.SyncedAt) {
@@ -180,6 +187,9 @@ func mergeNutritionTargets(fatsecretRow, manualRow *nutritionTargetsRow) *Nutrit
 		}
 		if manualRow.TargetFatG.Valid {
 			result.TargetFatG = floatPtr(manualRow.TargetFatG)
+		}
+		if manualRow.TargetWaterML.Valid {
+			result.TargetWaterML = floatPtr(manualRow.TargetWaterML)
 		}
 	}
 
@@ -237,6 +247,9 @@ func renderNutritionTargetsForAI(targets *NutritionTargets) string {
 	} else {
 		lines = append(lines, "- целевые калории/БЖУ: нет данных в API; не придумывай их и сравнивай только с фактическими средними.")
 	}
+	if targets.TargetWaterML != nil {
+		lines = append(lines, fmt.Sprintf("- вода: цель %.0f мл в день", *targets.TargetWaterML))
+	}
 
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -252,7 +265,7 @@ func (t *NutritionManualTargets) hasAny() bool {
 	if t == nil {
 		return false
 	}
-	return t.TargetWeightKg != nil || t.TargetCalories != nil || t.TargetProteinG != nil || t.TargetCarbsG != nil || t.TargetFatG != nil
+	return t.TargetWeightKg != nil || t.TargetCalories != nil || t.TargetProteinG != nil || t.TargetCarbsG != nil || t.TargetFatG != nil || t.TargetWaterML != nil
 }
 
 func floatPtr(value sql.NullFloat64) *float64 {

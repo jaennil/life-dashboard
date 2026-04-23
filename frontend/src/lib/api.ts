@@ -25,9 +25,11 @@ export interface DashboardSummary {
   }
   nutrition: {
     today_kcal: number
+    today_water_ml: number
     avg_calories: number
     days_tracked: number
     target_calories?: number
+    target_water_ml?: number
   }
   productivity: {
     active_total: number
@@ -222,8 +224,10 @@ export interface NutritionSummary {
   avg_protein: number
   avg_carbs: number
   avg_fat: number
+  avg_water_ml: number
   days_tracked: number
   today_kcal: number
+  today_water_ml: number
   targets?: NutritionTargets
 }
 
@@ -238,6 +242,7 @@ export interface NutritionTargets {
   target_protein_g?: number
   target_carbs_g?: number
   target_fat_g?: number
+  target_water_ml?: number
   weight_measure?: string
   height_measure?: string
   api_notes?: string[]
@@ -251,6 +256,7 @@ export interface NutritionManualTargets {
   target_protein_g?: number
   target_carbs_g?: number
   target_fat_g?: number
+  target_water_ml?: number
   updated_at?: string
 }
 
@@ -260,6 +266,7 @@ export interface NutritionTargetsInput {
   target_protein_g?: number | null
   target_carbs_g?: number | null
   target_fat_g?: number | null
+  target_water_ml?: number | null
 }
 
 export interface NutritionMealItem {
@@ -281,7 +288,13 @@ export interface NutritionDay {
   carbs: number
   fat: number
   fiber: number
+  water_ml: number
   meals: NutritionMeal[]
+}
+
+export interface NutritionWaterState {
+  date: string
+  water_ml: number
 }
 
 export interface Integration {
@@ -491,6 +504,15 @@ export const api = {
     }).then(async r => {
       if (!r.ok) throw new Error(await r.text())
       return r.json() as Promise<NutritionTargets | null>
+    }),
+  saveNutritionWater: (input: { date?: string; delta_ml?: number; water_ml?: number }) =>
+    fetch(BASE + '/nutrition/water', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+      return r.json() as Promise<NutritionWaterState>
     }),
   getIntegrations: () => get<Integration[]>('/integrations'),
   toggleIntegration: (name: string, enabled: boolean) =>

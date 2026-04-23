@@ -566,6 +566,7 @@ func (c *FatSecretConnector) storeEntries(ctx context.Context, userID string, da
 			carbs_g = EXCLUDED.carbs_g,
 			fat_g = EXCLUDED.fat_g,
 			fiber_g = EXCLUDED.fiber_g,
+			water_ml = nutrition_daily.water_ml,
 			source = 'fatsecret'
 		RETURNING id
 	`, userID, date, totalCal, totalProtein, totalCarbs, totalFat, totalFiber).Scan(&dailyID)

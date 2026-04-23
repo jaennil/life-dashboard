@@ -710,13 +710,13 @@ func (h *AIHandler) appendCheckupWorkoutContext(ctx context.Context, sb *strings
 
 func (h *AIHandler) appendCheckupNutritionContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
 	sb.WriteString("\n=== ПИТАНИЕ ===\n")
-	sb.WriteString("Это только залогированные приёмы пищи из трекера. Отсутствие ужина/перекуса в логах не означает, что их не было.\n")
+	sb.WriteString("Это залогированные приёмы пищи и вода из трекера. Отсутствие ужина, перекуса или воды в логах не означает, что их не было.\n")
 	if targets, err := loadNutritionTargets(ctx, h.db, userID); err == nil {
 		sb.WriteString(renderNutritionTargetsForAI(targets))
 	}
 
 	var trackedDays int
-	var avgCalories, avgProtein, avgCarbs, avgFat, minCalories, maxCalories float64
+	var avgCalories, avgProtein, avgCarbs, avgFat, avgWaterML, minCalories, maxCalories float64
 	h.db.QueryRow(ctx, `
 		SELECT
 			COUNT(*),
@@ -724,24 +724,29 @@ func (h *AIHandler) appendCheckupNutritionContext(ctx context.Context, sb *strin
 			COALESCE(AVG(protein_g), 0),
 			COALESCE(AVG(carbs_g), 0),
 			COALESCE(AVG(fat_g), 0),
+			COALESCE(AVG(water_ml) FILTER (WHERE water_ml IS NOT NULL AND water_ml > 0), 0),
 			COALESCE(MIN(calories_total), 0),
 			COALESCE(MAX(calories_total), 0)
 		FROM nutrition_daily
 		WHERE user_id = $1
 			AND date >= $2::date
 			AND date <= $3::date
-	`, userID, window.Start, window.End).Scan(&trackedDays, &avgCalories, &avgProtein, &avgCarbs, &avgFat, &minCalories, &maxCalories)
+	`, userID, window.Start, window.End).Scan(&trackedDays, &avgCalories, &avgProtein, &avgCarbs, &avgFat, &avgWaterML, &minCalories, &maxCalories)
 	if trackedDays == 0 {
 		sb.WriteString("Нет записей питания за период\n")
 		return
 	}
 
-	sb.WriteString(fmt.Sprintf("Отслежено дней: %d, среднее %.0f ккал | Б %.0f г | Ж %.0f г | У %.0f г\n",
+	sb.WriteString(fmt.Sprintf("Отслежено дней: %d, среднее %.0f ккал | Б %.0f г | Ж %.0f г | У %.0f г",
 		trackedDays, avgCalories, avgProtein, avgFat, avgCarbs))
+	if avgWaterML > 0 {
+		sb.WriteString(fmt.Sprintf(" | вода %.0f мл", avgWaterML))
+	}
+	sb.WriteString("\n")
 	sb.WriteString(fmt.Sprintf("Диапазон калорийности: %.0f — %.0f ккал\n", minCalories, maxCalories))
 
 	rows, err := h.db.Query(ctx, `
-		SELECT TO_CHAR(date, 'DD.MM'), calories_total, protein_g, carbs_g, fat_g
+		SELECT TO_CHAR(date, 'DD.MM'), COALESCE(calories_total, 0), COALESCE(protein_g, 0), COALESCE(carbs_g, 0), COALESCE(fat_g, 0), COALESCE(water_ml, 0)
 		FROM nutrition_daily
 		WHERE user_id = $1
 			AND date >= $2::date
@@ -754,9 +759,13 @@ func (h *AIHandler) appendCheckupNutritionContext(ctx context.Context, sb *strin
 		sb.WriteString("Последние дни питания:\n")
 		for rows.Next() {
 			var day string
-			var calories, protein, carbs, fat float64
-			if rows.Scan(&day, &calories, &protein, &carbs, &fat) == nil {
-				sb.WriteString(fmt.Sprintf("  - %s: %.0f ккал | Б %.0f | Ж %.0f | У %.0f\n", day, calories, protein, fat, carbs))
+			var calories, protein, carbs, fat, waterML float64
+			if rows.Scan(&day, &calories, &protein, &carbs, &fat, &waterML) == nil {
+				sb.WriteString(fmt.Sprintf("  - %s: %.0f ккал | Б %.0f | Ж %.0f | У %.0f", day, calories, protein, fat, carbs))
+				if waterML > 0 {
+					sb.WriteString(fmt.Sprintf(" | вода %.0f мл", waterML))
+				}
+				sb.WriteString("\n")
 			}
 		}
 	}

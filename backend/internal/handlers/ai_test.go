@@ -116,6 +116,17 @@ func TestSelectAIContextScopePrefersWorkoutContextForEquipmentQuestions(t *testi
 	}
 }
 
+func TestSelectAIContextScopeTreatsWaterAsNutrition(t *testing.T) {
+	scope := selectAIContextScope("сколько воды я пью и добираю ли норму по воде?", nil)
+
+	if !scope.nutrition {
+		t.Fatalf("expected nutrition scope to be enabled for water questions")
+	}
+	if scope.finance || scope.weather {
+		t.Fatalf("expected unrelated scopes to stay disabled, got %+v", scope)
+	}
+}
+
 func TestSelectAIContextScopeUsesHistoryForFollowUpQuestions(t *testing.T) {
 	history := []ChatMessage{
 		{Role: "user", Content: "у меня есть гантельные грифы по 10кг и блины 5кг и 2.5кг, какие ещё блины докупить?"},

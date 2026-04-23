@@ -22,6 +22,7 @@ func TestMergeNutritionTargetsPrefersManualGoals(t *testing.T) {
 		TargetProteinG: sql.NullFloat64{Float64: 170, Valid: true},
 		TargetCarbsG:   sql.NullFloat64{Float64: 250, Valid: true},
 		TargetFatG:     sql.NullFloat64{Float64: 70, Valid: true},
+		TargetWaterML:  sql.NullFloat64{Float64: 2600, Valid: true},
 		SyncedAt:       now,
 	}
 
@@ -43,6 +44,9 @@ func TestMergeNutritionTargetsPrefersManualGoals(t *testing.T) {
 	}
 	if targets.Manual == nil || !targets.Manual.hasAny() {
 		t.Fatal("expected manual overrides in result")
+	}
+	if targets.TargetWaterML == nil || *targets.TargetWaterML != 2600 {
+		t.Fatalf("expected manual water target 2600, got %+v", targets.TargetWaterML)
 	}
 }
 

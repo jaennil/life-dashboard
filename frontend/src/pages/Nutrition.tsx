@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { EChartsCoreOption } from 'echarts/core'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, Droplets, GlassWater, RotateCcw } from 'lucide-react'
 import { EChart } from '@/components/EChart'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { PageSyncButton } from '@/components/PageSyncButton'
@@ -62,6 +62,10 @@ function fmtSyncTime(value?: string) {
 
 function fmtOptionalNumber(value?: number, unit = '') {
   return typeof value === 'number' ? `${value.toFixed(0)}${unit}` : '—'
+}
+
+function fmtWaterMl(value?: number) {
+  return typeof value === 'number' ? `${Math.round(value)} мл` : '—'
 }
 
 function numberInputValue(value?: number) {
@@ -239,6 +243,59 @@ function buildMacrosTrendOption(data: NutritionDay[]): EChartsCoreOption {
   }
 }
 
+function buildWaterOption(data: NutritionDay[], waterTarget?: number): EChartsCoreOption {
+  return {
+    color: ['#38bdf8'],
+    animationDuration: 450,
+    grid: { top: 24, right: 12, bottom: 12, left: 12, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      backgroundColor: CHART_TOOLTIP,
+      borderColor: CHART_GRID,
+      textStyle: { color: CHART_TEXT },
+      formatter: (params: unknown) => {
+        const point = toTooltipList(params)[0]
+        if (!isRecord(point)) return ''
+        return [
+          `<div>${fmtDate(readString(point.axisValue) ?? '')}</div>`,
+          `${readString(point.marker) ?? ''}${toNumber(readScalar(point.value)).toFixed(0)} мл`,
+        ].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: data.map(point => point.date),
+      axisLabel: { color: CHART_MUTED, formatter: (value: string) => fmtShort(value) },
+      axisLine: { lineStyle: { color: CHART_GRID } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: CHART_MUTED, formatter: (value: number) => `${value.toFixed(0)} мл` },
+      splitLine: { lineStyle: { color: CHART_GRID } },
+    },
+    series: [
+      {
+        name: 'Вода',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2.5, color: '#38bdf8' },
+        areaStyle: { color: 'rgba(56, 189, 248, 0.14)' },
+        markLine: typeof waterTarget === 'number' ? {
+          symbol: 'none',
+          lineStyle: { color: '#22c55e', type: 'dashed', width: 1.5 },
+          label: { color: '#86efac', formatter: `Цель ${Math.round(waterTarget)} мл` },
+          data: [{ yAxis: waterTarget }],
+        } : undefined,
+        data: data.map(point => point.water_ml),
+      },
+    ],
+  }
+}
+
 function buildNutritionDonutOption(data: Array<{ name: string; value: number; color: string }>, centerLabel: string, suffix: string): EChartsCoreOption {
   const total = data.reduce((sum, point) => sum + point.value, 0)
   return {
@@ -385,6 +442,7 @@ function filterNutritionDayByMeal(day: NutritionDay, mealType: string): Nutritio
     carbs,
     fat,
     fiber,
+    water_ml: day.water_ml,
     meals,
   }
 }
@@ -415,6 +473,7 @@ function DayRow({ day, calorieReference, calorieTarget }: { day: NutritionDay; c
               <div className={cn('h-full rounded-full', overTarget ? 'bg-rose-400' : 'bg-orange-400')} style={{ width: `${pct}%` }} />
             </div>
             <div className="flex gap-2 text-xs text-muted-foreground shrink-0">
+              {day.water_ml > 0 && <span className="text-cyan-300">💧 {day.water_ml.toFixed(0)}мл</span>}
               <span className="text-blue-400">Б {day.protein.toFixed(0)}г</span>
               <span className="text-orange-400">Ж {day.fat.toFixed(0)}г</span>
               <span className="text-emerald-400">У {day.carbs.toFixed(0)}г</span>
@@ -471,12 +530,17 @@ export function Nutrition() {
   const [targetsError, setTargetsError] = useState('')
   const [targetsNotice, setTargetsNotice] = useState('')
   const [showTargetsPanel, setShowTargetsPanel] = useState(false)
+  const [savingWater, setSavingWater] = useState(false)
+  const [waterError, setWaterError] = useState('')
+  const [waterNotice, setWaterNotice] = useState('')
+  const [customWaterInput, setCustomWaterInput] = useState('')
   const [targetsForm, setTargetsForm] = useState({
     targetWeightKg: '',
     targetCalories: '',
     targetProteinG: '',
     targetCarbsG: '',
     targetFatG: '',
+    targetWaterMl: '',
   })
 
   const loadData = useCallback(async () => {
@@ -516,6 +580,7 @@ export function Nutrition() {
       targetProteinG: numberInputValue(manual?.target_protein_g),
       targetCarbsG: numberInputValue(manual?.target_carbs_g),
       targetFatG: numberInputValue(manual?.target_fat_g),
+      targetWaterMl: numberInputValue(manual?.target_water_ml),
     })
   }, [summary])
 
@@ -533,6 +598,10 @@ export function Nutrition() {
   const avgFat = chartData.length ? chartData.reduce((s, d) => s + d.fat, 0) / chartData.length : 0
   const avgCarbs = chartData.length ? chartData.reduce((s, d) => s + d.carbs, 0) / chartData.length : 0
   const avgCalories = chartData.length ? chartData.reduce((s, d) => s + d.calories, 0) / chartData.length : 0
+  const waterTrackedDays = chartData.filter(day => day.water_ml > 0).length
+  const avgWater = waterTrackedDays > 0
+    ? chartData.reduce((sum, day) => sum + day.water_ml, 0) / waterTrackedDays
+    : 0
 
   // Macro distribution pie
   const macroPie = [
@@ -568,6 +637,13 @@ export function Nutrition() {
   }).filter(stat => stat.totalCalories > 0)
   const targets = summary?.targets
   const calorieTarget = targets?.target_calories
+  const waterTarget = targets?.target_water_ml
+  const todayWater = summary?.today_water_ml ?? 0
+  const waterProgress = typeof waterTarget === 'number' && waterTarget > 0 ? Math.min(todayWater / waterTarget, 1) : null
+  const waterTargetLeft = typeof waterTarget === 'number' ? Math.max(waterTarget - todayWater, 0) : null
+  const waterGoalDays = typeof waterTarget === 'number'
+    ? chartData.filter(day => day.water_ml >= waterTarget).length
+    : 0
   const filteredDaily = mealFilter
     ? daily
       .map(day => filterNutritionDayByMeal(day, mealFilter))
@@ -611,12 +687,14 @@ export function Nutrition() {
         target_protein_g: null,
         target_carbs_g: null,
         target_fat_g: null,
+        target_water_ml: null,
       } : {
         target_weight_kg: parseRequiredDecimalOrNull('Целевой вес', targetsForm.targetWeightKg),
         target_calories: parseRequiredDecimalOrNull('Калории', targetsForm.targetCalories),
         target_protein_g: parseRequiredDecimalOrNull('Белки', targetsForm.targetProteinG),
         target_carbs_g: parseRequiredDecimalOrNull('Углеводы', targetsForm.targetCarbsG),
         target_fat_g: parseRequiredDecimalOrNull('Жиры', targetsForm.targetFatG),
+        target_water_ml: parseRequiredDecimalOrNull('Вода', targetsForm.targetWaterMl),
       }
       await api.saveNutritionTargets(payload)
       if (clear) {
@@ -626,6 +704,7 @@ export function Nutrition() {
           targetProteinG: '',
           targetCarbsG: '',
           targetFatG: '',
+          targetWaterMl: '',
         })
       }
       await loadData()
@@ -637,12 +716,56 @@ export function Nutrition() {
     }
   }
 
+  async function handleAddWater(deltaMl: number) {
+    setSavingWater(true)
+    setWaterError('')
+    setWaterNotice('')
+    try {
+      const next = await api.saveNutritionWater({ delta_ml: deltaMl })
+      await loadData()
+      setWaterNotice(`Добавлено ${Math.round(deltaMl)} мл · сегодня ${Math.round(next.water_ml)} мл`)
+    } catch (error) {
+      setWaterError(error instanceof Error ? error.message : 'Не удалось сохранить воду')
+    } finally {
+      setSavingWater(false)
+    }
+  }
+
+  async function handleSetWaterAbsolute(nextWaterMl: number) {
+    setSavingWater(true)
+    setWaterError('')
+    setWaterNotice('')
+    try {
+      const next = await api.saveNutritionWater({ water_ml: nextWaterMl })
+      await loadData()
+      setWaterNotice(nextWaterMl === 0 ? 'Сегодняшняя вода сброшена' : `Сегодня обновлено до ${Math.round(next.water_ml)} мл`)
+      if (nextWaterMl > 0) setCustomWaterInput('')
+    } catch (error) {
+      setWaterError(error instanceof Error ? error.message : 'Не удалось обновить воду')
+    } finally {
+      setSavingWater(false)
+    }
+  }
+
+  async function handleSubmitCustomWater() {
+    try {
+      const parsed = parseRequiredDecimalOrNull('Вода', customWaterInput)
+      if (parsed == null) {
+        setWaterError('Введи количество воды в мл')
+        return
+      }
+      await handleSetWaterAbsolute(parsed)
+    } catch (error) {
+      setWaterError(error instanceof Error ? error.message : 'Не удалось обновить воду')
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         eyebrow="Nutrition"
         title="Питание"
-        description="Калории, БЖУ и дневник питания без ручной рутины. Цели остаются рядом, но не мешают ежедневному просмотру данных."
+        description="Калории, БЖУ, вода и дневник питания в одном месте. Ежедневный hydration-трекинг живёт рядом с питанием, а редкие настройки убраны ниже."
         badges={[
           { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
           { label: enabledNutritionIntegrations.length > 0 ? `${enabledNutritionIntegrations.length} активных источника питания` : 'Источник питания не подключён', tone: enabledNutritionIntegrations.length > 0 ? 'success' : 'warning' },
@@ -671,9 +794,10 @@ export function Nutrition() {
       />
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         {[
           { label: 'Сегодня', value: summary ? `${summary.today_kcal.toFixed(0)}` : '—', unit: 'ккал', color: 'bg-orange-500' },
+          { label: 'Вода сегодня', value: fmtWaterMl(todayWater), unit: '', color: 'bg-cyan-500' },
           { label: `Ср. ккал/${period}д`, value: avgCalories.toFixed(0), unit: 'ккал', color: 'bg-amber-500' },
           { label: 'Ср. белки', value: avgProtein.toFixed(0), unit: 'г', color: 'bg-blue-500' },
           { label: 'Ср. жиры', value: avgFat.toFixed(0), unit: 'г', color: 'bg-orange-500' },
@@ -686,6 +810,135 @@ export function Nutrition() {
             )}
           </div>
         ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.02fr_1.28fr]">
+        <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Гидратация</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Быстрый лог воды на сегодня. Можно просто набивать `+250/+500`, а цель держать ниже в ручных настройках.
+              </p>
+            </div>
+            <div className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-200">
+              {typeof waterTarget === 'number' ? `Цель ${Math.round(waterTarget)} мл` : 'Цель воды не задана'}
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="rounded-2xl border border-cyan-500/10 bg-cyan-500/5 p-4 sm:col-span-2">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-cyan-200/80">Сегодня выпито</p>
+                  <p className="mt-2 text-3xl font-bold text-foreground">{Math.round(todayWater)} <span className="text-base font-medium text-muted-foreground">мл</span></p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {typeof waterTarget === 'number'
+                      ? waterTargetLeft === 0
+                        ? 'Цель по воде на сегодня закрыта.'
+                        : `До цели осталось ${Math.round(waterTargetLeft ?? 0)} мл.`
+                      : 'Можно сохранить цель по воде в ручных целях и видеть прогресс.'}
+                  </p>
+                </div>
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-500/15 text-cyan-200">
+                  <GlassWater className="h-5 w-5" />
+                </div>
+              </div>
+
+              <div className="mt-4 h-3 overflow-hidden rounded-full bg-muted/70">
+                <div
+                  className="h-full rounded-full bg-cyan-400 transition-[width]"
+                  style={{ width: `${waterProgress == null ? 0 : Math.min(100, Math.round(waterProgress * 100))}%` }}
+                />
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                {[
+                  { label: 'Ср. по дням с водой', value: fmtWaterMl(avgWater) },
+                  { label: `Дней с водой`, value: `${waterTrackedDays}/${chartData.length || 0}` },
+                  { label: 'Цель выполнена', value: typeof waterTarget === 'number' ? `${waterGoalDays}/${chartData.length || 0}` : '—' },
+                  { label: 'Статус', value: waterProgress == null ? 'без цели' : waterProgress >= 1 ? 'цель закрыта' : 'добираем' },
+                ].map(metric => (
+                  <div key={metric.label} className="rounded-xl border bg-background/45 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground/80">{metric.label}</p>
+                    <p className="mt-1 text-sm font-semibold text-foreground">{metric.value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-background/45 p-4">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Быстрый лог</p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {[250, 500, 750, 1000].map(amount => (
+                  <button
+                    key={amount}
+                    onClick={() => void handleAddWater(amount)}
+                    disabled={savingWater}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-100 transition-colors hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Droplets className="h-3.5 w-3.5" />
+                    +{amount}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 flex gap-2">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={customWaterInput}
+                  onChange={e => setCustomWaterInput(e.target.value)}
+                  placeholder="например, 1800"
+                  className="min-w-0 flex-1 rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+                <button
+                  onClick={() => void handleSubmitCustomWater()}
+                  disabled={savingWater}
+                  className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Задать
+                </button>
+              </div>
+              <button
+                onClick={() => void handleSetWaterAbsolute(0)}
+                disabled={savingWater}
+                className="mt-3 inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Сбросить сегодня
+              </button>
+              {(waterError || waterNotice) ? (
+                <p className={cn('mt-3 text-xs', waterError ? 'text-rose-400' : 'text-cyan-200')}>
+                  {waterError || waterNotice}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Вода по дням</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Видно, в какие дни ты реально пил воду, а в какие hydration разваливался. Это отдельный сигнал от калорий и БЖУ.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                Среднее: {fmtWaterMl(avgWater)}
+              </span>
+              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                Цель выполнена: {typeof waterTarget === 'number' ? `${waterGoalDays}/${chartData.length || 0}` : '—'}
+              </span>
+            </div>
+          </div>
+          {loading ? <div className="h-56 rounded bg-muted animate-pulse" /> : chartData.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Нет данных</p>
+          ) : (
+            <EChart option={buildWaterOption(chartData, waterTarget)} height={240} />
+          )}
+        </div>
       </div>
 
       {/* Charts row */}
@@ -796,6 +1049,9 @@ export function Nutrition() {
               Б/Ж/У: {fmtOptionalNumber(targets?.target_protein_g, ' г')} · {fmtOptionalNumber(targets?.target_fat_g, ' г')} · {fmtOptionalNumber(targets?.target_carbs_g, ' г')}
             </span>
             <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              Вода: {fmtOptionalNumber(targets?.target_water_ml, ' мл')}
+            </span>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
               Вес: {fmtWeight(targets?.current_weight_kg)} → {fmtWeight(targets?.target_weight_kg)}
             </span>
             <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
@@ -810,7 +1066,7 @@ export function Nutrition() {
         )}
       >
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
             <div className="rounded-xl bg-muted/40 p-3">
               <p className="text-[10px] text-muted-foreground">Текущий вес</p>
               <p className="mt-1 text-lg font-bold text-foreground">{fmtWeight(targets?.current_weight_kg)}</p>
@@ -831,6 +1087,10 @@ export function Nutrition() {
             <div className="rounded-xl bg-muted/40 p-3">
               <p className="text-[10px] text-muted-foreground">Цель ккал</p>
               <p className="mt-1 text-lg font-bold text-foreground">{fmtOptionalNumber(targets?.target_calories, ' ккал')}</p>
+            </div>
+            <div className="rounded-xl bg-cyan-500/10 p-3">
+              <p className="text-[10px] text-cyan-200/80">Цель воды</p>
+              <p className="mt-1 text-lg font-bold text-cyan-100">{fmtOptionalNumber(targets?.target_water_ml, ' мл')}</p>
             </div>
           </div>
 
@@ -863,7 +1123,7 @@ export function Nutrition() {
               ) : null}
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] text-muted-foreground">Целевой вес, кг</span>
                 <input
@@ -919,6 +1179,17 @@ export function Nutrition() {
                   className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                 />
               </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">Вода, мл</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={targetsForm.targetWaterMl}
+                  onChange={e => setTargetsField('targetWaterMl', e.target.value)}
+                  placeholder="например, 2500"
+                  className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
             </div>
 
             {(targetsError || targetsNotice) ? (
@@ -954,7 +1225,7 @@ export function Nutrition() {
       {/* Daily log */}
       <div className="rounded-2xl border bg-card/90 overflow-hidden shadow-sm">
         <div className="px-5 py-4 border-b flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Дневник питания</h2>
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Дневник питания и воды</h2>
           <div className="flex gap-1">
             <button onClick={() => setMealFilter('')}
               className={cn('px-2 py-1 text-xs rounded-lg transition-colors', !mealFilter ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent')}>
