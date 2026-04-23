@@ -1018,179 +1018,177 @@ export function Nutrition() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.06fr)_minmax(0,0.94fr)] xl:items-start">
-        <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Гидратация</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Чистая вода живёт отдельно, а режим гидратации решает, считать ли чай и кофе частью цели.
-              </p>
-            </div>
-            <div className={cn('rounded-full border px-3 py-1 text-xs font-medium', HYDRATION_MODE_ACCENT[hydrationMode])}>
-              {hydrationModeLabel(hydrationMode)} · {typeof waterTarget === 'number' ? `цель ${Math.round(waterTarget)} мл` : 'цель не задана'}
-            </div>
+      <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Гидратация</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Чистая вода живёт отдельно, а режим гидратации решает, считать ли чай и кофе частью цели.
+            </p>
           </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            {(['strict', 'flexible'] as HydrationMode[]).map(mode => (
-              <button
-                key={mode}
-                onClick={() => void handleHydrationModeChange(mode)}
-                disabled={savingTargets}
-                className={cn(
-                  'rounded-xl border px-3 py-2 text-sm transition-colors',
-                  hydrationMode === mode ? 'border-primary/30 bg-primary/10 text-primary' : 'bg-background/50 text-muted-foreground hover:bg-accent',
-                )}
-              >
-                {hydrationModeLabel(mode)}
-              </button>
-            ))}
-            <span className="self-center text-xs text-muted-foreground">{HYDRATION_MODE_NOTES[hydrationMode]}</span>
-          </div>
-
-          <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.16fr)_minmax(300px,0.84fr)]">
-            <div className="rounded-2xl border border-cyan-500/10 bg-cyan-500/5 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[11px] uppercase tracking-wide text-cyan-200/80">Сегодня в цель</p>
-                  <p className="mt-2 text-3xl font-bold text-foreground">{Math.round(todayHydration)} <span className="text-base font-medium text-muted-foreground">мл</span></p>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {typeof waterTarget === 'number'
-                      ? waterTargetLeft === 0
-                        ? 'Цель по гидратации на сегодня закрыта.'
-                        : `До цели осталось ${Math.round(waterTargetLeft ?? 0)} мл.`
-                      : 'Можно сохранить цель по воде в ручных целях и видеть прогресс.'}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                    <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-cyan-200">💧 Вода {Math.round(todayWater)} мл</span>
-                    <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-emerald-200">🍵/☕ В цель {Math.round(todayCountedDrinks)} мл</span>
-                    {todayOtherDrinks > 0 ? (
-                      <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-amber-200">🧃 Отдельно {Math.round(todayOtherDrinks)} мл</span>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-500/15 text-cyan-200">
-                  <GlassWater className="h-5 w-5" />
-                </div>
-              </div>
-
-              <div className="mt-4 h-3 overflow-hidden rounded-full bg-muted/70">
-                <div
-                  className="h-full rounded-full bg-cyan-400 transition-[width]"
-                  style={{ width: `${waterProgress == null ? 0 : Math.min(100, Math.round(waterProgress * 100))}%` }}
-                />
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-                {[
-                  { label: 'Ср. по дням', value: fmtWaterMl(avgHydration) },
-                  { label: 'Дней с гидратацией', value: `${hydrationTrackedDays}/${chartData.length || 0}` },
-                  { label: 'Цель выполнена', value: typeof waterTarget === 'number' ? `${waterGoalDays}/${chartData.length || 0}` : '—' },
-                  { label: 'Режим', value: hydrationModeLabel(hydrationMode) },
-                ].map(metric => (
-                  <div key={metric.label} className="rounded-xl border bg-background/45 px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground/80">{metric.label}</p>
-                    <p className="mt-1 text-sm font-semibold text-foreground">{metric.value}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border bg-background/45 p-4 xl:self-start">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Быстрый лог</p>
-              <p className="mt-2 text-[11px] text-muted-foreground">Вода</p>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                {[250, 500, 750, 1000].map(amount => (
-                  <button
-                    key={amount}
-                    onClick={() => void handleAddWater(amount)}
-                    disabled={savingWater}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-100 transition-colors hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <Droplets className="h-3.5 w-3.5" />
-                    +{amount}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-4 text-[11px] text-muted-foreground">Напитки</p>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {HYDRATION_BEVERAGES.map(beverage => (
-                  <button
-                    key={beverage.type}
-                    onClick={() => void handleAddHydration(beverage.type, beverage.amount)}
-                    disabled={savingWater}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <span>{beverage.emoji}</span>
-                    {beverage.short} +{beverage.amount}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                <select
-                  value={customHydrationType}
-                  onChange={e => setCustomHydrationType(e.target.value as HydrationBeverageType)}
-                  className="rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                >
-                  {HYDRATION_BEVERAGES.map(beverage => (
-                    <option key={beverage.type} value={beverage.type}>{beverage.label}</option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={customHydrationInput}
-                  onChange={e => setCustomHydrationInput(e.target.value)}
-                  placeholder="например, 250"
-                  className="min-w-0 flex-1 rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
-                <button
-                  onClick={() => void handleSubmitCustomHydration()}
-                  disabled={savingWater}
-                  className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-2"
-                >
-                  Добавить
-                </button>
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={customWaterInput}
-                    onChange={e => setCustomWaterInput(e.target.value)}
-                    placeholder="вода, например 1800"
-                    className="min-w-0 rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <button
-                    onClick={() => void handleSubmitCustomWater()}
-                    disabled={savingWater}
-                    className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-100 transition-colors hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Задать воду
-                  </button>
-                <button
-                  onClick={() => void handleSetWaterAbsolute(0)}
-                  disabled={savingWater}
-                  className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Сбросить воду
-                </button>
-              </div>
-              {(waterError || waterNotice) ? (
-                <p className={cn('mt-3 text-xs', waterError ? 'text-rose-400' : 'text-cyan-200')}>
-                  {waterError || waterNotice}
-                </p>
-              ) : null}
-            </div>
+          <div className={cn('rounded-full border px-3 py-1 text-xs font-medium', HYDRATION_MODE_ACCENT[hydrationMode])}>
+            {hydrationModeLabel(hydrationMode)} · {typeof waterTarget === 'number' ? `цель ${Math.round(waterTarget)} мл` : 'цель не задана'}
           </div>
         </div>
 
-        <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
+        <div className="mt-4 flex flex-wrap gap-2">
+          {(['strict', 'flexible'] as HydrationMode[]).map(mode => (
+            <button
+              key={mode}
+              onClick={() => void handleHydrationModeChange(mode)}
+              disabled={savingTargets}
+              className={cn(
+                'rounded-xl border px-3 py-2 text-sm transition-colors',
+                hydrationMode === mode ? 'border-primary/30 bg-primary/10 text-primary' : 'bg-background/50 text-muted-foreground hover:bg-accent',
+              )}
+            >
+              {hydrationModeLabel(mode)}
+            </button>
+          ))}
+          <span className="self-center text-xs text-muted-foreground">{HYDRATION_MODE_NOTES[hydrationMode]}</span>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)] xl:items-start">
+          <div className="rounded-2xl border border-cyan-500/10 bg-cyan-500/5 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-cyan-200/80">Сегодня в цель</p>
+                <p className="mt-2 text-3xl font-bold text-foreground">{Math.round(todayHydration)} <span className="text-base font-medium text-muted-foreground">мл</span></p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {typeof waterTarget === 'number'
+                    ? waterTargetLeft === 0
+                      ? 'Цель по гидратации на сегодня закрыта.'
+                      : `До цели осталось ${Math.round(waterTargetLeft ?? 0)} мл.`
+                    : 'Можно сохранить цель по воде в ручных целях и видеть прогресс.'}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-cyan-200">💧 Вода {Math.round(todayWater)} мл</span>
+                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-emerald-200">🍵/☕ В цель {Math.round(todayCountedDrinks)} мл</span>
+                  {todayOtherDrinks > 0 ? (
+                    <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-amber-200">🧃 Отдельно {Math.round(todayOtherDrinks)} мл</span>
+                  ) : null}
+                </div>
+              </div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-500/15 text-cyan-200">
+                <GlassWater className="h-5 w-5" />
+              </div>
+            </div>
+
+            <div className="mt-4 h-3 overflow-hidden rounded-full bg-muted/70">
+              <div
+                className="h-full rounded-full bg-cyan-400 transition-[width]"
+                style={{ width: `${waterProgress == null ? 0 : Math.min(100, Math.round(waterProgress * 100))}%` }}
+              />
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+              {[
+                { label: 'Ср. по дням', value: fmtWaterMl(avgHydration) },
+                { label: 'Дней с гидратацией', value: `${hydrationTrackedDays}/${chartData.length || 0}` },
+                { label: 'Цель выполнена', value: typeof waterTarget === 'number' ? `${waterGoalDays}/${chartData.length || 0}` : '—' },
+                { label: 'Режим', value: hydrationModeLabel(hydrationMode) },
+              ].map(metric => (
+                <div key={metric.label} className="rounded-xl border bg-background/45 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground/80">{metric.label}</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">{metric.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-background/45 p-4">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Быстрый лог</p>
+            <p className="mt-2 text-[11px] text-muted-foreground">Вода</p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {[250, 500, 750, 1000].map(amount => (
+                <button
+                  key={amount}
+                  onClick={() => void handleAddWater(amount)}
+                  disabled={savingWater}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-100 transition-colors hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Droplets className="h-3.5 w-3.5" />
+                  +{amount}
+                </button>
+              ))}
+            </div>
+            <p className="mt-4 text-[11px] text-muted-foreground">Напитки</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {HYDRATION_BEVERAGES.map(beverage => (
+                <button
+                  key={beverage.type}
+                  onClick={() => void handleAddHydration(beverage.type, beverage.amount)}
+                  disabled={savingWater}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <span>{beverage.emoji}</span>
+                  {beverage.short} +{beverage.amount}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <select
+                value={customHydrationType}
+                onChange={e => setCustomHydrationType(e.target.value as HydrationBeverageType)}
+                className="rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              >
+                {HYDRATION_BEVERAGES.map(beverage => (
+                  <option key={beverage.type} value={beverage.type}>{beverage.label}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={customHydrationInput}
+                onChange={e => setCustomHydrationInput(e.target.value)}
+                placeholder="например, 250"
+                className="min-w-0 rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+              <button
+                onClick={() => void handleSubmitCustomHydration()}
+                disabled={savingWater}
+                className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-2"
+              >
+                Добавить
+              </button>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={customWaterInput}
+                onChange={e => setCustomWaterInput(e.target.value)}
+                placeholder="вода, например 1800"
+                className="min-w-0 rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+              <button
+                onClick={() => void handleSubmitCustomWater()}
+                disabled={savingWater}
+                className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-100 transition-colors hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Задать воду
+              </button>
+              <button
+                onClick={() => void handleSetWaterAbsolute(0)}
+                disabled={savingWater}
+                className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-2"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Сбросить воду
+              </button>
+            </div>
+            {(waterError || waterNotice) ? (
+              <p className={cn('mt-3 text-xs', waterError ? 'text-rose-400' : 'text-cyan-200')}>
+                {waterError || waterNotice}
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-5 border-t border-border/70 pt-5">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Гидратация по дням</h2>
+              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">Гидратация по дням</h3>
               <p className="mt-1 text-xs text-muted-foreground">
                 Видно отдельно чистую воду, counted hydration и напитки, которые в цель не идут. Это не смешивается с калориями и БЖУ.
               </p>
@@ -1214,7 +1212,7 @@ export function Nutrition() {
                 </div>
                 <p className="mt-4 text-sm font-medium text-foreground">Пока нет логов по гидратации</p>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Добавь воду, чай или кофе в блоке слева. Когда появятся первые записи, здесь будет видно, что идёт в цель, а что считается отдельно.
+                  Добавь воду, чай или кофе в quick log выше. Когда появятся первые записи, здесь будет видно, что идёт в цель, а что считается отдельно.
                 </p>
               </div>
             </div>
