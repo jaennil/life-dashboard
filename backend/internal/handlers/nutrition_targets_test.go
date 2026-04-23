@@ -23,6 +23,7 @@ func TestMergeNutritionTargetsPrefersManualGoals(t *testing.T) {
 		TargetCarbsG:   sql.NullFloat64{Float64: 250, Valid: true},
 		TargetFatG:     sql.NullFloat64{Float64: 70, Valid: true},
 		TargetWaterML:  sql.NullFloat64{Float64: 2600, Valid: true},
+		HydrationMode:  sql.NullString{String: hydrationModeFlexible, Valid: true},
 		SyncedAt:       now,
 	}
 
@@ -48,6 +49,9 @@ func TestMergeNutritionTargetsPrefersManualGoals(t *testing.T) {
 	if targets.TargetWaterML == nil || *targets.TargetWaterML != 2600 {
 		t.Fatalf("expected manual water target 2600, got %+v", targets.TargetWaterML)
 	}
+	if targets.HydrationMode != hydrationModeFlexible {
+		t.Fatalf("expected hydration mode %q, got %q", hydrationModeFlexible, targets.HydrationMode)
+	}
 }
 
 func TestMergeNutritionTargetsWithoutFatSecretStillReturnsManual(t *testing.T) {
@@ -70,5 +74,8 @@ func TestMergeNutritionTargetsWithoutFatSecretStillReturnsManual(t *testing.T) {
 	}
 	if targets.Manual == nil || targets.Manual.UpdatedAt == nil {
 		t.Fatal("expected manual metadata")
+	}
+	if targets.HydrationMode != hydrationModeStrict {
+		t.Fatalf("expected default hydration mode %q, got %q", hydrationModeStrict, targets.HydrationMode)
 	}
 }

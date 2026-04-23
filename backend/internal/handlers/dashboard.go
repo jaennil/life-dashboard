@@ -41,12 +41,13 @@ type FitnessSummary struct {
 }
 
 type DashboardNutritionSummary struct {
-	TodayKcal      float64  `json:"today_kcal"`
-	TodayWaterML   float64  `json:"today_water_ml"`
-	AvgCalories    float64  `json:"avg_calories"`
-	DaysTracked    int      `json:"days_tracked"`
-	TargetCalories *float64 `json:"target_calories,omitempty"`
-	TargetWaterML  *float64 `json:"target_water_ml,omitempty"`
+	TodayKcal        float64  `json:"today_kcal"`
+	TodayWaterML     float64  `json:"today_water_ml"`
+	TodayHydrationML float64  `json:"today_hydration_ml"`
+	AvgCalories      float64  `json:"avg_calories"`
+	DaysTracked      int      `json:"days_tracked"`
+	TargetCalories   *float64 `json:"target_calories,omitempty"`
+	TargetWaterML    *float64 `json:"target_water_ml,omitempty"`
 }
 
 type DashboardProductivitySummary struct {
@@ -122,9 +123,17 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		FROM nutrition_daily
 		WHERE date = $1 AND user_id = $2
 	`, todayStart, userID).Scan(&summary.Nutrition.TodayKcal, &summary.Nutrition.TodayWaterML)
+	summary.Nutrition.TodayHydrationML = summary.Nutrition.TodayWaterML
+	hydrationMode := hydrationModeStrict
 	if targets, err := loadNutritionTargets(ctx, h.db, userID); err == nil && targets != nil {
 		summary.Nutrition.TargetCalories = targets.TargetCalories
 		summary.Nutrition.TargetWaterML = targets.TargetWaterML
+		hydrationMode = targets.HydrationMode
+	}
+	if hydration, err := loadHydrationRange(ctx, h.db, userID, todayStart, todayStart, hydrationMode); err == nil {
+		if day := hydration[todayStart.Format("2006-01-02")]; day != nil {
+			summary.Nutrition.TodayHydrationML = day.HydrationML
+		}
 	}
 
 	// Todoist task pulse

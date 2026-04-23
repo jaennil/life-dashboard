@@ -26,6 +26,7 @@ export interface DashboardSummary {
   nutrition: {
     today_kcal: number
     today_water_ml: number
+    today_hydration_ml: number
     avg_calories: number
     days_tracked: number
     target_calories?: number
@@ -282,11 +283,19 @@ export interface NutritionSummary {
   avg_carbs: number
   avg_fat: number
   avg_water_ml: number
+  avg_hydration_ml: number
   days_tracked: number
   today_kcal: number
   today_water_ml: number
+  today_hydration_ml: number
+  today_counted_drinks_ml: number
+  today_other_drinks_ml: number
+  hydration_mode: HydrationMode
   targets?: NutritionTargets
 }
+
+export type HydrationMode = 'strict' | 'flexible'
+export type HydrationBeverageType = 'tea' | 'coffee' | 'energy' | 'milkshake' | 'other'
 
 export interface NutritionGoldenCard {
   key: string
@@ -312,6 +321,7 @@ export interface NutritionTargets {
   target_carbs_g?: number
   target_fat_g?: number
   target_water_ml?: number
+  hydration_mode: HydrationMode
   weight_measure?: string
   height_measure?: string
   api_notes?: string[]
@@ -326,6 +336,7 @@ export interface NutritionManualTargets {
   target_carbs_g?: number
   target_fat_g?: number
   target_water_ml?: number
+  hydration_mode?: HydrationMode
   updated_at?: string
 }
 
@@ -336,6 +347,13 @@ export interface NutritionTargetsInput {
   target_carbs_g?: number | null
   target_fat_g?: number | null
   target_water_ml?: number | null
+  hydration_mode?: HydrationMode | null
+}
+
+export interface NutritionHydrationBeverage {
+  beverage_type: HydrationBeverageType
+  amount_ml: number
+  counts_toward_goal: boolean
 }
 
 export interface NutritionMealItem {
@@ -358,12 +376,21 @@ export interface NutritionDay {
   fat: number
   fiber: number
   water_ml: number
+  hydration_ml: number
+  counted_drinks_ml: number
+  other_drinks_ml: number
+  beverages: NutritionHydrationBeverage[]
   meals: NutritionMeal[]
 }
 
-export interface NutritionWaterState {
+export interface NutritionHydrationState {
   date: string
   water_ml: number
+  hydration_ml: number
+  counted_drinks_ml: number
+  other_drinks_ml: number
+  hydration_mode: HydrationMode
+  beverages: NutritionHydrationBeverage[]
 }
 
 export interface Integration {
@@ -583,7 +610,16 @@ export const api = {
       body: JSON.stringify(input),
     }).then(async r => {
       if (!r.ok) throw new Error(await r.text())
-      return r.json() as Promise<NutritionWaterState>
+      return r.json() as Promise<NutritionHydrationState>
+    }),
+  saveNutritionHydration: (input: { date?: string; beverage_type: HydrationBeverageType; delta_ml?: number; amount_ml?: number }) =>
+    fetch(BASE + '/nutrition/hydration', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text())
+      return r.json() as Promise<NutritionHydrationState>
     }),
   getIntegrations: () => get<Integration[]>('/integrations'),
   toggleIntegration: (name: string, enabled: boolean) =>

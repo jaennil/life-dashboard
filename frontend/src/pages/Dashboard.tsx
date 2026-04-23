@@ -441,8 +441,8 @@ export function Dashboard() {
         insights.push({ type: 'warn', text: `Средние калории за 7 дней (${Math.round(summary.nutrition.avg_calories)}) выше цели (${Math.round(summary.nutrition.target_calories)}).` })
       }
     }
-    if (summary.nutrition.target_water_ml && summary.nutrition.today_water_ml < summary.nutrition.target_water_ml * 0.5) {
-      insights.push({ type: 'info', text: `По воде сегодня ${Math.round(summary.nutrition.today_water_ml)} мл из цели ${Math.round(summary.nutrition.target_water_ml)} мл.` })
+    if (summary.nutrition.target_water_ml && summary.nutrition.today_hydration_ml < summary.nutrition.target_water_ml * 0.5) {
+      insights.push({ type: 'info', text: `По гидратации сегодня ${Math.round(summary.nutrition.today_hydration_ml)} мл из цели ${Math.round(summary.nutrition.target_water_ml)} мл.` })
     }
     if (!summary.checkup.has_report) {
       insights.push({ type: 'info', text: 'AI-checkup ещё не запускался. Имеет смысл сделать первый обзор по всем сферам.' })
@@ -500,10 +500,10 @@ export function Dashboard() {
         { label: 'Сегодня', value: `${Math.round(summary.nutrition.today_kcal)} ккал` },
         { label: 'Ср. 7д', value: `${Math.round(summary.nutrition.avg_calories)} ккал` },
         { label: 'Цель', value: summary.nutrition.target_calories ? `${Math.round(summary.nutrition.target_calories)} ккал` : 'не задана' },
-        { label: 'Вода', value: `${Math.round(summary.nutrition.today_water_ml)} мл` },
+        { label: 'Гидратация', value: `${Math.round(summary.nutrition.today_hydration_ml)} мл` },
       ],
       note: summary.nutrition.days_tracked > 0
-        ? `Дней с логами: ${summary.nutrition.days_tracked} из 7${summary.nutrition.target_water_ml ? ` · цель воды ${Math.round(summary.nutrition.target_water_ml)} мл` : ''}.`
+        ? `Дней с логами: ${summary.nutrition.days_tracked} из 7${summary.nutrition.target_water_ml ? ` · цель гидратации ${Math.round(summary.nutrition.target_water_ml)} мл` : ''}.`
         : 'Пока нет свежих данных по дневнику питания.',
     },
     {
@@ -609,8 +609,8 @@ export function Dashboard() {
             title="Питание сегодня"
             value={summary ? `${Math.round(summary.nutrition.today_kcal)} ккал` : '—'}
             sub={summary?.nutrition.target_calories
-              ? `цель: ${Math.round(summary.nutrition.target_calories)} ккал · вода ${Math.round(summary?.nutrition.today_water_ml ?? 0)} мл`
-              : `вода: ${Math.round(summary?.nutrition.today_water_ml ?? 0)} мл`}
+              ? `цель: ${Math.round(summary.nutrition.target_calories)} ккал · гидратация ${Math.round(summary?.nutrition.today_hydration_ml ?? 0)} мл`
+              : `гидратация: ${Math.round(summary?.nutrition.today_hydration_ml ?? 0)} мл`}
             icon={UtensilsCrossed}
             color="bg-emerald-500"
             loading={loading}

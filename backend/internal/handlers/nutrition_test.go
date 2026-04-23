@@ -37,13 +37,14 @@ func TestBuildNutritionGoldenMetricsUsesTargets(t *testing.T) {
 	targetWater := 2500.0
 
 	resp := buildNutritionGoldenMetrics(7, []nutritionGoldenDay{
-		{Calories: 2900, Protein: 185, WaterML: 2600, MealTypeCount: 3},
-		{Calories: 3100, Protein: 170, WaterML: 2400, MealTypeCount: 4},
-		{Calories: 1500, Protein: 90, WaterML: 0, MealTypeCount: 2},
+		{Calories: 2900, Protein: 185, HydrationML: 2600, MealTypeCount: 3},
+		{Calories: 3100, Protein: 170, HydrationML: 2400, MealTypeCount: 4},
+		{Calories: 1500, Protein: 90, HydrationML: 0, MealTypeCount: 2},
 	}, &NutritionTargets{
 		TargetCalories: &targetCalories,
 		TargetProteinG: &targetProtein,
 		TargetWaterML:  &targetWater,
+		HydrationMode:  hydrationModeStrict,
 	}, map[string]int{
 		"breakfast": 2,
 		"lunch":     3,

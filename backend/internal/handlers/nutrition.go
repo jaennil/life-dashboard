@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,15 +29,20 @@ func NewNutrition(db *pgxpool.Pool, logger zerolog.Logger) *NutritionHandler {
 }
 
 type NutritionSummary struct {
-	AvgCalories float64           `json:"avg_calories"`
-	AvgProtein  float64           `json:"avg_protein"`
-	AvgCarbs    float64           `json:"avg_carbs"`
-	AvgFat      float64           `json:"avg_fat"`
-	AvgWaterML  float64           `json:"avg_water_ml"`
-	DaysTracked int               `json:"days_tracked"`
-	TodayKcal   float64           `json:"today_kcal"`
-	TodayWater  float64           `json:"today_water_ml"`
-	Targets     *NutritionTargets `json:"targets,omitempty"`
+	AvgCalories        float64           `json:"avg_calories"`
+	AvgProtein         float64           `json:"avg_protein"`
+	AvgCarbs           float64           `json:"avg_carbs"`
+	AvgFat             float64           `json:"avg_fat"`
+	AvgWaterML         float64           `json:"avg_water_ml"`
+	AvgHydrationML     float64           `json:"avg_hydration_ml"`
+	DaysTracked        int               `json:"days_tracked"`
+	TodayKcal          float64           `json:"today_kcal"`
+	TodayWater         float64           `json:"today_water_ml"`
+	TodayHydrationML   float64           `json:"today_hydration_ml"`
+	TodayCountedDrinks float64           `json:"today_counted_drinks_ml"`
+	TodayOtherDrinksML float64           `json:"today_other_drinks_ml"`
+	HydrationMode      string            `json:"hydration_mode"`
+	Targets            *NutritionTargets `json:"targets,omitempty"`
 }
 
 type NutritionGoldenCard struct {
@@ -64,14 +70,18 @@ type NutritionMeal struct {
 }
 
 type NutritionDay struct {
-	Date     string          `json:"date"`
-	Calories float64         `json:"calories"`
-	Protein  float64         `json:"protein"`
-	Carbs    float64         `json:"carbs"`
-	Fat      float64         `json:"fat"`
-	Fiber    float64         `json:"fiber"`
-	WaterML  float64         `json:"water_ml"`
-	Meals    []NutritionMeal `json:"meals"`
+	Date            string                       `json:"date"`
+	Calories        float64                      `json:"calories"`
+	Protein         float64                      `json:"protein"`
+	Carbs           float64                      `json:"carbs"`
+	Fat             float64                      `json:"fat"`
+	Fiber           float64                      `json:"fiber"`
+	WaterML         float64                      `json:"water_ml"`
+	HydrationML     float64                      `json:"hydration_ml"`
+	CountedDrinksML float64                      `json:"counted_drinks_ml"`
+	OtherDrinksML   float64                      `json:"other_drinks_ml"`
+	Beverages       []NutritionHydrationBeverage `json:"beverages,omitempty"`
+	Meals           []NutritionMeal              `json:"meals"`
 }
 
 type SaveNutritionTargetsRequest struct {
@@ -81,6 +91,7 @@ type SaveNutritionTargetsRequest struct {
 	TargetCarbsG   *float64 `json:"target_carbs_g"`
 	TargetFatG     *float64 `json:"target_fat_g"`
 	TargetWaterML  *float64 `json:"target_water_ml"`
+	HydrationMode  *string  `json:"hydration_mode"`
 }
 
 type SaveNutritionWaterRequest struct {
@@ -89,24 +100,26 @@ type SaveNutritionWaterRequest struct {
 	WaterML *float64 `json:"water_ml"`
 }
 
-type NutritionWaterState struct {
-	Date    string  `json:"date"`
-	WaterML float64 `json:"water_ml"`
+type SaveNutritionHydrationRequest struct {
+	Date         string   `json:"date"`
+	BeverageType string   `json:"beverage_type"`
+	DeltaML      *float64 `json:"delta_ml"`
+	AmountML     *float64 `json:"amount_ml"`
 }
 
 type nutritionGoldenDay struct {
 	Calories      float64
 	Protein       float64
-	WaterML       float64
+	HydrationML   float64
 	MealTypeCount int
 }
 
 func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
-	now := time.Now()
-	sevenDaysAgo := now.AddDate(0, 0, -7)
-	today := now.Truncate(24 * time.Hour)
+	now := time.Now().In(aiDisplayLocation)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+	sevenDaysAgo := today.AddDate(0, 0, -6)
 
 	var s NutritionSummary
 	h.db.QueryRow(ctx, `
@@ -131,6 +144,33 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn().Err(err).Msg("load nutrition targets")
 	} else {
 		s.Targets = targets
+		s.HydrationMode = normalizeHydrationMode(targets.HydrationMode)
+	}
+	if s.HydrationMode == "" {
+		s.HydrationMode = hydrationModeStrict
+	}
+
+	hydrationRange, err := loadHydrationRange(ctx, h.db, userID, sevenDaysAgo, today, s.HydrationMode)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load nutrition hydration summary")
+	} else {
+		hydrationDays := 0
+		hydrationTotal := 0.0
+		todayKey := today.Format("2006-01-02")
+		for day, aggregate := range hydrationRange {
+			if aggregate.HydrationML > 0 {
+				hydrationDays++
+				hydrationTotal += aggregate.HydrationML
+			}
+			if day == todayKey {
+				s.TodayHydrationML = aggregate.HydrationML
+				s.TodayCountedDrinks = aggregate.CountedDrinksML
+				s.TodayOtherDrinksML = aggregate.OtherDrinksML
+			}
+		}
+		if hydrationDays > 0 {
+			s.AvgHydrationML = hydrationTotal / float64(hydrationDays)
+		}
 	}
 
 	h.logger.Debug().Interface("summary", s).Msg("nutrition summary")
@@ -144,21 +184,22 @@ func (h *NutritionHandler) GetGoldenMetrics(w http.ResponseWriter, r *http.Reque
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 	windowDays := parseNutritionWindowDays(r, defaultNutritionWindowDays)
 	now := time.Now().In(aiDisplayLocation)
-	startDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation).AddDate(0, 0, -(windowDays - 1))
+	endDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+	startDate := endDate.AddDate(0, 0, -(windowDays - 1))
 
 	rows, err := h.db.Query(ctx, `
 		SELECT
+			TO_CHAR(d.date, 'YYYY-MM-DD'),
 			COALESCE(d.calories_total, 0),
 			COALESCE(d.protein_g, 0),
-			COALESCE(d.water_ml, 0),
 			COALESCE((
 				SELECT COUNT(DISTINCT i.meal_type)
 				FROM nutrition_items i
 				WHERE i.daily_id = d.id
 			), 0)
 		FROM nutrition_daily d
-		WHERE d.date >= $1 AND d.user_id = $2
-	`, startDate, userID)
+		WHERE d.date >= $1 AND d.date <= $3 AND d.user_id = $2
+	`, startDate, userID, endDate)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query nutrition golden days")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -166,14 +207,15 @@ func (h *NutritionHandler) GetGoldenMetrics(w http.ResponseWriter, r *http.Reque
 	}
 	defer rows.Close()
 
-	days := make([]nutritionGoldenDay, 0)
+	dayMap := make(map[string]nutritionGoldenDay)
 	for rows.Next() {
+		var dayKey string
 		var day nutritionGoldenDay
-		if err := rows.Scan(&day.Calories, &day.Protein, &day.WaterML, &day.MealTypeCount); err != nil {
+		if err := rows.Scan(&dayKey, &day.Calories, &day.Protein, &day.MealTypeCount); err != nil {
 			h.logger.Warn().Err(err).Msg("scan nutrition golden day")
 			continue
 		}
-		days = append(days, day)
+		dayMap[dayKey] = day
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error().Err(err).Msg("iterate nutrition golden days")
@@ -186,9 +228,9 @@ func (h *NutritionHandler) GetGoldenMetrics(w http.ResponseWriter, r *http.Reque
 		SELECT i.meal_type, COUNT(DISTINCT i.daily_id)
 		FROM nutrition_items i
 		JOIN nutrition_daily d ON d.id = i.daily_id
-		WHERE d.date >= $1 AND d.user_id = $2
+		WHERE d.date >= $1 AND d.date <= $3 AND d.user_id = $2
 		GROUP BY i.meal_type
-	`, startDate, userID)
+	`, startDate, userID, endDate)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query nutrition meal presence")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -214,6 +256,28 @@ func (h *NutritionHandler) GetGoldenMetrics(w http.ResponseWriter, r *http.Reque
 	targets, err := loadNutritionTargets(ctx, h.db, userID)
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("load nutrition golden targets")
+	}
+	hydrationMode := hydrationModeStrict
+	if targets != nil {
+		hydrationMode = normalizeHydrationMode(targets.HydrationMode)
+	}
+	hydrationRange, err := loadHydrationRange(ctx, h.db, userID, startDate, endDate, hydrationMode)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load nutrition golden hydration")
+	}
+
+	days := make([]nutritionGoldenDay, 0, len(dayMap)+len(hydrationRange))
+	for dayKey, day := range dayMap {
+		if hydration, ok := hydrationRange[dayKey]; ok {
+			day.HydrationML = hydration.HydrationML
+		}
+		days = append(days, day)
+	}
+	for dayKey, hydration := range hydrationRange {
+		if _, ok := dayMap[dayKey]; ok {
+			continue
+		}
+		days = append(days, nutritionGoldenDay{HydrationML: hydration.HydrationML})
 	}
 
 	resp := buildNutritionGoldenMetrics(windowDays, days, targets, mealPresence)
@@ -244,9 +308,9 @@ func (h *NutritionHandler) SaveTargets(w http.ResponseWriter, r *http.Request) {
 	} else {
 		if _, err := h.db.Exec(ctx, `
 			INSERT INTO nutrition_targets (
-				user_id, source, target_weight_kg, target_calories, target_protein_g, target_carbs_g, target_fat_g, target_water_ml, synced_at, updated_at
+				user_id, source, target_weight_kg, target_calories, target_protein_g, target_carbs_g, target_fat_g, target_water_ml, hydration_mode, synced_at, updated_at
 			)
-			VALUES ($1, 'manual', $2, $3, $4, $5, $6, $7, NOW(), NOW())
+			VALUES ($1, 'manual', $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
 			ON CONFLICT (user_id, source) DO UPDATE SET
 				target_weight_kg = EXCLUDED.target_weight_kg,
 				target_calories = EXCLUDED.target_calories,
@@ -254,9 +318,10 @@ func (h *NutritionHandler) SaveTargets(w http.ResponseWriter, r *http.Request) {
 				target_carbs_g = EXCLUDED.target_carbs_g,
 				target_fat_g = EXCLUDED.target_fat_g,
 				target_water_ml = EXCLUDED.target_water_ml,
+				hydration_mode = EXCLUDED.hydration_mode,
 				synced_at = NOW(),
 				updated_at = NOW()
-		`, userID, req.TargetWeightKg, req.TargetCalories, req.TargetProteinG, req.TargetCarbsG, req.TargetFatG, req.TargetWaterML); err != nil {
+		`, userID, req.TargetWeightKg, req.TargetCalories, req.TargetProteinG, req.TargetCarbsG, req.TargetFatG, req.TargetWaterML, normalizedHydrationMode(req.HydrationMode)); err != nil {
 			h.logger.Error().Err(err).Msg("save manual nutrition targets")
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -278,14 +343,25 @@ func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 	windowDays := parseNutritionWindowDays(r, defaultNutritionWindowDays)
-	startDate := time.Now().AddDate(0, 0, -(windowDays - 1))
+	now := time.Now().In(aiDisplayLocation)
+	endDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+	startDate := endDate.AddDate(0, 0, -(windowDays - 1))
+
+	targets, err := loadNutritionTargets(ctx, h.db, userID)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load nutrition daily targets")
+	}
+	hydrationMode := hydrationModeStrict
+	if targets != nil {
+		hydrationMode = normalizeHydrationMode(targets.HydrationMode)
+	}
 
 	rows, err := h.db.Query(ctx, `
 		SELECT id, TO_CHAR(date, 'YYYY-MM-DD'), COALESCE(calories_total, 0), COALESCE(protein_g, 0), COALESCE(carbs_g, 0), COALESCE(fat_g, 0), COALESCE(fiber_g, 0), COALESCE(water_ml, 0)
 		FROM nutrition_daily
-		WHERE date >= $1 AND user_id = $2
+		WHERE date >= $1 AND date <= $3 AND user_id = $2
 		ORDER BY date DESC
-	`, startDate, userID)
+	`, startDate, userID, endDate)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query nutrition daily")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -297,27 +373,55 @@ func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 		NutritionDay
 		id string
 	}
-	dayRows := make([]dayWithID, 0)
+	dayRows := make(map[string]*dayWithID)
 	for rows.Next() {
 		var d dayWithID
 		if err := rows.Scan(&d.id, &d.Date, &d.Calories, &d.Protein, &d.Carbs, &d.Fat, &d.Fiber, &d.WaterML); err != nil {
 			continue
 		}
 		d.Meals = []NutritionMeal{}
-		dayRows = append(dayRows, d)
+		d.Beverages = []NutritionHydrationBeverage{}
+		dayRows[d.Date] = &d
 	}
 	rows.Close()
 
+	hydrationRange, err := loadHydrationRange(ctx, h.db, userID, startDate, endDate, hydrationMode)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load nutrition daily hydration")
+	} else {
+		for dayKey, aggregate := range hydrationRange {
+			entry, ok := dayRows[dayKey]
+			if !ok {
+				entry = &dayWithID{
+					NutritionDay: NutritionDay{
+						Date:      dayKey,
+						Meals:     []NutritionMeal{},
+						Beverages: []NutritionHydrationBeverage{},
+					},
+				}
+				dayRows[dayKey] = entry
+			}
+			entry.WaterML = aggregate.WaterML
+			entry.HydrationML = aggregate.HydrationML
+			entry.CountedDrinksML = aggregate.CountedDrinksML
+			entry.OtherDrinksML = aggregate.OtherDrinksML
+			entry.Beverages = aggregate.Beverages
+		}
+	}
+
 	// Load meal items for each day
-	for i := range dayRows {
+	for _, entry := range dayRows {
+		if entry.id == "" {
+			continue
+		}
 		itemRows, err := h.db.Query(ctx, `
 			SELECT meal_type, food_name, serving_description, calories, COALESCE(macros, '{}')
 			FROM nutrition_items
 			WHERE daily_id = $1
 			ORDER BY meal_type, calories DESC
-		`, dayRows[i].id)
+		`, entry.id)
 		if err != nil {
-			h.logger.Warn().Err(err).Str("daily_id", dayRows[i].id).Msg("query nutrition items")
+			h.logger.Warn().Err(err).Str("daily_id", entry.id).Msg("query nutrition items")
 			continue
 		}
 
@@ -346,13 +450,28 @@ func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 		itemRows.Close()
 
 		for _, mt := range mealOrder {
-			dayRows[i].Meals = append(dayRows[i].Meals, *mealMap[mt])
+			entry.Meals = append(entry.Meals, *mealMap[mt])
 		}
 	}
 
-	result := make([]NutritionDay, len(dayRows))
-	for i, d := range dayRows {
-		result[i] = d.NutritionDay
+	keys := make([]string, 0, len(dayRows))
+	for dayKey := range dayRows {
+		keys = append(keys, dayKey)
+	}
+	slices.SortFunc(keys, func(a, b string) int {
+		switch {
+		case a > b:
+			return -1
+		case a < b:
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	result := make([]NutritionDay, 0, len(keys))
+	for _, dayKey := range keys {
+		result = append(result, dayRows[dayKey].NutritionDay)
 	}
 
 	h.logger.Debug().Int("days", len(result)).Msg("nutrition daily")
@@ -393,7 +512,6 @@ func (h *NutritionHandler) SaveWater(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var currentWater float64
 	if req.WaterML != nil {
 		err = h.db.QueryRow(ctx, `
 			INSERT INTO nutrition_daily (user_id, date, water_ml, source)
@@ -401,7 +519,7 @@ func (h *NutritionHandler) SaveWater(w http.ResponseWriter, r *http.Request) {
 			ON CONFLICT (user_id, date) DO UPDATE SET
 				water_ml = GREATEST(EXCLUDED.water_ml, 0)
 			RETURNING COALESCE(water_ml, 0)
-		`, userID, targetDate, *req.WaterML).Scan(&currentWater)
+		`, userID, targetDate, *req.WaterML).Scan(new(float64))
 	} else {
 		err = h.db.QueryRow(ctx, `
 			INSERT INTO nutrition_daily (user_id, date, water_ml, source)
@@ -409,7 +527,7 @@ func (h *NutritionHandler) SaveWater(w http.ResponseWriter, r *http.Request) {
 			ON CONFLICT (user_id, date) DO UPDATE SET
 				water_ml = GREATEST(COALESCE(nutrition_daily.water_ml, 0) + EXCLUDED.water_ml, 0)
 			RETURNING COALESCE(water_ml, 0)
-		`, userID, targetDate, *req.DeltaML).Scan(&currentWater)
+		`, userID, targetDate, *req.DeltaML).Scan(new(float64))
 	}
 	if err != nil {
 		h.logger.Error().Err(err).Msg("save nutrition water")
@@ -417,16 +535,109 @@ func (h *NutritionHandler) SaveWater(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	targets, err := loadNutritionTargets(ctx, h.db, userID)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load hydration mode after water save")
+	}
+	hydrationMode := hydrationModeStrict
+	if targets != nil {
+		hydrationMode = normalizeHydrationMode(targets.HydrationMode)
+	}
+	state, err := loadHydrationStateForDate(ctx, h.db, userID, targetDate, hydrationMode)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("load hydration state after water save")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(NutritionWaterState{
-		Date:    targetDate.Format("2006-01-02"),
-		WaterML: currentWater,
-	})
+	json.NewEncoder(w).Encode(state)
+}
+
+func (h *NutritionHandler) SaveHydration(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := r.Context().Value(authmw.UserIDKey).(string)
+
+	var req SaveNutritionHydrationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if err := validateHydrationBeverageType(req.BeverageType); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.DeltaML == nil && req.AmountML == nil {
+		http.Error(w, "delta_ml or amount_ml is required", http.StatusBadRequest)
+		return
+	}
+	if req.DeltaML != nil && req.AmountML != nil {
+		http.Error(w, "use either delta_ml or amount_ml", http.StatusBadRequest)
+		return
+	}
+	if req.DeltaML != nil && *req.DeltaML <= 0 {
+		http.Error(w, "delta_ml must be > 0", http.StatusBadRequest)
+		return
+	}
+	if req.AmountML != nil && *req.AmountML < 0 {
+		http.Error(w, "amount_ml must be >= 0", http.StatusBadRequest)
+		return
+	}
+
+	targetDate, err := parseNutritionTargetDate(req.Date)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.AmountML != nil {
+		if _, err := h.db.Exec(ctx, `
+			INSERT INTO nutrition_hydration_entries (user_id, date, beverage_type, amount_ml)
+			VALUES ($1, $2, $3, GREATEST($4, 0))
+			ON CONFLICT (user_id, date, beverage_type) DO UPDATE SET
+				amount_ml = GREATEST(EXCLUDED.amount_ml, 0),
+				updated_at = NOW()
+		`, userID, targetDate, normalizeHydrationBeverageType(req.BeverageType), *req.AmountML); err != nil {
+			h.logger.Error().Err(err).Msg("set nutrition hydration amount")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if _, err := h.db.Exec(ctx, `
+			INSERT INTO nutrition_hydration_entries (user_id, date, beverage_type, amount_ml)
+			VALUES ($1, $2, $3, GREATEST($4, 0))
+			ON CONFLICT (user_id, date, beverage_type) DO UPDATE SET
+				amount_ml = GREATEST(COALESCE(nutrition_hydration_entries.amount_ml, 0) + EXCLUDED.amount_ml, 0),
+				updated_at = NOW()
+		`, userID, targetDate, normalizeHydrationBeverageType(req.BeverageType), *req.DeltaML); err != nil {
+			h.logger.Error().Err(err).Msg("increment nutrition hydration amount")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	targets, err := loadNutritionTargets(ctx, h.db, userID)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load hydration mode after hydration save")
+	}
+	hydrationMode := hydrationModeStrict
+	if targets != nil {
+		hydrationMode = normalizeHydrationMode(targets.HydrationMode)
+	}
+	state, err := loadHydrationStateForDate(ctx, h.db, userID, targetDate, hydrationMode)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("load hydration state after hydration save")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(state)
 }
 
 func buildNutritionGoldenMetrics(windowDays int, days []nutritionGoldenDay, targets *NutritionTargets, mealPresence map[string]int) NutritionGoldenMetrics {
 	nutritionDays := make([]nutritionGoldenDay, 0, len(days))
-	waterDays := make([]nutritionGoldenDay, 0, len(days))
+	hydrationDays := make([]nutritionGoldenDay, 0, len(days))
 	fullMealDays := 0
 	totalMealTypes := 0
 
@@ -438,16 +649,16 @@ func buildNutritionGoldenMetrics(windowDays int, days []nutritionGoldenDay, targ
 				fullMealDays++
 			}
 		}
-		if day.WaterML > 0 {
-			waterDays = append(waterDays, day)
+		if day.HydrationML > 0 {
+			hydrationDays = append(hydrationDays, day)
 		}
 	}
 
 	loggedDays := len(nutritionDays)
-	waterTrackedDays := len(waterDays)
+	hydrationTrackedDays := len(hydrationDays)
 	avgCalories := averageNutritionField(nutritionDays, func(day nutritionGoldenDay) float64 { return day.Calories })
 	avgProtein := averageNutritionField(nutritionDays, func(day nutritionGoldenDay) float64 { return day.Protein })
-	avgWater := averageNutritionField(waterDays, func(day nutritionGoldenDay) float64 { return day.WaterML })
+	avgHydration := averageNutritionField(hydrationDays, func(day nutritionGoldenDay) float64 { return day.HydrationML })
 	avgMealTypes := 0.0
 	if loggedDays > 0 {
 		avgMealTypes = float64(totalMealTypes) / float64(loggedDays)
@@ -456,6 +667,10 @@ func buildNutritionGoldenMetrics(windowDays int, days []nutritionGoldenDay, targ
 	calorieTarget := nutritionTargetValue(targets, func(t *NutritionTargets) *float64 { return t.TargetCalories })
 	proteinTarget := nutritionTargetValue(targets, func(t *NutritionTargets) *float64 { return t.TargetProteinG })
 	waterTarget := nutritionTargetValue(targets, func(t *NutritionTargets) *float64 { return t.TargetWaterML })
+	hydrationMode := hydrationModeStrict
+	if targets != nil {
+		hydrationMode = normalizeHydrationMode(targets.HydrationMode)
+	}
 
 	calorieHitDays := 0
 	if calorieTarget != nil && *calorieTarget > 0 {
@@ -477,8 +692,8 @@ func buildNutritionGoldenMetrics(windowDays int, days []nutritionGoldenDay, targ
 
 	waterHitDays := 0
 	if waterTarget != nil && *waterTarget > 0 {
-		for _, day := range waterDays {
-			if day.WaterML >= *waterTarget {
+		for _, day := range hydrationDays {
+			if day.HydrationML >= *waterTarget {
 				waterHitDays++
 			}
 		}
@@ -520,16 +735,16 @@ func buildNutritionGoldenMetrics(windowDays int, days []nutritionGoldenDay, targ
 	waterTone := "muted"
 	waterValue := "—"
 	waterDetail := "цель воды не задана или вода ещё не логировалась"
-	if waterTrackedDays > 0 {
+	if hydrationTrackedDays > 0 {
 		if waterTarget != nil && *waterTarget > 0 {
-			coverage := avgWater / *waterTarget
-			waterTone = nutritionToneForMinimumRatio(avgWater, *waterTarget, 0.95, 0.65)
+			coverage := avgHydration / *waterTarget
+			waterTone = nutritionToneForMinimumRatio(avgHydration, *waterTarget, 0.95, 0.65)
 			waterValue = fmt.Sprintf("%.0f%% цели", coverage*100)
-			waterDetail = fmt.Sprintf("%d/%d дней закрыто ≥ %.0f мл", waterHitDays, waterTrackedDays, *waterTarget)
+			waterDetail = fmt.Sprintf("%d/%d дней закрыто ≥ %.0f мл · %s", waterHitDays, hydrationTrackedDays, *waterTarget, hydrationModeDescription(hydrationMode))
 		} else {
-			waterTone = nutritionToneForMinimumRatio(float64(waterTrackedDays), float64(windowDays), 0.7, 0.35)
-			waterValue = fmt.Sprintf("%.0f мл", avgWater)
-			waterDetail = fmt.Sprintf("вода есть в %d/%d дней периода", waterTrackedDays, windowDays)
+			waterTone = nutritionToneForMinimumRatio(float64(hydrationTrackedDays), float64(windowDays), 0.7, 0.35)
+			waterValue = fmt.Sprintf("%.0f мл", avgHydration)
+			waterDetail = fmt.Sprintf("гидратация есть в %d/%d дней периода · %s", hydrationTrackedDays, windowDays, hydrationModeDescription(hydrationMode))
 		}
 	}
 
@@ -548,7 +763,7 @@ func buildNutritionGoldenMetrics(windowDays int, days []nutritionGoldenDay, targ
 				Key:    "consistency",
 				Title:  "Режим",
 				Value:  fmt.Sprintf("%d/%d дн", loggedDays, windowDays),
-				Detail: fmt.Sprintf("%d дней с полным логом · вода %d/%d", fullMealDays, waterTrackedDays, windowDays),
+				Detail: fmt.Sprintf("%d дней с полным логом · гидратация %d/%d", fullMealDays, hydrationTrackedDays, windowDays),
 				Tone:   regimeTone,
 			},
 			{
@@ -567,7 +782,7 @@ func buildNutritionGoldenMetrics(windowDays int, days []nutritionGoldenDay, targ
 			},
 			{
 				Key:    "hydration",
-				Title:  "Вода",
+				Title:  "Гидратация",
 				Value:  waterValue,
 				Detail: waterDetail,
 				Tone:   waterTone,
@@ -690,7 +905,8 @@ func isEmptyNutritionTargetsRequest(req SaveNutritionTargetsRequest) bool {
 		req.TargetProteinG == nil &&
 		req.TargetCarbsG == nil &&
 		req.TargetFatG == nil &&
-		req.TargetWaterML == nil
+		req.TargetWaterML == nil &&
+		req.HydrationMode == nil
 }
 
 func validateNutritionTargetsRequest(req SaveNutritionTargetsRequest) error {
@@ -707,5 +923,18 @@ func validateNutritionTargetsRequest(req SaveNutritionTargetsRequest) error {
 			return fmt.Errorf("%s must be >= 0", name)
 		}
 	}
+	if req.HydrationMode != nil {
+		if err := validateHydrationMode(*req.HydrationMode); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func normalizedHydrationMode(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	mode := normalizeHydrationMode(*value)
+	return &mode
 }
