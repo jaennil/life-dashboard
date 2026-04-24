@@ -62,6 +62,68 @@ func TestProductivityDueState(t *testing.T) {
 	}
 }
 
+func TestProductivityIsStaleTask(t *testing.T) {
+	now := time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
+	todayStart := time.Date(2026, 4, 24, 0, 0, 0, 0, time.UTC)
+	tomorrowStart := todayStart.AddDate(0, 0, 1)
+	nextWeekStart := todayStart.AddDate(0, 0, 8)
+	staleBefore := todayStart.AddDate(0, 0, -14)
+
+	tests := []struct {
+		name string
+		task ProductivityTask
+		want bool
+	}{
+		{
+			name: "old task without due date is stale",
+			task: ProductivityTask{
+				AddedAt: timePtr(time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)),
+			},
+			want: true,
+		},
+		{
+			name: "old task with future due date is not stale",
+			task: ProductivityTask{
+				AddedAt: timePtr(time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)),
+				DueDate: timePtr(time.Date(2026, 5, 24, 0, 0, 0, 0, time.UTC)),
+			},
+			want: false,
+		},
+		{
+			name: "old task with future due timestamp is not stale",
+			task: ProductivityTask{
+				AddedAt: timePtr(time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)),
+				DueAt:   timePtr(time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)),
+			},
+			want: false,
+		},
+		{
+			name: "old overdue task is stale",
+			task: ProductivityTask{
+				AddedAt: timePtr(time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)),
+				DueDate: timePtr(time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)),
+			},
+			want: true,
+		},
+		{
+			name: "recent task is not stale",
+			task: ProductivityTask{
+				AddedAt: timePtr(time.Date(2026, 4, 20, 10, 0, 0, 0, time.UTC)),
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := productivityIsStaleTask(tt.task, now, todayStart, tomorrowStart, nextWeekStart, staleBefore)
+			if got != tt.want {
+				t.Fatalf("expected stale=%v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
 func timePtr(t time.Time) *time.Time {
 	return &t
 }

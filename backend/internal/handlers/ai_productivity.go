@@ -40,12 +40,13 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 	tomorrowStart := todayStart.AddDate(0, 0, 1)
 	nextWeekStart := todayStart.AddDate(0, 0, 8)
 	staleBefore := todayStart.AddDate(0, 0, -14)
+	staleCondition := productivityStaleConditionExpr(3, 6)
 
 	data := AIProductivityOverviewData{
 		Source: "todoist_tasks + todoist_task_completions",
 	}
 
-	if err := h.db.QueryRow(ctx, `
+	if err := h.db.QueryRow(ctx, fmt.Sprintf(`
 		SELECT
 			COUNT(*) FILTER (WHERE is_active = TRUE),
 			COUNT(*) FILTER (
@@ -70,10 +71,10 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 					)
 			),
 			COUNT(*) FILTER (WHERE is_active = TRUE AND is_recurring = TRUE),
-			COUNT(*) FILTER (WHERE is_active = TRUE AND added_at IS NOT NULL AND added_at < $6)
+			COUNT(*) FILTER (WHERE is_active = TRUE AND %s)
 		FROM todoist_tasks
 		WHERE user_id = $1
-	`, userID, now, todayStart, tomorrowStart, nextWeekStart, staleBefore).Scan(
+	`, staleCondition), userID, now, todayStart, tomorrowStart, nextWeekStart, staleBefore).Scan(
 		&data.Summary.ActiveTotal,
 		&data.Summary.OverdueTotal,
 		&data.Summary.DueTodayTotal,
@@ -131,7 +132,7 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 		return AIProductivityOverviewData{}, err
 	}
 
-	taskRows, err := h.db.Query(ctx, `
+	taskRows, err := h.db.Query(ctx, fmt.Sprintf(`
 		SELECT
 			id,
 			external_id,
@@ -153,20 +154,20 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 				OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $3::date)
 				OR (due_at IS NOT NULL AND due_at >= $3 AND due_at < $4)
 				OR (due_at IS NULL AND due_date >= $3::date AND due_date < $5::date)
-				OR (added_at IS NOT NULL AND added_at < $6)
+				OR %s
 			)
 		ORDER BY
 			CASE
 				WHEN (due_at IS NOT NULL AND due_at < $2) OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $3::date) THEN 0
 				WHEN (due_at IS NOT NULL AND due_at >= $3 AND due_at < $4) OR (due_at IS NULL AND due_date = $3::date) THEN 1
-				WHEN added_at IS NOT NULL AND added_at < $6 THEN 2
+				WHEN %s THEN 2
 				ELSE 3
 			END,
 			COALESCE(due_at, due_date::timestamptz, added_at) ASC,
 			priority DESC,
 			content ASC
 		LIMIT $7
-	`, userID, now, todayStart, tomorrowStart, nextWeekStart, staleBefore, limit)
+	`, staleCondition, staleCondition), userID, now, todayStart, tomorrowStart, nextWeekStart, staleBefore, limit)
 	if err != nil {
 		return AIProductivityOverviewData{}, err
 	}
@@ -271,7 +272,7 @@ func renderProductivityOverviewText(title string, data AIProductivityOverviewDat
 
 		for _, task := range data.KeyTasks {
 			label := "без срока"
-			isOverdue, bucket := productivityDueState(task.DueAt, task.DueDate, now, todayStart, tomorrowStart, nextWeekStart)
+			_, bucket := productivityDueState(task.DueAt, task.DueDate, now, todayStart, tomorrowStart, nextWeekStart)
 			switch bucket {
 			case "overdue":
 				label = "overdue"
@@ -282,7 +283,7 @@ func renderProductivityOverviewText(title string, data AIProductivityOverviewDat
 			case "later":
 				label = "позже"
 			}
-			if !isOverdue && task.AddedAt != nil && task.AddedAt.Before(staleBefore) && (bucket == "no_due" || bucket == "later") {
+			if productivityIsStaleTask(task, now, todayStart, tomorrowStart, nextWeekStart, staleBefore) {
 				label = "висит давно"
 			}
 

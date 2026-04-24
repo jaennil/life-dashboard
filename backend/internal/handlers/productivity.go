@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -62,9 +63,10 @@ func (h *ProductivityHandler) GetSummary(w http.ResponseWriter, r *http.Request)
 	tomorrowStart := todayStart.AddDate(0, 0, 1)
 	nextWeekStart := todayStart.AddDate(0, 0, 8)
 	staleBefore := todayStart.AddDate(0, 0, -14)
+	staleCondition := productivityStaleConditionExpr(2, 5)
 
 	var summary ProductivitySummary
-	_ = h.db.QueryRow(ctx, `
+	_ = h.db.QueryRow(ctx, fmt.Sprintf(`
 		SELECT
 			COUNT(*) FILTER (
 				WHERE is_active = TRUE
@@ -91,10 +93,10 @@ func (h *ProductivityHandler) GetSummary(w http.ResponseWriter, r *http.Request)
 					)
 			),
 			COUNT(*) FILTER (WHERE is_active = TRUE AND is_recurring = TRUE),
-			COUNT(*) FILTER (WHERE is_active = TRUE AND added_at IS NOT NULL AND added_at < $5)
+			COUNT(*) FILTER (WHERE is_active = TRUE AND %s)
 		FROM todoist_tasks
 		WHERE user_id = $1
-	`, userID, todayStart, tomorrowStart, nextWeekStart, staleBefore).Scan(
+	`, staleCondition), userID, todayStart, tomorrowStart, nextWeekStart, staleBefore).Scan(
 		&summary.ActiveTotal,
 		&summary.OverdueTotal,
 		&summary.DueTodayTotal,
@@ -159,6 +161,7 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	tomorrowStart := todayStart.AddDate(0, 0, 1)
 	nextWeekStart := todayStart.AddDate(0, 0, 8)
 	staleBefore := todayStart.AddDate(0, 0, -14)
+	staleCondition := productivityStaleConditionExpr(2, 5)
 
 	baseWhere := `
 		WHERE user_id = $1
@@ -201,7 +204,7 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 		`
 	case "stale":
 		baseWhere += `
-			AND added_at IS NOT NULL AND added_at < $5
+			AND ` + staleCondition + `
 		`
 	case "all":
 	default:
