@@ -39,6 +39,21 @@ func TestIsFatSecretRateLimitError(t *testing.T) {
 	}
 }
 
+func TestFatSecretSyncDays(t *testing.T) {
+	if got := fatSecretSyncDays(SyncTriggerScheduled); got != fatSecretScheduledSyncDays {
+		t.Fatalf("expected scheduled sync days %d, got %d", fatSecretScheduledSyncDays, got)
+	}
+	if got := fatSecretSyncDays(SyncTriggerManual); got != nutritionSyncDays {
+		t.Fatalf("expected manual sync days %d, got %d", nutritionSyncDays, got)
+	}
+	if got := fatSecretSyncDays(SyncTriggerInitial); got != nutritionSyncDays {
+		t.Fatalf("expected initial sync days %d, got %d", nutritionSyncDays, got)
+	}
+	if got := fatSecretSyncDays(SyncTriggerUnknown); got != nutritionSyncDays {
+		t.Fatalf("expected unknown sync days %d, got %d", nutritionSyncDays, got)
+	}
+}
+
 func assertErr(message string) error {
 	return &fatSecretTestError{message: message}
 }

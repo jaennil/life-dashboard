@@ -45,7 +45,7 @@ func (h *SyncHandler) TriggerSync(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info().Str("source", source).Str("user_id", userID).Msg("manual sync triggered")
 
 	if err := observability.RunSync(r.Context(), source, observability.SyncTriggerManual, func(ctx context.Context) error {
-		return conn.Sync(ctx, userID)
+		return conn.Sync(connectors.WithSyncTrigger(ctx, connectors.SyncTriggerManual), userID)
 	}); err != nil {
 		h.logger.Error().Err(err).Str("source", source).Msg("sync failed")
 		h.writeError(w, http.StatusInternalServerError, err.Error())

@@ -165,7 +165,7 @@ func main() {
 				}
 				log.Info().Str("connector", connCopy.Name()).Str("user_id", userID).Msg("scheduled sync for user")
 				if err := observability.RunSync(ctx, connCopy.Name(), observability.SyncTriggerScheduled, func(ctx context.Context) error {
-					return connCopy.Sync(ctx, userID)
+					return connCopy.Sync(connectors.WithSyncTrigger(ctx, connectors.SyncTriggerScheduled), userID)
 				}); err != nil {
 					log.Error().Err(err).Str("connector", connCopy.Name()).Str("user_id", userID).Msg("scheduled sync failed")
 				}

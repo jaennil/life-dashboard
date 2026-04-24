@@ -21,11 +21,12 @@ import (
 )
 
 const (
-	fsRequestTokenURL = "https://authentication.fatsecret.com/oauth/request_token"
-	fsAuthorizeURL    = "https://authentication.fatsecret.com/oauth/authorize"
-	fsAccessTokenURL  = "https://authentication.fatsecret.com/oauth/access_token"
-	fsAPIBase         = "https://platform.fatsecret.com/rest/server.api"
-	nutritionSyncDays = 90
+	fsRequestTokenURL          = "https://authentication.fatsecret.com/oauth/request_token"
+	fsAuthorizeURL             = "https://authentication.fatsecret.com/oauth/authorize"
+	fsAccessTokenURL           = "https://authentication.fatsecret.com/oauth/access_token"
+	fsAPIBase                  = "https://platform.fatsecret.com/rest/server.api"
+	nutritionSyncDays          = 90
+	fatSecretScheduledSyncDays = 7
 )
 
 type requestTokenState struct {
@@ -222,7 +223,14 @@ func (c *FatSecretConnector) getStoredTokens(ctx context.Context, userID string)
 }
 
 func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
-	c.logger.Info().Str("user_id", userID).Msg("starting sync")
+	trigger := GetSyncTrigger(ctx)
+	syncDays := fatSecretSyncDays(trigger)
+
+	c.logger.Info().
+		Str("user_id", userID).
+		Str("trigger", string(trigger)).
+		Int("sync_days", syncDays).
+		Msg("starting sync")
 
 	token, secret, err := c.getStoredTokens(ctx, userID)
 	if err != nil {
@@ -237,7 +245,7 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 	recentFailures := make([]string, 0, fatSecretCriticalSyncDays)
 	recentSuccesses := 0
 	stoppedOnRateLimit := false
-	for i := 0; i < nutritionSyncDays; i++ {
+	for i := 0; i < syncDays; i++ {
 		date := today.AddDate(0, 0, -i)
 		if err := c.syncDay(ctx, userID, token, secret, date); err != nil {
 			c.logger.Warn().Err(err).Str("date", date.Format("2006-01-02")).Msg("failed to sync day")
@@ -259,7 +267,10 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 		return err
 	}
 	if stoppedOnRateLimit {
-		c.logger.Warn().Str("user_id", userID).Msg("fatsecret sync stopped early after rate limit; recent days already refreshed")
+		c.logger.Warn().
+			Str("user_id", userID).
+			Str("trigger", string(trigger)).
+			Msg("fatsecret sync stopped early after rate limit; recent days already refreshed")
 	}
 
 	_, err = c.db.Exec(ctx, `
@@ -270,6 +281,13 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 
 	c.logger.Info().Msg("sync complete")
 	return err
+}
+
+func fatSecretSyncDays(trigger SyncTrigger) int {
+	if trigger == SyncTriggerScheduled {
+		return fatSecretScheduledSyncDays
+	}
+	return nutritionSyncDays
 }
 
 // daysSinceEpoch returns FatSecret's date format: days since Jan 1, 1970
