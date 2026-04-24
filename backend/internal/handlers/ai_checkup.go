@@ -828,8 +828,6 @@ func (h *AIHandler) appendCheckupJournalContext(ctx context.Context, sb *strings
 		return
 	}
 
-	sb.WriteString(fmt.Sprintf("Записей: %d, среднее настроение %.1f/10\n", entriesCount, avgMood))
-
 	rows, err := h.db.Query(ctx, `
 		SELECT COALESCE(date, created_at::date), COALESCE(title, ''), COALESCE(content, ''), COALESCE(tags, '{}'), mood, COALESCE(source, '')
 		FROM journal_entries
@@ -860,8 +858,63 @@ func (h *AIHandler) appendCheckupJournalContext(ctx context.Context, sb *strings
 		return
 	}
 
-	sb.WriteString("Полные записи за период:\n")
-	writeAIJournalEntriesWithLimit(sb, entries, 0)
+	sb.WriteString(fmt.Sprintf("Записей: %d, среднее настроение %.1f/10\n", len(entries), avgMood))
+	if tagsSummary := summarizeAIJournalTags(entries, 5); tagsSummary != "" {
+		sb.WriteString("Частые теги: " + tagsSummary + "\n")
+	}
+	sb.WriteString("Содержимое записей за период (от новых к старым):\n")
+	written, omitted := writeAIJournalEntriesWithinBudget(sb, entries, 0, aiCheckupJournalTotalSize, aiCheckupJournalMaxItems)
+	if written == 0 {
+		sb.WriteString("Контент записей слишком большой для прямой вставки в контекст.\n")
+		return
+	}
+	if omitted > 0 {
+		sb.WriteString(fmt.Sprintf("...ещё %d записей опущено из-за лимита контекста. Если нужен полный разбор архива, используй отдельный вопрос по заметкам.\n", omitted))
+	}
+}
+
+func summarizeAIJournalTags(entries []aiJournalEntry, limit int) string {
+	if limit <= 0 {
+		limit = 5
+	}
+
+	counts := make(map[string]int)
+	for _, entry := range entries {
+		for _, tag := range entry.Tags {
+			tag = strings.TrimSpace(tag)
+			if tag == "" {
+				continue
+			}
+			counts[tag]++
+		}
+	}
+	if len(counts) == 0 {
+		return ""
+	}
+
+	type tagCount struct {
+		tag   string
+		count int
+	}
+	items := make([]tagCount, 0, len(counts))
+	for tag, count := range counts {
+		items = append(items, tagCount{tag: tag, count: count})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].count == items[j].count {
+			return items[i].tag < items[j].tag
+		}
+		return items[i].count > items[j].count
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, fmt.Sprintf("%s×%d", item.tag, item.count))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (h *AIHandler) appendCheckupCalendarContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {

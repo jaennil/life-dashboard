@@ -11,6 +11,7 @@ import (
 	"life-dashboard/internal/connectors"
 	authmw "life-dashboard/internal/middleware"
 	"life-dashboard/internal/observability"
+	"life-dashboard/internal/syncstate"
 )
 
 type IntegrationsHandler struct {
@@ -425,8 +426,14 @@ func (h *IntegrationsHandler) runInitialSync(source string, userID string) error
 	if err := observability.RunSync(ctx, source, observability.SyncTriggerInitial, func(ctx context.Context) error {
 		return conn.Sync(ctx, userID)
 	}); err != nil {
+		if recordErr := syncstate.RecordSyncFailure(context.Background(), h.db, source, userID, time.Now()); recordErr != nil {
+			h.logger.Warn().Err(recordErr).Str("source", source).Str("user_id", userID).Msg("record initial sync failure")
+		}
 		h.logger.Error().Err(err).Str("source", source).Str("user_id", userID).Msg("initial sync failed")
 		return err
+	}
+	if err := syncstate.RecordSyncSuccess(context.Background(), h.db, source, userID, time.Now()); err != nil {
+		h.logger.Warn().Err(err).Str("source", source).Str("user_id", userID).Msg("record initial sync success")
 	}
 
 	h.logger.Info().Str("source", source).Str("user_id", userID).Msg("initial sync complete")

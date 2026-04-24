@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"image/png"
@@ -16,6 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"life-dashboard/internal/middleware"
+	"life-dashboard/internal/syncstate"
 )
 
 type UsersHandler struct {
@@ -131,10 +133,10 @@ func (h *UsersHandler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.issueToken(w, id, username, totpEnabled)
+	h.issueToken(r.Context(), w, r, id, username, totpEnabled)
 }
 
-func (h *UsersHandler) issueToken(w http.ResponseWriter, id, username string, totpEnabled bool) {
+func (h *UsersHandler) issueToken(ctx context.Context, w http.ResponseWriter, r *http.Request, id, username string, totpEnabled bool) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":      id,
 		"username": username,
@@ -148,12 +150,17 @@ func (h *UsersHandler) issueToken(w http.ResponseWriter, id, username string, to
 		return
 	}
 
+	if err := syncstate.ForceUserActivity(ctx, h.db, id); err != nil {
+		h.logger.Warn().Err(err).Str("user_id", id).Msg("touch user activity on login")
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "token",
 		Value:    signed,
 		Path:     "/",
 		MaxAge:   7 * 24 * 3600,
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -169,6 +176,7 @@ func (h *UsersHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	w.WriteHeader(http.StatusNoContent)

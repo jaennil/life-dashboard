@@ -26,6 +26,7 @@ import (
 	authmw "life-dashboard/internal/middleware"
 	"life-dashboard/internal/observability"
 	"life-dashboard/internal/scheduler"
+	"life-dashboard/internal/syncstate"
 )
 
 func main() {
@@ -145,29 +146,31 @@ func main() {
 	sched := scheduler.New(log.Logger)
 	for _, conn := range activeConnectors {
 		connCopy := conn
-		if err := sched.AddJob("0 0 */2 * * *", connCopy.Name(), func() {
+		if err := sched.AddJob("0 */15 * * * *", connCopy.Name(), func() {
 			ctx := context.Background()
-			rows, err := pool.Query(ctx, `SELECT id FROM users`)
+			dueSyncs, err := syncstate.LoadDueSyncs(ctx, pool, connCopy.Name(), time.Now())
 			if err != nil {
-				log.Error().Err(err).Str("connector", connCopy.Name()).Msg("failed to query users for scheduled sync")
+				log.Error().Err(err).Str("connector", connCopy.Name()).Msg("failed to load due syncs")
 				return
 			}
-			defer rows.Close()
-			for rows.Next() {
-				var userID string
-				if err := rows.Scan(&userID); err != nil {
-					log.Error().Err(err).Str("connector", connCopy.Name()).Msg("failed to scan user id")
-					continue
-				}
+			for _, item := range dueSyncs {
+				userID := item.UserID
 				if !handlers.IsEnabled(ctx, pool, connCopy.Name(), userID) {
-					log.Info().Str("connector", connCopy.Name()).Str("user_id", userID).Msg("skipping disabled connector for user")
+					log.Info().Str("connector", connCopy.Name()).Str("user_id", userID).Msg("skipping connector without active credentials")
 					continue
 				}
 				log.Info().Str("connector", connCopy.Name()).Str("user_id", userID).Msg("scheduled sync for user")
 				if err := observability.RunSync(ctx, connCopy.Name(), observability.SyncTriggerScheduled, func(ctx context.Context) error {
 					return connCopy.Sync(connectors.WithSyncTrigger(ctx, connectors.SyncTriggerScheduled), userID)
 				}); err != nil {
+					if recordErr := syncstate.RecordSyncFailure(ctx, pool, connCopy.Name(), userID, time.Now()); recordErr != nil {
+						log.Warn().Err(recordErr).Str("connector", connCopy.Name()).Str("user_id", userID).Msg("failed to record sync failure")
+					}
 					log.Error().Err(err).Str("connector", connCopy.Name()).Str("user_id", userID).Msg("scheduled sync failed")
+					continue
+				}
+				if err := syncstate.RecordSyncSuccess(ctx, pool, connCopy.Name(), userID, time.Now()); err != nil {
+					log.Warn().Err(err).Str("connector", connCopy.Name()).Str("user_id", userID).Msg("failed to record sync success")
 				}
 			}
 		}); err != nil {
@@ -236,6 +239,7 @@ func main() {
 	// Protected routes
 	r.Group(func(r chi.Router) {
 		r.Use(authmw.Auth(cfg.Auth.JWTSecret))
+		r.Use(authmw.TrackActivity(pool, log.Logger))
 
 		r.Get("/api/v1/auth/me", usersHandler.Me)
 		r.Get("/api/v1/auth/totp/setup", usersHandler.TOTPSetup)

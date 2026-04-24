@@ -97,6 +97,37 @@ func TestFormatAIJournalEntryWithLimitCanKeepFullContent(t *testing.T) {
 	}
 }
 
+func TestWriteAIJournalEntriesWithinBudgetOmitsOverflow(t *testing.T) {
+	entries := []aiJournalEntry{
+		{
+			Date:    time.Date(2026, 4, 24, 0, 0, 0, 0, time.UTC),
+			Title:   "entry 1",
+			Content: strings.Repeat("a", 80),
+		},
+		{
+			Date:    time.Date(2026, 4, 23, 0, 0, 0, 0, time.UTC),
+			Title:   "entry 2",
+			Content: strings.Repeat("b", 80),
+		},
+	}
+
+	var sb strings.Builder
+	written, omitted := writeAIJournalEntriesWithinBudget(&sb, entries, 0, 140, 0)
+
+	if written != 1 {
+		t.Fatalf("written = %d, want 1", written)
+	}
+	if omitted != 1 {
+		t.Fatalf("omitted = %d, want 1", omitted)
+	}
+	if !strings.Contains(sb.String(), "entry 1") {
+		t.Fatalf("expected first entry to be included, got %q", sb.String())
+	}
+	if strings.Contains(sb.String(), "entry 2") {
+		t.Fatalf("expected second entry to be omitted, got %q", sb.String())
+	}
+}
+
 func TestParseAIStreamDataDelta(t *testing.T) {
 	delta, done, err := parseAIStreamData(`{"choices":[{"delta":{"content":"Привет"}}]}`)
 	if err != nil {

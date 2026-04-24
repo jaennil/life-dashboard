@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"life-dashboard/internal/connectors"
 	"life-dashboard/internal/middleware"
 	"life-dashboard/internal/observability"
+	"life-dashboard/internal/syncstate"
 )
 
 type SyncHandler struct {
@@ -47,9 +49,15 @@ func (h *SyncHandler) TriggerSync(w http.ResponseWriter, r *http.Request) {
 	if err := observability.RunSync(r.Context(), source, observability.SyncTriggerManual, func(ctx context.Context) error {
 		return conn.Sync(connectors.WithSyncTrigger(ctx, connectors.SyncTriggerManual), userID)
 	}); err != nil {
+		if recordErr := syncstate.RecordSyncFailure(r.Context(), h.db, source, userID, time.Now()); recordErr != nil {
+			h.logger.Warn().Err(recordErr).Str("source", source).Str("user_id", userID).Msg("record manual sync failure")
+		}
 		h.logger.Error().Err(err).Str("source", source).Msg("sync failed")
 		h.writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if err := syncstate.RecordSyncSuccess(r.Context(), h.db, source, userID, time.Now()); err != nil {
+		h.logger.Warn().Err(err).Str("source", source).Str("user_id", userID).Msg("record manual sync success")
 	}
 
 	w.Header().Set("Content-Type", "application/json")

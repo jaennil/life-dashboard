@@ -107,6 +107,9 @@ const (
 	aiUpstreamHeaderTimeout   = 150 * time.Second
 	aiUpstreamRequestTimeout  = 150 * time.Second
 	aiUpstreamResponseLogSize = 512
+	aiJournalDefaultLimit     = 300
+	aiCheckupJournalTotalSize = 50000
+	aiCheckupJournalMaxItems  = 45
 )
 
 var (
@@ -1275,7 +1278,7 @@ func formatAIWorkoutContext(workout Workout) string {
 }
 
 func formatAIJournalEntry(entry aiJournalEntry) string {
-	return formatAIJournalEntryWithLimit(entry, 300)
+	return formatAIJournalEntryWithLimit(entry, aiJournalDefaultLimit)
 }
 
 func formatAIJournalEntryWithLimit(entry aiJournalEntry, contentLimit int) string {
@@ -1300,7 +1303,7 @@ func formatAIJournalEntryWithLimit(entry aiJournalEntry, contentLimit int) strin
 }
 
 func writeAIJournalEntries(sb *strings.Builder, entries []aiJournalEntry) {
-	writeAIJournalEntriesWithLimit(sb, entries, 300)
+	writeAIJournalEntriesWithLimit(sb, entries, aiJournalDefaultLimit)
 }
 
 func writeAIJournalEntriesWithLimit(sb *strings.Builder, entries []aiJournalEntry, contentLimit int) {
@@ -1308,6 +1311,27 @@ func writeAIJournalEntriesWithLimit(sb *strings.Builder, entries []aiJournalEntr
 		sb.WriteString(formatAIJournalEntryWithLimit(entry, contentLimit))
 		sb.WriteString("\n")
 	}
+}
+
+func writeAIJournalEntriesWithinBudget(sb *strings.Builder, entries []aiJournalEntry, contentLimit int, totalLimit int, maxEntries int) (written int, omitted int) {
+	if maxEntries > 0 && len(entries) > maxEntries {
+		omitted += len(entries) - maxEntries
+		entries = entries[:maxEntries]
+	}
+
+	total := 0
+	for i, entry := range entries {
+		formatted := formatAIJournalEntryWithLimit(entry, contentLimit) + "\n"
+		if totalLimit > 0 && total+len(formatted) > totalLimit {
+			omitted += len(entries) - i
+			break
+		}
+		sb.WriteString(formatted)
+		total += len(formatted)
+		written++
+	}
+
+	return written, omitted
 }
 
 func (h *AIHandler) loadAIJournalEntries(ctx context.Context, userID string, days, limit int) ([]aiJournalEntry, error) {
