@@ -359,7 +359,13 @@ func (z *ZenmoneyConnector) fetchDiff(ctx context.Context, token string, lastSer
 
 func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, userID string, acc *zenmoneyAccount, currencies map[int]string, companies map[int]string) error {
 	if acc.Deleted {
-		_, err := z.db.Exec(ctx, `DELETE FROM accounts WHERE external_id = $1 AND user_id = $2`, acc.ID, userID)
+		_, err := z.db.Exec(ctx, `
+			UPDATE accounts
+			SET archived = TRUE,
+			    in_balance = FALSE,
+			    last_updated = NOW()
+			WHERE external_id = $1 AND user_id = $2
+		`, acc.ID, userID)
 		return err
 	}
 
@@ -376,18 +382,19 @@ func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, userID string, ac
 	}
 
 	_, err := z.db.Exec(ctx, `
-		INSERT INTO accounts (external_id, title, type, currency, balance, in_balance, company_id, company_title, last_updated, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), NOW(), $9)
+		INSERT INTO accounts (external_id, title, type, currency, balance, in_balance, archived, company_id, company_title, last_updated, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, ''), NOW(), $10)
 		ON CONFLICT (user_id, external_id) DO UPDATE SET
 			title        = EXCLUDED.title,
 			type         = EXCLUDED.type,
 			currency     = EXCLUDED.currency,
 			balance      = EXCLUDED.balance,
 			in_balance   = EXCLUDED.in_balance,
+			archived     = EXCLUDED.archived,
 			company_id   = COALESCE(EXCLUDED.company_id, accounts.company_id),
 			company_title = COALESCE(EXCLUDED.company_title, accounts.company_title),
 			last_updated = EXCLUDED.last_updated
-	`, acc.ID, acc.Title, acc.Type, currency, acc.Balance, zenmoneyAccountInBalance(acc), companyID, companyTitle, userID)
+	`, acc.ID, acc.Title, acc.Type, currency, acc.Balance, zenmoneyAccountInBalance(acc), acc.Archived, companyID, companyTitle, userID)
 	if err != nil {
 		return err
 	}
@@ -398,6 +405,7 @@ func (z *ZenmoneyConnector) upsertAccount(ctx context.Context, userID string, ac
 		Str("company_title", companyTitle).
 		Float64("balance", acc.Balance).
 		Bool("in_balance", zenmoneyAccountInBalance(acc)).
+		Bool("archived", acc.Archived).
 		Msg("account upserted")
 	return nil
 }

@@ -749,7 +749,7 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 		rows, err := h.db.Query(ctx, `
 			SELECT title, currency, balance, type, in_balance
 			FROM accounts
-			WHERE balance != 0 AND user_id = $1
+			WHERE balance != 0 AND user_id = $1 AND COALESCE(archived, FALSE) = FALSE
 			ORDER BY in_balance DESC, balance DESC LIMIT 10
 		`, userID)
 		if err == nil {
@@ -770,7 +770,7 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 		}
 
 		var totalBalance, monthSpending, monthIncome float64
-		h.db.QueryRow(ctx, `SELECT COALESCE(SUM(balance),0) FROM accounts WHERE currency='RUB' AND in_balance = TRUE AND user_id = $1`, userID).Scan(&totalBalance)
+		h.db.QueryRow(ctx, `SELECT COALESCE(SUM(balance),0) FROM accounts WHERE currency='RUB' AND in_balance = TRUE AND COALESCE(archived, FALSE) = FALSE AND user_id = $1`, userID).Scan(&totalBalance)
 		h.db.QueryRow(ctx, `
 			SELECT
 				COALESCE(SUM(CASE WHEN t.amount < 0 THEN ABS(t.amount) ELSE 0 END), 0),

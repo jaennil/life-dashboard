@@ -72,7 +72,7 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	_ = h.db.QueryRow(ctx, `
 		SELECT COALESCE(SUM(balance), 0)
 		FROM accounts
-		WHERE currency = 'RUB' AND in_balance = TRUE AND user_id = $1
+		WHERE currency = 'RUB' AND in_balance = TRUE AND COALESCE(archived, FALSE) = FALSE AND user_id = $1
 	`, userID).Scan(&summary.Finance.TotalBalance)
 
 	// Monthly spending / income

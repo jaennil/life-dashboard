@@ -40,6 +40,7 @@ func (h *AIHandler) buildFinanceOverviewInRange(ctx context.Context, userID stri
 		FROM accounts
 		WHERE currency = 'RUB'
 			AND in_balance = TRUE
+			AND COALESCE(archived, FALSE) = FALSE
 			AND user_id = $1
 	`, userID).Scan(&data.CurrentBalanceRub); err != nil {
 		return AIFinanceOverviewData{}, err

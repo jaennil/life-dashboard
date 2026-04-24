@@ -26,3 +26,14 @@ func TestZenmoneyAccountInBalanceReadsExplicitFalse(t *testing.T) {
 		t.Fatalf("expected explicit inBalance=false to be preserved")
 	}
 }
+
+func TestZenmoneyAccountReadsArchivedFlag(t *testing.T) {
+	var acc zenmoneyAccount
+	if err := json.Unmarshal([]byte(`{"id":"1","title":"Split","type":"ccard","currency":2,"balance":0,"archived":true}`), &acc); err != nil {
+		t.Fatalf("unmarshal account: %v", err)
+	}
+
+	if !acc.Archived {
+		t.Fatalf("expected archived=true to be preserved")
+	}
+}
