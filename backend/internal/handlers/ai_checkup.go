@@ -831,33 +831,37 @@ func (h *AIHandler) appendCheckupJournalContext(ctx context.Context, sb *strings
 	sb.WriteString(fmt.Sprintf("Записей: %d, среднее настроение %.1f/10\n", entriesCount, avgMood))
 
 	rows, err := h.db.Query(ctx, `
-		SELECT TO_CHAR(COALESCE(date, created_at::date), 'DD.MM'), COALESCE(title, ''), COALESCE(tags, '{}'), mood
+		SELECT COALESCE(date, created_at::date), COALESCE(title, ''), COALESCE(content, ''), COALESCE(tags, '{}'), mood, COALESCE(source, '')
 		FROM journal_entries
 		WHERE user_id = $1
 			AND COALESCE(date, created_at::date) >= $2::date
 			AND COALESCE(date, created_at::date) <= $3::date
-		ORDER BY COALESCE(date, created_at::date) DESC
-		LIMIT 5
+		ORDER BY COALESCE(date, created_at::date) DESC, updated_at DESC
 	`, userID, window.Start, window.End)
-	if err == nil {
-		defer rows.Close()
-		sb.WriteString("Последние записи:\n")
-		for rows.Next() {
-			var day, title string
-			var tags []string
-			var mood *int
-			if rows.Scan(&day, &title, &tags, &mood) == nil {
-				line := fmt.Sprintf("  - %s: %s", day, title)
-				if mood != nil {
-					line += fmt.Sprintf(" | настроение %d/10", *mood)
-				}
-				if len(tags) > 0 {
-					line += " | " + strings.Join(tags, ", ")
-				}
-				sb.WriteString(line + "\n")
-			}
+	if err != nil {
+		sb.WriteString("Полный текст записей дневника сейчас недоступен.\n")
+		return
+	}
+	defer rows.Close()
+
+	entries := make([]aiJournalEntry, 0, entriesCount)
+	for rows.Next() {
+		var entry aiJournalEntry
+		if rows.Scan(&entry.Date, &entry.Title, &entry.Content, &entry.Tags, &entry.Mood, &entry.Source) == nil {
+			entries = append(entries, entry)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		sb.WriteString("Не удалось дочитать текст записей дневника полностью.\n")
+		return
+	}
+	if len(entries) == 0 {
+		sb.WriteString("Записи дневника есть, но детали за период не загрузились.\n")
+		return
+	}
+
+	sb.WriteString("Полные записи за период:\n")
+	writeAIJournalEntriesWithLimit(sb, entries, 0)
 }
 
 func (h *AIHandler) appendCheckupCalendarContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {

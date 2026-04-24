@@ -1275,6 +1275,10 @@ func formatAIWorkoutContext(workout Workout) string {
 }
 
 func formatAIJournalEntry(entry aiJournalEntry) string {
+	return formatAIJournalEntryWithLimit(entry, 300)
+}
+
+func formatAIJournalEntryWithLimit(entry aiJournalEntry, contentLimit int) string {
 	line := fmt.Sprintf("  %s: %s", entry.Date.Format("02.01.2006"), strings.TrimSpace(entry.Title))
 	if strings.TrimSpace(entry.Title) == "" {
 		line = fmt.Sprintf("  %s: (без названия)", entry.Date.Format("02.01.2006"))
@@ -1286,8 +1290,8 @@ func formatAIJournalEntry(entry aiJournalEntry) string {
 		line += " [" + strings.Join(entry.Tags, ", ") + "]"
 	}
 	content := strings.TrimSpace(entry.Content)
-	if len(content) > 300 {
-		content = content[:300] + "..."
+	if contentLimit > 0 && len(content) > contentLimit {
+		content = content[:contentLimit] + "..."
 	}
 	if content != "" {
 		line += "\n    " + strings.ReplaceAll(content, "\n", "\n    ")
@@ -1296,8 +1300,12 @@ func formatAIJournalEntry(entry aiJournalEntry) string {
 }
 
 func writeAIJournalEntries(sb *strings.Builder, entries []aiJournalEntry) {
+	writeAIJournalEntriesWithLimit(sb, entries, 300)
+}
+
+func writeAIJournalEntriesWithLimit(sb *strings.Builder, entries []aiJournalEntry, contentLimit int) {
 	for _, entry := range entries {
-		sb.WriteString(formatAIJournalEntry(entry))
+		sb.WriteString(formatAIJournalEntryWithLimit(entry, contentLimit))
 		sb.WriteString("\n")
 	}
 }

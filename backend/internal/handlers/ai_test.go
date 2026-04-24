@@ -79,6 +79,24 @@ func TestFormatAIJournalEntryUntitled(t *testing.T) {
 	}
 }
 
+func TestFormatAIJournalEntryWithLimitCanKeepFullContent(t *testing.T) {
+	content := strings.Repeat("abc", 130)
+	entry := aiJournalEntry{
+		Date:    time.Date(2026, 4, 24, 0, 0, 0, 0, time.UTC),
+		Title:   "full note",
+		Content: content,
+	}
+
+	got := formatAIJournalEntryWithLimit(entry, 0)
+
+	if strings.Contains(got, "...") {
+		t.Fatalf("expected untruncated content, got %q", got)
+	}
+	if !strings.Contains(got, content) {
+		t.Fatalf("expected full content in formatted journal entry, got %q", got)
+	}
+}
+
 func TestParseAIStreamDataDelta(t *testing.T) {
 	delta, done, err := parseAIStreamData(`{"choices":[{"delta":{"content":"Привет"}}]}`)
 	if err != nil {
