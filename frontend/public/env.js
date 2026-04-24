@@ -1,0 +1,6 @@
+window.__APP_CONFIG__ = Object.freeze({
+  SENTRY_FRONTEND_DSN: '',
+  SENTRY_ENVIRONMENT: '',
+  SENTRY_RELEASE: '',
+  SENTRY_FRONTEND_TRACES_SAMPLE_RATE: '0',
+});

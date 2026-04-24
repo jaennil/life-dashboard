@@ -17,6 +17,31 @@ spec:
       containers:
         - name: frontend
           image: frontend
+          env:
+            - name: SENTRY_FRONTEND_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: app-config
+                  key: SENTRY_FRONTEND_DSN
+                  optional: true
+            - name: SENTRY_ENVIRONMENT
+              valueFrom:
+                secretKeyRef:
+                  name: app-config
+                  key: SENTRY_ENVIRONMENT
+                  optional: true
+            - name: SENTRY_RELEASE
+              valueFrom:
+                secretKeyRef:
+                  name: app-config
+                  key: SENTRY_RELEASE
+                  optional: true
+            - name: SENTRY_FRONTEND_TRACES_SAMPLE_RATE
+              valueFrom:
+                secretKeyRef:
+                  name: app-config
+                  key: SENTRY_FRONTEND_TRACES_SAMPLE_RATE
+                  optional: true
           ports:
             - containerPort: 3000
               name: http

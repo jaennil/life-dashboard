@@ -1,3 +1,5 @@
+import { captureAPIFailure } from '@/lib/sentry'
+
 const BASE = '/api/v1'
 
 export interface User {
@@ -54,10 +56,112 @@ export interface Transaction {
   is_transfer: boolean
 }
 
+class APIError extends Error {
+  path: string
+  method: string
+  statusCode?: number
+
+  constructor(message: string, path: string, method: string, statusCode?: number) {
+    super(message)
+    this.name = 'APIError'
+    this.path = path
+    this.method = method
+    this.statusCode = statusCode
+  }
+}
+
+function jsonHeaders(headers?: HeadersInit): HeadersInit {
+  return {
+    'Content-Type': 'application/json',
+    ...(headers ?? {}),
+  }
+}
+
+async function readErrorText(res: Response): Promise<string> {
+  const text = (await res.text()).trim()
+  return text || `${res.status} ${res.statusText}`
+}
+
+async function request(path: string, init?: RequestInit): Promise<Response> {
+  const method = (init?.method ?? 'GET').toUpperCase()
+
+  try {
+    const res = await fetch(BASE + path, init)
+    if (!res.ok) {
+      const message = await readErrorText(res)
+      const error = new APIError(message, path, method, res.status)
+      if (res.status >= 500) {
+        captureAPIFailure({
+          path,
+          method,
+          statusCode: res.status,
+          responseBody: message,
+          error,
+        })
+      }
+      throw error
+    }
+    return res
+  } catch (error) {
+    if (error instanceof APIError) {
+      throw error
+    }
+
+    captureAPIFailure({
+      path,
+      method,
+      error,
+    })
+    throw error instanceof Error ? error : new Error(`request failed: ${method} ${path}`)
+  }
+}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(BASE + path)
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json() as Promise<T>
+  const res = await request(path)
+  return parseJSON<T>(res)
+}
+
+async function parseJSON<T>(res: Response): Promise<T> {
+  if (res.status === 204) {
+    return undefined as T
+  }
+  const text = await res.text()
+  if (!text) {
+    return undefined as T
+  }
+  return JSON.parse(text) as T
+}
+
+async function postJSON<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
+  const res = await request(path, {
+    method: 'POST',
+    headers: jsonHeaders(init?.headers),
+    ...init,
+    body: body === undefined ? init?.body : JSON.stringify(body),
+  })
+  return parseJSON<T>(res)
+}
+
+async function patchJSON<T>(path: string, body?: unknown): Promise<T> {
+  const res = await request(path, {
+    method: 'PATCH',
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+  })
+  return parseJSON<T>(res)
+}
+
+async function postNoContent(path: string, body?: unknown, init?: RequestInit): Promise<void> {
+  await request(path, {
+    method: 'POST',
+    headers: body === undefined && !init?.headers ? undefined : jsonHeaders(init?.headers),
+    ...init,
+    body: body === undefined ? init?.body : JSON.stringify(body),
+  })
+}
+
+async function deleteNoContent(path: string): Promise<void> {
+  await request(path, { method: 'DELETE' })
 }
 
 export interface MonthStat {
@@ -527,35 +631,13 @@ export const api = {
     get<ProductivityTask[]>('/productivity/tasks?filter=' + encodeURIComponent(filter)),
   getProductivityHabits: () => get<ProductivityHabitsResponse>('/productivity/habits'),
   createProductivityHabit: (input: ProductivityHabitInput) =>
-    fetch(BASE + '/productivity/habits', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-    }),
+    postNoContent('/productivity/habits', input),
   updateProductivityHabit: (id: string, input: ProductivityHabitInput) =>
-    fetch(BASE + `/productivity/habits/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-    }),
+    patchJSON<void>(`/productivity/habits/${id}`, input),
   deleteProductivityHabit: (id: string) =>
-    fetch(BASE + `/productivity/habits/${id}`, {
-      method: 'DELETE',
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-    }),
+    deleteNoContent(`/productivity/habits/${id}`),
   setProductivityHabitStatus: (id: string, status: 'completed' | 'none' | 'skipped' | 'failed', date?: string) =>
-    fetch(BASE + `/productivity/habits/${id}/status`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, date }),
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-    }),
+    postNoContent(`/productivity/habits/${id}/status`, { status, date }),
   getSpendingByCategory: (from?: string, to?: string) => {
     const p = new URLSearchParams()
     if (from) p.set('from', from)
@@ -577,118 +659,45 @@ export const api = {
   getFinanceObligations: (days = 30) =>
     get<FinanceObligationsSummary>('/finance/obligations?days=' + encodeURIComponent(String(days))),
   saveFinanceObligationRule: (input: { key?: string; label: string; action: 'ignore' | 'force' }) =>
-    fetch(BASE + '/finance/obligation-rules', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-    }),
+    postNoContent('/finance/obligation-rules', input),
   deleteFinanceObligationRule: (key: string) =>
-    fetch(BASE + '/finance/obligation-rules/' + encodeURIComponent(key), {
-      method: 'DELETE',
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-    }),
+    deleteNoContent('/finance/obligation-rules/' + encodeURIComponent(key)),
   getCategoryList: () => get<string[]>('/finance/category-list'),
   getNutritionSummary: () => get<NutritionSummary>('/nutrition/summary'),
   getNutritionGolden: (days = 14) => get<NutritionGoldenMetrics>(`/nutrition/golden?days=${days}`),
   getNutritionDaily: (days = 14) => get<NutritionDay[]>(`/nutrition/daily?days=${days}`),
   saveNutritionTargets: (input: NutritionTargetsInput) =>
-    fetch(BASE + '/nutrition/targets', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-      return r.json() as Promise<NutritionTargets | null>
-    }),
+    postJSON<NutritionTargets | null>('/nutrition/targets', input),
   saveNutritionWater: (input: { date?: string; delta_ml?: number; water_ml?: number }) =>
-    fetch(BASE + '/nutrition/water', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-      return r.json() as Promise<NutritionHydrationState>
-    }),
+    postJSON<NutritionHydrationState>('/nutrition/water', input),
   saveNutritionHydration: (input: { date?: string; beverage_type: HydrationBeverageType; delta_ml?: number; amount_ml?: number }) =>
-    fetch(BASE + '/nutrition/hydration', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-      return r.json() as Promise<NutritionHydrationState>
-    }),
+    postJSON<NutritionHydrationState>('/nutrition/hydration', input),
   getIntegrations: () => get<Integration[]>('/integrations'),
   toggleIntegration: (name: string, enabled: boolean) =>
-    fetch(BASE + `/integrations/${name}/toggle`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
-    }).then(r => { if (!r.ok) throw new Error(r.statusText) }),
+    postNoContent(`/integrations/${name}/toggle`, { enabled }),
   syncIntegration: (name: string) =>
-    fetch(BASE + `/sync/${name}`, { method: 'POST' })
-      .then(r => { if (!r.ok) throw new Error(r.statusText) }),
+    postNoContent(`/sync/${name}`),
   getAIHistory: () => get<AIHistoryMessage[]>('/ai/history'),
   getLatestAICheckup: () => get<AILatestCheckup>('/ai/checkup/latest'),
   clearAIHistory: () =>
-    fetch(BASE + '/ai/history', { method: 'DELETE' }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-    }),
+    deleteNoContent('/ai/history'),
   saveToken: (name: string, token: string, extra?: Record<string, string>) =>
-    fetch(BASE + `/integrations/${name}/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, ...extra }),
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-      return r.json() as Promise<ConnectionResult>
-    }),
+    postJSON<ConnectionResult>(`/integrations/${name}/token`, { token, ...extra }),
   me: () => get<User>('/auth/me'),
   register: (username: string, password: string) =>
-    fetch(BASE + '/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-      return r.json() as Promise<User>
-    }),
+    postJSON<User>('/auth/register', { username, password }),
   login: (username: string, password: string, totp_code?: string) =>
-    fetch(BASE + '/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, totp_code: totp_code ?? '' }),
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text())
-      return r.json() as Promise<LoginResult>
-    }),
+    postJSON<LoginResult>('/auth/login', { username, password, totp_code: totp_code ?? '' }),
   logout: () =>
-    fetch(BASE + '/auth/logout', { method: 'POST' }).then(r => {
-      if (!r.ok) throw new Error(r.statusText)
-    }),
+    postNoContent('/auth/logout'),
   totpSetup: () => get<{ secret: string; qr: string }>('/auth/totp/setup'),
   totpEnable: (code: string) =>
-    fetch(BASE + '/auth/totp/enable', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    }).then(async r => { if (!r.ok) throw new Error(await r.text()) }),
+    postNoContent('/auth/totp/enable', { code }),
   totpDisable: (code: string) =>
-    fetch(BASE + '/auth/totp/disable', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    }).then(async r => { if (!r.ok) throw new Error(await r.text()) }),
+    postNoContent('/auth/totp/disable', { code }),
   getAPIKey: () => get<HealthAPIKeyInfo>('/health/apikey'),
   generateAPIKey: () =>
-    fetch(BASE + '/health/apikey', { method: 'POST' })
-      .then(async r => {
-        if (!r.ok) throw new Error(r.statusText)
-        return r.json() as Promise<HealthAPIKeyInfo>
-      }),
+    postJSON<HealthAPIKeyInfo>('/health/apikey'),
   getWeather: (lat?: number, lon?: number, city?: string) => {
     const params = new URLSearchParams()
     if (lat != null) params.set('lat', String(lat))

@@ -49,6 +49,14 @@ func main() {
 
 	log.Info().Str("env", cfg.Server.Env).Str("log_level", level.String()).Msg("starting life-dashboard")
 
+	if cfg.Sentry.Environment == "" {
+		cfg.Sentry.Environment = cfg.Server.Env
+	}
+	if err := observability.InitSentry(cfg.Sentry, log.Logger); err != nil {
+		log.Fatal().Err(err).Msg("failed to init sentry")
+	}
+	defer observability.FlushSentry(2 * time.Second)
+
 	ctx := context.Background()
 
 	pool, err := database.New(ctx, cfg.Database)
@@ -185,6 +193,7 @@ func main() {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(observability.SentryMiddleware())
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -239,6 +248,7 @@ func main() {
 	// Protected routes
 	r.Group(func(r chi.Router) {
 		r.Use(authmw.Auth(cfg.Auth.JWTSecret))
+		r.Use(authmw.AttachSentryUser)
 		r.Use(authmw.TrackActivity(pool, log.Logger))
 
 		r.Get("/api/v1/auth/me", usersHandler.Me)

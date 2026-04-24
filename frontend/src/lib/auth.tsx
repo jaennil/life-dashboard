@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { api, type User } from '@/lib/api'
+import { setSentryUser } from '@/lib/sentry'
 
 interface AuthContextValue {
   user: User | null
@@ -39,6 +40,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       cancelled = true
     }
   }, [refresh])
+
+  useEffect(() => {
+    setSentryUser(user ? { id: user.id, username: user.username } : null)
+  }, [user])
 
   async function login(username: string, password: string, totpCode?: string) {
     const result = await api.login(username, password, totpCode)

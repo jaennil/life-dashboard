@@ -8,6 +8,7 @@ type Config struct {
 	Auth       AuthConfig       `mapstructure:"auth"`
 	AI         AIConfig         `mapstructure:"ai"`
 	Log        LogConfig        `mapstructure:"log"`
+	Sentry     SentryConfig     `mapstructure:"sentry"`
 	Connectors ConnectorsConfig `mapstructure:"connectors"`
 	Weather    WeatherConfig    `mapstructure:"weather"`
 	Unleash    UnleashConfig    `mapstructure:"unleash"`
@@ -110,6 +111,13 @@ type LogConfig struct {
 	Level string `mapstructure:"level"`
 }
 
+type SentryConfig struct {
+	BackendDSN       string  `mapstructure:"backend_dsn"`
+	Environment      string  `mapstructure:"environment"`
+	Release          string  `mapstructure:"release"`
+	TracesSampleRate float64 `mapstructure:"traces_sample_rate"`
+}
+
 func Load() (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -119,6 +127,10 @@ func Load() (*Config, error) {
 	viper.BindEnv("database.url", "DATABASE_URL")
 	viper.BindEnv("ai.api_key", "AI_API_KEY")
 	viper.BindEnv("server.env", "SERVER_ENV")
+	viper.BindEnv("sentry.backend_dsn", "SENTRY_BACKEND_DSN")
+	viper.BindEnv("sentry.environment", "SENTRY_ENVIRONMENT")
+	viper.BindEnv("sentry.release", "SENTRY_RELEASE")
+	viper.BindEnv("sentry.traces_sample_rate", "SENTRY_BACKEND_TRACES_SAMPLE_RATE")
 	viper.BindEnv("connectors.hevy.api_key", "HEVY_API_KEY")
 	viper.BindEnv("connectors.strava.client_id", "STRAVA_CLIENT_ID")
 	viper.BindEnv("connectors.strava.client_secret", "STRAVA_CLIENT_SECRET")
@@ -148,6 +160,8 @@ func Load() (*Config, error) {
 
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.env", "development")
+	viper.SetDefault("sentry.environment", "")
+	viper.SetDefault("sentry.traces_sample_rate", 0)
 	viper.SetDefault("database.max_conns", 10)
 	viper.BindEnv("ai.base_url", "AI_BASE_URL")
 	viper.BindEnv("ai.model", "AI_MODEL")

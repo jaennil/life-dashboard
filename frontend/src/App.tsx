@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { InstallPrompt } from '@/components/InstallPrompt'
 import { Sidebar } from '@/components/Sidebar'
@@ -11,6 +12,7 @@ import { Settings } from '@/pages/Settings'
 import { Login } from '@/pages/Login'
 import { Register } from '@/pages/Register'
 import { AuthProvider, useAuth } from '@/lib/auth'
+import { sentryEnabled } from '@/lib/sentry'
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -74,11 +76,32 @@ function AppRoutes() {
 }
 
 export default function App() {
-  return (
+  const app = (
     <BrowserRouter>
       <AuthProvider>
         <AppRoutes />
       </AuthProvider>
     </BrowserRouter>
+  )
+
+  if (!sentryEnabled) {
+    return app
+  }
+
+  return (
+    <Sentry.ErrorBoundary
+      fallback={(
+        <div className="flex min-h-screen items-center justify-center bg-background px-6">
+          <div className="max-w-md rounded-3xl border border-border/60 bg-card/90 p-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+            <h1 className="text-2xl font-semibold text-foreground">Приложение столкнулось с ошибкой</h1>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              Ошибка уже отправлена в мониторинг. Обнови страницу, если экран не восстановился сам.
+            </p>
+          </div>
+        </div>
+      )}
+    >
+      {app}
+    </Sentry.ErrorBoundary>
   )
 }
