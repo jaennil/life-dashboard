@@ -1340,9 +1340,9 @@ export function Finance() {
       </div>
 
       {/* Accounts + Transactions */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
         {/* Accounts */}
-        <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+        <div className="self-start overflow-hidden rounded-2xl border bg-card shadow-sm">
           <div className="border-b px-5 py-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
