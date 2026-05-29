@@ -142,6 +142,7 @@ func (h *FinanceHandler) GetSpendingByCategory(w http.ResponseWriter, r *http.Re
 	q := r.URL.Query()
 	from := q.Get("from")
 	to := q.Get("to")
+	categoryType := q.Get("type")
 	var monthStart time.Time
 	if from != "" {
 		monthStart, _ = time.Parse("2006-01-02", from)
@@ -153,11 +154,18 @@ func (h *FinanceHandler) GetSpendingByCategory(w http.ResponseWriter, r *http.Re
 		to = time.Now().Format("2006-01-02")
 	}
 
-	rows, err := h.db.Query(ctx, `
-		SELECT COALESCE(t.category, 'Без категории') as category, SUM(ABS(t.amount)) as total
+	amountCondition := "t.amount < 0"
+	amountExpression := "ABS(t.amount)"
+	if categoryType == "income" {
+		amountCondition = "t.amount > 0"
+		amountExpression = "t.amount"
+	}
+
+	rows, err := h.db.Query(ctx, fmt.Sprintf(`
+		SELECT COALESCE(t.category, 'Без категории') as category, SUM(%s) as total
 		FROM transactions t
 		LEFT JOIN accounts a ON a.id = t.account_id
-		WHERE t.amount < 0
+		WHERE %s
 		  AND t.is_transfer = false
 		  AND t.currency = 'RUB'
 		  AND t.occurred_at >= $1
@@ -167,7 +175,7 @@ func (h *FinanceHandler) GetSpendingByCategory(w http.ResponseWriter, r *http.Re
 		GROUP BY category
 		ORDER BY total DESC
 		LIMIT 15
-	`, monthStart, to, userID)
+	`, amountExpression, amountCondition), monthStart, to, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query categories")
 		http.Error(w, "internal error", http.StatusInternalServerError)

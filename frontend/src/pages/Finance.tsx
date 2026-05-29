@@ -36,6 +36,11 @@ const CATEGORY_COLORS = [
   '#06b6d4', '#eab308', '#ec4899', '#14b8a6', '#a855f7',
 ]
 
+const INCOME_CATEGORY_COLORS = [
+  '#10b981', '#22c55e', '#06b6d4', '#3b82f6', '#84cc16',
+  '#14b8a6', '#0ea5e9', '#a3e635', '#2dd4bf', '#60a5fa',
+]
+
 const MONTH_LABELS: Record<string, string> = {
   '01': 'Янв', '02': 'Фев', '03': 'Мар', '04': 'Апр',
   '05': 'Май', '06': 'Июн', '07': 'Июл', '08': 'Авг',
@@ -450,10 +455,10 @@ function buildDailyOption(daily: DailyTotal[]): EChartsCoreOption {
   }
 }
 
-function buildCategoriesOption(categories: CategoryStat[]): EChartsCoreOption {
+function buildCategoriesOption(categories: CategoryStat[], colors = CATEGORY_COLORS): EChartsCoreOption {
   const total = categories.reduce((sum, point) => sum + point.amount, 0)
   return {
-    color: CATEGORY_COLORS,
+    color: colors,
     animationDuration: 450,
     tooltip: {
       trigger: 'item',
@@ -583,6 +588,7 @@ export function Finance() {
   const [monthly, setMonthly] = useState<MonthStat[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [categories, setCategories] = useState<CategoryStat[]>([])
+  const [incomeCategories, setIncomeCategories] = useState<CategoryStat[]>([])
   const [daily, setDaily] = useState<DailyTotal[]>([])
   const [topExpenses, setTopExpenses] = useState<TopExpense[]>([])
   const [obligations, setObligations] = useState<FinanceObligationsSummary | null>(null)
@@ -611,10 +617,11 @@ export function Finance() {
   const loadPageData = useCallback(async () => {
     setLoading(true)
     try {
-      const [m, a, c, d, t, o, cl] = await Promise.all([
+      const [m, a, c, ic, d, t, o, cl] = await Promise.all([
         api.getMonthlyStats(),
         api.getAccounts(),
         api.getSpendingByCategory(from, to),
+        api.getIncomeByCategory(from, to),
         api.getDailyTotals(from, to),
         api.getTopExpenses(from, to),
         api.getFinanceObligations(30),
@@ -622,7 +629,7 @@ export function Finance() {
       ])
 
       setMonthly(m); setAccounts(a); setCategories(c)
-      setDaily(d); setTopExpenses(t); setObligations(o); setCategoryList(cl)
+      setIncomeCategories(ic); setDaily(d); setTopExpenses(t); setObligations(o); setCategoryList(cl)
     } catch (error) {
       console.error(error)
     } finally {
@@ -689,6 +696,8 @@ export function Finance() {
     : PERIODS.find(item => item.days === period)?.label ?? 'Месяц'
   const totalCategorySpend = categories.reduce((sum, category) => sum + category.amount, 0)
   const topCategory = categories[0]
+  const totalCategoryIncome = incomeCategories.reduce((sum, category) => sum + category.amount, 0)
+  const topIncomeCategory = incomeCategories[0]
   const topThreeCategories = categories.slice(0, 3)
   const totalDailySpending = daily.reduce((sum, day) => sum + day.spending, 0)
   const totalDailyIncome = daily.reduce((sum, day) => sum + day.income, 0)
@@ -1294,6 +1303,82 @@ export function Finance() {
                         style={{
                           width: formatPercent(c.amount, totalCategorySpend),
                           backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+                        }}
+                      />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Income categories */}
+        <div className="rounded-2xl border bg-card p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Доходы по категориям</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Отдельный срез поступлений за выбранный период без переводов между счетами.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {topIncomeCategory ? (
+                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
+                  Лидер: {topIncomeCategory.category} · {formatPercent(topIncomeCategory.amount, totalCategoryIncome)}
+                </span>
+              ) : null}
+              {filter === 'income' && catFilter ? (
+                <button
+                  onClick={() => {
+                    setFilter('')
+                    setCatFilter('')
+                  }}
+                  className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300 transition-colors hover:bg-emerald-500/15"
+                >
+                  Фильтр: {catFilter} ×
+                </button>
+              ) : null}
+            </div>
+          </div>
+          {loading ? <div className="h-56 bg-muted rounded animate-pulse" /> : incomeCategories.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
+          ) : (
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+              <EChart option={buildCategoriesOption(incomeCategories, INCOME_CATEGORY_COLORS)} height={200} width={200} className="shrink-0" />
+              <div className="flex max-h-[280px] flex-1 min-w-0 flex-col gap-2 overflow-y-auto py-1 pr-1">
+                {incomeCategories.map((c, i) => (
+                  <button
+                    key={c.category}
+                    onClick={() => {
+                      const isSameFilter = filter === 'income' && catFilter === c.category
+                      setFilter(isSameFilter ? '' : 'income')
+                      setCatFilter(isSameFilter ? '' : c.category)
+                    }}
+                    className={cn(
+                      'rounded-xl border border-transparent bg-background/45 px-3 py-2 text-left transition-colors hover:border-border hover:bg-accent/40',
+                      filter === 'income' && catFilter === c.category && 'border-emerald-500/30 bg-emerald-500/10'
+                    )}
+                  >
+                    <div className="flex items-center gap-3 text-xs">
+                      <div
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: INCOME_CATEGORY_COLORS[i % INCOME_CATEGORY_COLORS.length] }}
+                      />
+                      <span className={cn('min-w-0 flex-1 truncate text-sm', filter === 'income' && catFilter === c.category && 'font-medium text-emerald-300')}>
+                        {c.category}
+                      </span>
+                      <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                        {formatPercent(c.amount, totalCategoryIncome)}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-sm text-foreground">{fmt(c.amount)}</span>
+                    </div>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted/70">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: formatPercent(c.amount, totalCategoryIncome),
+                          backgroundColor: INCOME_CATEGORY_COLORS[i % INCOME_CATEGORY_COLORS.length],
                         }}
                       />
                     </div>

@@ -644,6 +644,13 @@ export const api = {
     if (to) p.set('to', to)
     return get<CategoryStat[]>('/finance/categories?' + p.toString())
   },
+  getIncomeByCategory: (from?: string, to?: string) => {
+    const p = new URLSearchParams()
+    p.set('type', 'income')
+    if (from) p.set('from', from)
+    if (to) p.set('to', to)
+    return get<CategoryStat[]>('/finance/categories?' + p.toString())
+  },
   getDailyTotals: (from?: string, to?: string) => {
     const p = new URLSearchParams()
     if (from) p.set('from', from)
