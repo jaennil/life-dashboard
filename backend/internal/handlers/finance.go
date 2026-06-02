@@ -279,6 +279,8 @@ func (h *FinanceHandler) GetTransactions(w http.ResponseWriter, r *http.Request)
 	switch sortBy {
 	case "amount":
 		orderBy = "ABS(t.amount) " + direction
+	case "signed_amount":
+		orderBy = "t.amount " + direction
 	case "date_asc":
 		orderBy = "t.occurred_at ASC"
 	case "amount_asc":

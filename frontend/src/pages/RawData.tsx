@@ -6,36 +6,38 @@ import { api, type CollectionParams } from '@/lib/api'
 import { RAW_DATA_SOURCES, type RawDataSource } from '@/lib/raw-data'
 
 type RawRecord = Record<string, unknown>
+type SortValue = string | number | undefined
 type RawRow = {
   id: string
   raw: RawRecord
   values: Record<string, string | number | undefined>
+  sortValues: Record<string, SortValue>
 }
-type Column = { key: string; label: string }
+type Column = { key: string; label: string; defaultOrder?: 'asc' | 'desc' }
 
 const SOURCE_COLUMNS: Record<RawDataSource, Column[]> = {
   'finance.transactions': [
-    { key: 'date', label: 'Дата' }, { key: 'payee', label: 'Payee' }, { key: 'category', label: 'Категория' },
-    { key: 'amount', label: 'Сумма' }, { key: 'account', label: 'Счёт' }, { key: 'comment', label: 'Комментарий' },
+    { key: 'date', label: 'Дата', defaultOrder: 'desc' }, { key: 'payee', label: 'Payee', defaultOrder: 'asc' }, { key: 'category', label: 'Категория', defaultOrder: 'asc' },
+    { key: 'amount', label: 'Сумма', defaultOrder: 'desc' }, { key: 'account', label: 'Счёт', defaultOrder: 'asc' }, { key: 'comment', label: 'Комментарий', defaultOrder: 'asc' },
   ],
   'fitness.activities': [
-    { key: 'date', label: 'Дата' }, { key: 'type', label: 'Тип' }, { key: 'name', label: 'Название' },
-    { key: 'distance', label: 'Дистанция' }, { key: 'duration', label: 'Длительность' }, { key: 'calories', label: 'Ккал' },
+    { key: 'date', label: 'Дата', defaultOrder: 'desc' }, { key: 'type', label: 'Тип', defaultOrder: 'asc' }, { key: 'name', label: 'Название', defaultOrder: 'asc' },
+    { key: 'distance', label: 'Дистанция', defaultOrder: 'desc' }, { key: 'duration', label: 'Длительность', defaultOrder: 'desc' }, { key: 'calories', label: 'Ккал', defaultOrder: 'desc' },
   ],
   'fitness.workouts': [
-    { key: 'date', label: 'Дата' }, { key: 'title', label: 'Тренировка' }, { key: 'source', label: 'Источник' },
-    { key: 'exercises', label: 'Упражнений' }, { key: 'sets', label: 'Сетов' }, { key: 'notes', label: 'Заметки' },
+    { key: 'date', label: 'Дата', defaultOrder: 'desc' }, { key: 'title', label: 'Тренировка', defaultOrder: 'asc' }, { key: 'source', label: 'Источник', defaultOrder: 'asc' },
+    { key: 'exercises', label: 'Упражнений', defaultOrder: 'desc' }, { key: 'sets', label: 'Сетов', defaultOrder: 'desc' }, { key: 'notes', label: 'Заметки', defaultOrder: 'asc' },
   ],
   'nutrition.days': [
-    { key: 'date', label: 'Дата' }, { key: 'calories', label: 'Ккал' }, { key: 'protein', label: 'Белки' },
-    { key: 'fat', label: 'Жиры' }, { key: 'carbs', label: 'Углеводы' }, { key: 'water', label: 'Вода' },
+    { key: 'date', label: 'Дата', defaultOrder: 'desc' }, { key: 'calories', label: 'Ккал', defaultOrder: 'desc' }, { key: 'protein', label: 'Белки', defaultOrder: 'desc' },
+    { key: 'fat', label: 'Жиры', defaultOrder: 'desc' }, { key: 'carbs', label: 'Углеводы', defaultOrder: 'desc' }, { key: 'water', label: 'Вода', defaultOrder: 'desc' },
   ],
   'productivity.tasks': [
-    { key: 'due', label: 'Срок' }, { key: 'content', label: 'Задача' }, { key: 'project', label: 'Проект' },
-    { key: 'section', label: 'Секция' }, { key: 'priority', label: 'Приоритет' }, { key: 'bucket', label: 'Статус' },
+    { key: 'due', label: 'Срок', defaultOrder: 'asc' }, { key: 'content', label: 'Задача', defaultOrder: 'asc' }, { key: 'project', label: 'Проект', defaultOrder: 'asc' },
+    { key: 'section', label: 'Секция', defaultOrder: 'asc' }, { key: 'priority', label: 'Приоритет', defaultOrder: 'desc' }, { key: 'bucket', label: 'Статус', defaultOrder: 'asc' },
   ],
   'ai.messages': [
-    { key: 'date', label: 'Дата' }, { key: 'role', label: 'Роль' }, { key: 'content', label: 'Сообщение' },
+    { key: 'date', label: 'Дата', defaultOrder: 'desc' }, { key: 'role', label: 'Роль', defaultOrder: 'asc' }, { key: 'content', label: 'Сообщение', defaultOrder: 'asc' },
   ],
 }
 
@@ -49,6 +51,17 @@ function displayDate(value?: string | null) {
 function stringify(value: unknown) {
   if (value == null || value === '') return '—'
   return String(value)
+}
+
+function sortDate(value?: string | null) {
+  if (!value) return undefined
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? time : value
+}
+
+function toSortNumber(value: unknown) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : undefined
 }
 
 function matchesContext(source: RawDataSource, raw: RawRecord, params: URLSearchParams) {
@@ -74,12 +87,18 @@ function buildRows(source: RawDataSource, data: unknown[]): RawRow[] {
         return { id: stringify(raw.id), raw, values: {
           date: displayDate(raw.occurred_at as string), payee: stringify(raw.payee), category: stringify(raw.category),
           amount: `${Number(raw.amount ?? 0).toLocaleString('ru-RU')} ${stringify(raw.currency)}`, account: stringify(raw.account_title), comment: stringify(raw.comment),
+        }, sortValues: {
+          date: sortDate(raw.occurred_at as string), payee: stringify(raw.payee), category: stringify(raw.category),
+          amount: toSortNumber(raw.amount), account: stringify(raw.account_title), comment: stringify(raw.comment),
         } }
       case 'fitness.activities':
         return { id: stringify(raw.id), raw, values: {
           date: displayDate(raw.started_at as string), type: stringify(raw.type), name: stringify(raw.name),
           distance: raw.distance_meters ? `${(Number(raw.distance_meters) / 1000).toFixed(1)} км` : '—',
           duration: raw.duration_seconds ? `${Math.round(Number(raw.duration_seconds) / 60)} мин` : '—', calories: stringify(raw.calories),
+        }, sortValues: {
+          date: sortDate(raw.started_at as string), type: stringify(raw.type), name: stringify(raw.name),
+          distance: toSortNumber(raw.distance_meters), duration: toSortNumber(raw.duration_seconds), calories: toSortNumber(raw.calories),
         } }
       case 'fitness.workouts': {
         const exercises = Array.isArray(raw.exercises) ? raw.exercises : []
@@ -87,21 +106,32 @@ function buildRows(source: RawDataSource, data: unknown[]): RawRow[] {
         return { id: stringify(raw.id), raw, values: {
           date: displayDate(raw.started_at as string), title: stringify(raw.title), source: stringify(raw.source),
           exercises: exercises.length, sets, notes: stringify(raw.notes),
+        }, sortValues: {
+          date: sortDate(raw.started_at as string), title: stringify(raw.title), source: stringify(raw.source),
+          exercises: exercises.length, sets, notes: stringify(raw.notes),
         } }
       }
       case 'nutrition.days':
         return { id: stringify(raw.date ?? index), raw, values: {
           date: stringify(raw.date), calories: Math.round(Number(raw.calories ?? 0)), protein: `${Math.round(Number(raw.protein ?? 0))} г`,
           fat: `${Math.round(Number(raw.fat ?? 0))} г`, carbs: `${Math.round(Number(raw.carbs ?? 0))} г`, water: `${Math.round(Number(raw.water_ml ?? 0))} мл`,
+        }, sortValues: {
+          date: sortDate(raw.date as string), calories: toSortNumber(raw.calories), protein: toSortNumber(raw.protein),
+          fat: toSortNumber(raw.fat), carbs: toSortNumber(raw.carbs), water: toSortNumber(raw.water_ml),
         } }
       case 'productivity.tasks':
         return { id: stringify(raw.id), raw, values: {
           due: stringify(raw.due_at ?? raw.due_date), content: stringify(raw.content), project: stringify(raw.project_name),
           section: stringify(raw.section_name), priority: Number(raw.priority ?? 0), bucket: stringify(raw.due_bucket),
+        }, sortValues: {
+          due: sortDate((raw.due_at ?? raw.due_date) as string), content: stringify(raw.content), project: stringify(raw.project_name),
+          section: stringify(raw.section_name), priority: toSortNumber(raw.priority), bucket: stringify(raw.due_bucket),
         } }
       case 'ai.messages':
         return { id: stringify(raw.id), raw, values: {
           date: displayDate(raw.created_at as string), role: stringify(raw.role), content: stringify(raw.content),
+        }, sortValues: {
+          date: sortDate(raw.created_at as string), role: stringify(raw.role), content: stringify(raw.content),
         } }
     }
   })
@@ -115,7 +145,8 @@ export function RawData() {
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState('')
   const search = params.get('search') ?? ''
-  const sort = params.get('sort') ?? SOURCE_COLUMNS[source][0].key
+  const columns = SOURCE_COLUMNS[source]
+  const sort = columns.some(column => column.key === params.get('sort')) ? params.get('sort') as string : columns[0].key
   const order = params.get('order') === 'asc' ? 'asc' : 'desc'
 
   const loadRawData = useCallback(async () => {
@@ -123,6 +154,8 @@ export function RawData() {
       from: params.get('from') ?? undefined, to: params.get('to') ?? undefined,
       search: params.get('search') ?? undefined, type: params.get('type') ?? undefined,
       category: params.get('category') ?? undefined, payee: params.get('payee') ?? undefined,
+      sort: source === 'finance.transactions' && sort === 'amount' ? 'signed_amount' : sort,
+      order,
       page_size: 250,
     }
     setLoading(true)
@@ -140,7 +173,7 @@ export function RawData() {
     } finally {
       setLoading(false)
     }
-  }, [params, source])
+  }, [order, params, sort, source])
 
   useEffect(() => {
     void loadRawData()
@@ -153,8 +186,8 @@ export function RawData() {
       .filter(row => matchesContext(source, row.raw, params))
       .filter(row => !needle || recordSearch(row).includes(needle))
       .sort((left, right) => {
-        const a = left.values[sort] ?? ''
-        const b = right.values[sort] ?? ''
+        const a = left.sortValues[sort] ?? ''
+        const b = right.sortValues[sort] ?? ''
         const result = typeof a === 'number' && typeof b === 'number'
           ? a - b
           : String(a).localeCompare(String(b), 'ru-RU', { numeric: true })
@@ -166,6 +199,13 @@ export function RawData() {
     const copy = new URLSearchParams(params)
     Object.entries(next).forEach(([key, value]) => value ? copy.set(key, value) : copy.delete(key))
     setParams(copy)
+  }
+
+  function sortByColumn(column: Column) {
+    const nextOrder = sort === column.key
+      ? order === 'asc' ? 'desc' : 'asc'
+      : column.defaultOrder ?? 'asc'
+    update({ sort: column.key, order: nextOrder })
   }
 
   const context = CONTEXT_KEYS.flatMap(key => params.get(key) ? [{ key, value: params.get(key) as string }] : [])
@@ -188,7 +228,10 @@ export function RawData() {
           </label>
           <label className="flex items-center gap-2 rounded-xl border bg-background px-3 py-2">
             <span className="text-xs text-muted-foreground">Сортировка</span>
-            <select value={sort} onChange={event => update({ sort: event.target.value })} className="bg-transparent text-sm text-foreground outline-none">
+            <select value={sort} onChange={event => {
+              const column = columns.find(item => item.key === event.target.value)
+              update({ sort: event.target.value, order: column?.defaultOrder ?? 'asc' })
+            }} className="bg-transparent text-sm text-foreground outline-none">
               {SOURCE_COLUMNS[source].map(column => <option key={column.key} value={column.key}>{column.label}</option>)}
             </select>
           </label>
@@ -210,7 +253,19 @@ export function RawData() {
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead className="bg-background/55 text-xs uppercase text-muted-foreground">
-              <tr><th className="w-10 px-4 py-3" />{SOURCE_COLUMNS[source].map(column => <th key={column.key} className="whitespace-nowrap px-4 py-3 font-medium">{column.label}</th>)}</tr>
+              <tr>
+                <th className="w-10 px-4 py-3" />
+                {columns.map(column => (
+                  <th key={column.key} aria-sort={sort === column.key ? order === 'asc' ? 'ascending' : 'descending' : 'none'} className="whitespace-nowrap px-4 py-3 font-medium">
+                    <button type="button" onClick={() => sortByColumn(column)} className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground">
+                      <span>{column.label}</span>
+                      {sort === column.key ? (
+                        order === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />
+                      ) : null}
+                    </button>
+                  </th>
+                ))}
+              </tr>
             </thead>
             <tbody className="divide-y">
               {loading ? <tr><td colSpan={SOURCE_COLUMNS[source].length + 1} className="px-4 py-10 text-center text-muted-foreground">Загрузка...</td></tr>
