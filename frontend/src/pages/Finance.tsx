@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   BadgeRussianRuble,
   Ban,
@@ -585,6 +586,7 @@ type FilterType = '' | 'income' | 'expense'
 type SortType = '' | 'amount' | 'amount_asc' | 'date_asc' | 'category'
 
 export function Finance() {
+  const [searchParams] = useSearchParams()
   const [monthly, setMonthly] = useState<MonthStat[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [categories, setCategories] = useState<CategoryStat[]>([])
@@ -611,8 +613,11 @@ export function Finance() {
   const [ruleError, setRuleError] = useState('')
   const [integrations, setIntegrations] = useState<Integration[]>([])
 
-  const from = customFrom || dateOffset(period)
-  const to = customTo || undefined
+  const globalFrom = searchParams.get('from') ?? ''
+  const globalTo = searchParams.get('to') ?? ''
+  const hasGlobalRange = Boolean(globalFrom || globalTo)
+  const from = globalFrom || customFrom || dateOffset(period)
+  const to = globalTo || customTo || undefined
 
   const loadPageData = useCallback(async () => {
     setLoading(true)
@@ -688,11 +693,11 @@ export function Finance() {
   const excludedBalance = excludedAccounts
     .filter(a => a.currency === 'RUB')
     .reduce((sum, a) => sum + a.balance, 0)
-  const hasCustomRange = Boolean(customFrom || customTo)
+  const hasCustomRange = Boolean(customFrom || customTo || hasGlobalRange)
   const effectiveTo = to || new Date().toISOString().split('T')[0]
   const rangeLabel = formatRangeLabel(from, to)
   const activePeriodLabel = hasCustomRange
-    ? 'Произвольный диапазон'
+    ? hasGlobalRange ? 'Глобальный диапазон' : 'Произвольный диапазон'
     : PERIODS.find(item => item.days === period)?.label ?? 'Месяц'
   const totalCategorySpend = categories.reduce((sum, category) => sum + category.amount, 0)
   const topCategory = categories[0]
@@ -825,8 +830,10 @@ export function Finance() {
         >
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <p className="max-w-2xl text-sm text-foreground">
-              {hasCustomRange
-                ? 'Показываем произвольный диапазон без усреднений по календарным периодам.'
+              {hasGlobalRange
+                ? 'Показываем диапазон из глобального фильтра. Чтобы вернуться к локальным быстрым периодам, сбрось фильтр в верхней панели.'
+                : hasCustomRange
+                  ? 'Показываем произвольный диапазон без усреднений по календарным периодам.'
                 : `Быстрый срез за ${activePeriodLabel.toLowerCase()} с фокусом на реальный cashflow и структуру трат.`}
             </p>
 
@@ -835,11 +842,14 @@ export function Finance() {
                 {PERIODS.map(p => (
                   <button
                     key={p.days}
+                    disabled={hasGlobalRange}
                     onClick={() => { setPeriod(p.days); setCustomFrom(''); setCustomTo('') }}
                     className={cn(
                       'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-                      period === p.days && !customFrom
+                      period === p.days && !customFrom && !hasGlobalRange
                         ? 'bg-primary text-primary-foreground shadow-sm'
+                        : hasGlobalRange
+                          ? 'cursor-not-allowed text-muted-foreground/50'
                         : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                     )}
                   >
@@ -853,21 +863,23 @@ export function Finance() {
                   <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">С даты</span>
                   <input
                     type="date"
-                    value={customFrom}
+                    value={hasGlobalRange ? globalFrom : customFrom}
+                    disabled={hasGlobalRange}
                     onChange={e => setCustomFrom(e.target.value)}
-                    className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary"
+                    className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary disabled:cursor-not-allowed disabled:text-muted-foreground/60"
                   />
                 </label>
                 <label className="flex min-w-[128px] flex-col gap-1">
                   <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">По дату</span>
                   <input
                     type="date"
-                    value={customTo}
+                    value={hasGlobalRange ? globalTo : customTo}
+                    disabled={hasGlobalRange}
                     onChange={e => setCustomTo(e.target.value)}
-                    className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary"
+                    className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary disabled:cursor-not-allowed disabled:text-muted-foreground/60"
                   />
                 </label>
-                {hasCustomRange ? (
+                {hasCustomRange && !hasGlobalRange ? (
                   <button
                     onClick={() => { setCustomFrom(''); setCustomTo('') }}
                     className="self-end rounded-lg border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { InstallPrompt } from '@/components/InstallPrompt'
+import { GlobalDateFilters } from '@/components/GlobalDateFilters'
 import { Sidebar } from '@/components/Sidebar'
 import { Dashboard } from '@/pages/Dashboard'
 import { Finance } from '@/pages/Finance'
@@ -20,6 +21,7 @@ function Layout({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <InstallPrompt />
       <main className="app-shell-main min-w-0 flex-1 lg:ml-56">
+        <GlobalDateFilters />
         <div className="page-shell">
           {children}
         </div>
