@@ -10,6 +10,7 @@ import { Nutrition } from '@/pages/Nutrition'
 import { Productivity } from '@/pages/Productivity'
 import { AiChat } from '@/pages/AiChat'
 import { Settings } from '@/pages/Settings'
+import { RawData } from '@/pages/RawData'
 import { Login } from '@/pages/Login'
 import { Register } from '@/pages/Register'
 import { AuthProvider, useAuth } from '@/lib/auth'
@@ -69,6 +70,7 @@ function AppRoutes() {
               <Route path="/nutrition" element={<Nutrition />} />
               <Route path="/ai" element={<AiChat />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/raw-data" element={<RawData />} />
             </Routes>
           </Layout>
         </ProtectedRoute>

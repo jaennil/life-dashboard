@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BadgeRussianRuble,
   Ban,
@@ -31,6 +31,7 @@ import {
   type MonthStat, type Account, type FinanceTransaction,
   type CategoryStat, type DailyTotal, type TopExpense, type Integration, type FinanceObligationsSummary, type FinanceObligationRule,
 } from '@/lib/api'
+import { rawDataHref } from '@/lib/raw-data'
 
 const CATEGORY_COLORS = [
   '#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#f43f5e',
@@ -125,6 +126,18 @@ function dateOffset(days: number) {
   const d = new Date()
   d.setDate(d.getDate() - days)
   return d.toISOString().split('T')[0]
+}
+
+function monthBounds(ym: string) {
+  const [year, month] = ym.split('-').map(Number)
+  if (!year || !month) return null
+  const from = `${year}-${String(month).padStart(2, '0')}-01`
+  const to = new Date(year, month, 0).toISOString().split('T')[0]
+  return { from, to }
+}
+
+function categoryFilterValue(category: string) {
+  return category === 'Без категории' ? '__uncategorized__' : category
 }
 
 function formatRangeLabel(from: string, to?: string) {
@@ -587,6 +600,7 @@ type SortType = '' | 'amount' | 'amount_asc' | 'date_asc' | 'category'
 
 export function Finance() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [monthly, setMonthly] = useState<MonthStat[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [categories, setCategories] = useState<CategoryStat[]>([])
@@ -618,6 +632,10 @@ export function Finance() {
   const hasGlobalRange = Boolean(globalFrom || globalTo)
   const from = globalFrom || customFrom || dateOffset(period)
   const to = globalTo || customTo || undefined
+
+  function openFinanceRaw(filters: Record<string, string | undefined> = {}) {
+    navigate(rawDataHref('finance.transactions', { from, to, ...filters }))
+  }
 
   const loadPageData = useCallback(async () => {
     setLoading(true)
@@ -1197,7 +1215,14 @@ export function Finance() {
             </div>
           </div>
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : (
-            <EChart option={buildMonthlyOption(monthly)} height={220} />
+            <EChart
+              option={buildMonthlyOption(monthly)}
+              height={220}
+              onClick={(params) => {
+                const bounds = monthBounds(String(params.name ?? ''))
+                if (bounds) openFinanceRaw(bounds)
+              }}
+            />
           )}
         </div>
 
@@ -1219,7 +1244,14 @@ export function Finance() {
             </div>
           </div>
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : (
-            <EChart option={buildDailyOption(daily)} height={220} />
+            <EChart
+              option={buildDailyOption(daily)}
+              height={220}
+              onClick={(params) => {
+                const day = String(params.name ?? '')
+                if (day) openFinanceRaw({ from: day, to: day })
+              }}
+            />
           )}
         </div>
       </div>
@@ -1255,12 +1287,21 @@ export function Finance() {
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-              <EChart option={buildCategoriesOption(categories)} height={200} width={200} className="shrink-0" />
+              <EChart
+                option={buildCategoriesOption(categories)}
+                height={200}
+                width={200}
+                className="shrink-0"
+                onClick={(params) => {
+                  const category = String(params.name ?? '')
+                  if (category) openFinanceRaw({ type: 'expense', category: categoryFilterValue(category) })
+                }}
+              />
               <div className="flex max-h-[280px] flex-1 min-w-0 flex-col gap-2 overflow-y-auto py-1 pr-1">
                 {categories.map((c, i) => (
                   <button
                     key={c.category}
-                    onClick={() => setCatFilter(catFilter === c.category ? '' : c.category)}
+                    onClick={() => openFinanceRaw({ type: 'expense', category: categoryFilterValue(c.category) })}
                     className={cn(
                       'rounded-xl border border-transparent bg-background/45 px-3 py-2 text-left transition-colors hover:border-border hover:bg-accent/40',
                       catFilter === c.category && 'border-primary/30 bg-primary/10'
@@ -1327,16 +1368,21 @@ export function Finance() {
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-              <EChart option={buildCategoriesOption(incomeCategories, INCOME_CATEGORY_COLORS)} height={200} width={200} className="shrink-0" />
+              <EChart
+                option={buildCategoriesOption(incomeCategories, INCOME_CATEGORY_COLORS)}
+                height={200}
+                width={200}
+                className="shrink-0"
+                onClick={(params) => {
+                  const category = String(params.name ?? '')
+                  if (category) openFinanceRaw({ type: 'income', category: categoryFilterValue(category) })
+                }}
+              />
               <div className="flex max-h-[280px] flex-1 min-w-0 flex-col gap-2 overflow-y-auto py-1 pr-1">
                 {incomeCategories.map((c, i) => (
                   <button
                     key={c.category}
-                    onClick={() => {
-                      const isSameFilter = filter === 'income' && catFilter === c.category
-                      setFilter(isSameFilter ? '' : 'income')
-                      setCatFilter(isSameFilter ? '' : c.category)
-                    }}
+                    onClick={() => openFinanceRaw({ type: 'income', category: categoryFilterValue(c.category) })}
                     className={cn(
                       'rounded-xl border border-transparent bg-background/45 px-3 py-2 text-left transition-colors hover:border-border hover:bg-accent/40',
                       filter === 'income' && catFilter === c.category && 'border-emerald-500/30 bg-emerald-500/10'
@@ -1390,7 +1436,15 @@ export function Finance() {
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
             <div className="space-y-4">
-              <EChart option={buildTopExpensesOption(topExpenses)} height={Math.max(220, topExpenses.length * 32)} />
+              <EChart
+                option={buildTopExpensesOption(topExpenses)}
+                height={Math.max(220, topExpenses.length * 32)}
+                onClick={(params) => {
+                  const data = typeof params.data === 'object' && params.data !== null ? params.data as Record<string, unknown> : null
+                  const payee = String(data?.fullLabel ?? params.name ?? '')
+                  if (payee) openFinanceRaw({ type: 'expense', payee })
+                }}
+              />
               <div className="grid gap-2 sm:grid-cols-3">
                 {topExpenses.slice(0, 3).map((expense, index) => (
                   <div key={expense.payee} className="rounded-xl border bg-background/50 px-3 py-2">

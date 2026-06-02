@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -290,20 +291,67 @@ func (h *FitnessHandler) loadActivitiesInRange(ctx context.Context, userID strin
 func (h *FitnessHandler) GetActivities(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
+	q := r.URL.Query()
 	now := time.Now().In(aiDisplayLocation)
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
 	dateRange := parseQueryDateRange(r, todayStart.AddDate(0, 0, -29), todayStart)
 
-	rows, err := h.db.Query(ctx, `
+	limit, _ := strconv.Atoi(q.Get("page_size"))
+	if limit <= 0 {
+		limit = 30
+	}
+	if limit > 250 {
+		limit = 250
+	}
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	conditions := "user_id = $1 AND started_at >= $2 AND started_at < $3"
+	args := []any{userID, dateRange.Start, dateRange.EndExclusive}
+	argN := 4
+	if activityType := q.Get("type"); activityType != "" {
+		conditions += fmt.Sprintf(" AND type = $%d", argN)
+		args = append(args, activityType)
+		argN++
+	}
+	if search := q.Get("search"); search != "" {
+		conditions += fmt.Sprintf(" AND (COALESCE(name,'') ILIKE $%d OR COALESCE(type,'') ILIKE $%d)", argN, argN)
+		args = append(args, "%"+search+"%")
+		argN++
+	}
+
+	orderBy := "started_at DESC"
+	direction := "DESC"
+	if q.Get("order") == "asc" {
+		direction = "ASC"
+	}
+	switch q.Get("sort") {
+	case "type":
+		orderBy = "type " + direction + ", started_at DESC"
+	case "name":
+		orderBy = "name " + direction + ", started_at DESC"
+	case "distance":
+		orderBy = "distance_meters " + direction + " NULLS LAST"
+	case "duration":
+		orderBy = "duration_seconds " + direction + " NULLS LAST"
+	case "calories":
+		orderBy = "calories " + direction + " NULLS LAST"
+	case "date", "started_at":
+		orderBy = "started_at " + direction
+	}
+
+	args = append(args, limit, offset)
+	rows, err := h.db.Query(ctx, fmt.Sprintf(`
 		SELECT id, type, COALESCE(name,''), started_at,
 			duration_seconds, distance_meters, calories, avg_heart_rate
 		FROM activities
-		WHERE user_id = $1
-			AND started_at >= $2
-			AND started_at < $3
-		ORDER BY started_at DESC
-		LIMIT 30
-	`, userID, dateRange.Start, dateRange.EndExclusive)
+		WHERE %s
+		ORDER BY %s
+		LIMIT $%d OFFSET $%d
+	`, conditions, orderBy, argN, argN+1), args...)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query activities")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -328,6 +376,7 @@ func (h *FitnessHandler) GetActivities(w http.ResponseWriter, r *http.Request) {
 func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
+	q := r.URL.Query()
 	now := time.Now().In(aiDisplayLocation)
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
 	dateRange := parseQueryDateRange(r, todayStart.AddDate(0, 0, -29), todayStart)
@@ -338,12 +387,73 @@ func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if len(workouts) > 30 {
-		workouts = workouts[:30]
+
+	search := strings.ToLower(strings.TrimSpace(q.Get("search")))
+	category := strings.ToLower(strings.TrimSpace(q.Get("category")))
+	filtered := workouts[:0]
+	for _, workout := range workouts {
+		if search != "" && !workoutMatchesSearch(workout, search) {
+			continue
+		}
+		if category != "" && !workoutMatchesCategory(workout, category) {
+			continue
+		}
+		filtered = append(filtered, workout)
+	}
+	workouts = filtered
+
+	limit, _ := strconv.Atoi(q.Get("page_size"))
+	if limit <= 0 {
+		limit = 30
+	}
+	if limit > 250 {
+		limit = 250
+	}
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+	if offset >= len(workouts) {
+		workouts = []Workout{}
+	} else {
+		end := offset + limit
+		if end > len(workouts) {
+			end = len(workouts)
+		}
+		workouts = workouts[offset:end]
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(workouts)
+}
+
+func workoutMatchesSearch(workout Workout, search string) bool {
+	if strings.Contains(strings.ToLower(workout.Title), search) ||
+		strings.Contains(strings.ToLower(workout.Notes), search) ||
+		strings.Contains(strings.ToLower(workout.Source), search) {
+		return true
+	}
+	for _, exercise := range workout.Exercises {
+		if strings.Contains(strings.ToLower(exercise.Name), search) ||
+			strings.Contains(strings.ToLower(exercise.Category), search) {
+			return true
+		}
+	}
+	return false
+}
+
+func workoutMatchesCategory(workout Workout, category string) bool {
+	for _, exercise := range workout.Exercises {
+		key := strings.ToLower(exercise.Category)
+		if key == "" {
+			key = strings.ToLower(exercise.Name)
+		}
+		if key == category {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *FitnessHandler) loadHevyWorkoutsInRange(ctx context.Context, userID string, since, until time.Time) ([]Workout, error) {

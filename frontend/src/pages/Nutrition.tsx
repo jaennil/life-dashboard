@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { EChartsCoreOption } from 'echarts/core'
 import { Activity, Droplets, Flame, GlassWater, RotateCcw, Target, UtensilsCrossed } from 'lucide-react'
 import { EChart } from '@/components/EChart'
@@ -8,10 +9,12 @@ import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type HydrationBeverageType, type HydrationMode, type Integration, type NutritionDay, type NutritionGoldenCard, type NutritionGoldenMetrics, type NutritionSummary, type NutritionTargetsInput } from '@/lib/api'
+import { rawDataHref } from '@/lib/raw-data'
 
 const MEAL_LABELS: Record<string, string> = {
   breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', snacks: 'Перекус', other: 'Прочее',
 }
+const MEAL_KEYS_BY_LABEL = Object.fromEntries(Object.entries(MEAL_LABELS).map(([key, label]) => [label, key]))
 
 const MEAL_COLORS: Record<string, string> = {
   breakfast: '#f97316',
@@ -763,6 +766,7 @@ function NutritionDayDetails({ day }: { day: NutritionDay }) {
 
 export function Nutrition() {
   const globalRange = useGlobalDateRange()
+  const navigate = useNavigate()
   const [summary, setSummary] = useState<NutritionSummary | null>(null)
   const [golden, setGolden] = useState<NutritionGoldenMetrics | null>(null)
   const [daily, setDaily] = useState<NutritionDay[]>([])
@@ -912,6 +916,10 @@ export function Nutrition() {
     () => filteredDaily.find(day => day.date === selectedDayDate) ?? filteredDaily[0] ?? null,
     [filteredDaily, selectedDayDate],
   )
+
+  function openNutritionRaw(filters: Record<string, string | undefined> = {}) {
+    navigate(rawDataHref('nutrition.days', { ...globalRange.params, ...filters }))
+  }
 
   const calorieReference = Math.max(
     calorieTarget ?? 0,
@@ -1345,7 +1353,14 @@ export function Nutrition() {
               </div>
             </div>
           ) : (
-            <EChart option={buildHydrationOption(chartData, waterTarget)} height={240} />
+            <EChart
+              option={buildHydrationOption(chartData, waterTarget)}
+              height={240}
+              onClick={(params) => {
+                const day = String(params.name ?? '')
+                if (day) openNutritionRaw({ day, metric: 'hydration' })
+              }}
+            />
           )}
         </div>
       </div>
@@ -1358,7 +1373,14 @@ export function Nutrition() {
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : chartData.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
-            <EChart option={buildCaloriesOption(chartData, calorieTarget)} height={200} />
+            <EChart
+              option={buildCaloriesOption(chartData, calorieTarget)}
+              height={200}
+              onClick={(params) => {
+                const day = String(params.name ?? '')
+                if (day) openNutritionRaw({ day, metric: 'calories' })
+              }}
+            />
           )}
         </div>
 
@@ -1368,7 +1390,15 @@ export function Nutrition() {
           {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : chartData.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
           ) : (
-            <EChart option={buildMacrosTrendOption(chartData)} height={200} />
+            <EChart
+              option={buildMacrosTrendOption(chartData)}
+              height={200}
+              onClick={(params) => {
+                const day = String(params.name ?? '')
+                const metric = String(params.seriesName ?? '')
+                if (day) openNutritionRaw({ day, metric })
+              }}
+            />
           )}
         </div>
       </div>
@@ -1380,7 +1410,16 @@ export function Nutrition() {
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Распределение БЖУ (ккал)</h2>
           {loading || macroPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
             <div className="flex flex-col gap-5 md:flex-row md:items-start">
-              <EChart option={buildNutritionDonutOption(macroPie, 'Всего', ' ккал')} height={160} width={160} className="mx-auto shrink-0 md:mx-0" />
+              <EChart
+                option={buildNutritionDonutOption(macroPie, 'Всего', ' ккал')}
+                height={160}
+                width={160}
+                className="mx-auto shrink-0 md:mx-0"
+                onClick={(params) => {
+                  const metric = String(params.name ?? '')
+                  if (metric) openNutritionRaw({ metric })
+                }}
+              />
               <div className="flex min-w-0 flex-1 flex-col gap-2">
                 {macroPie.map(m => (
                   <div key={m.name} className="rounded-xl border bg-background/45 px-3 py-2">
@@ -1407,10 +1446,19 @@ export function Nutrition() {
           </p>
           {loading || mealStats.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
             <div className="flex flex-col gap-5">
-              <EChart option={buildMealsTimelineOption(chartData, mealStats)} height={220} />
+              <EChart
+                option={buildMealsTimelineOption(chartData, mealStats)}
+                height={220}
+                onClick={(params) => {
+                  const day = String(params.name ?? '')
+                  const label = String(params.seriesName ?? '')
+                  const mealType = MEAL_KEYS_BY_LABEL[label] ?? label
+                  if (day) openNutritionRaw({ day, meal_type: mealType })
+                }}
+              />
               <div className="grid gap-2 md:grid-cols-2">
                 {mealStats.map((stat) => (
-                  <button key={stat.key} onClick={() => setMealFilter(mealFilter === stat.key ? '' : stat.key)}
+                  <button key={stat.key} onClick={() => openNutritionRaw({ meal_type: stat.key })}
                     className={cn(
                       'rounded-xl border bg-background/45 px-3 py-2 text-left transition-colors hover:border-border hover:bg-accent/40',
                       mealFilter === stat.key && 'border-primary/30 bg-primary/10'
@@ -1692,10 +1740,9 @@ export function Nutrition() {
                 height={Math.max(280, filteredDaily.length * 44)}
                 onClick={(params) => {
                   const dataIndex = typeof params.dataIndex === 'number' ? params.dataIndex : null
-                  if (dataIndex == null) return
-                  const day = filteredDaily[dataIndex]
+                  const day = dataIndex == null ? null : filteredDaily[dataIndex]
                   if (!day) return
-                  setSelectedDayDate(day.date)
+                  openNutritionRaw({ day: day.date })
                 }}
               />
             </div>

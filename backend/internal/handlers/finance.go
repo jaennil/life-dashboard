@@ -45,13 +45,16 @@ type Account struct {
 }
 
 type FinanceTransaction struct {
-	ID         string    `json:"id"`
-	OccurredAt time.Time `json:"occurred_at"`
-	Amount     float64   `json:"amount"`
-	Currency   string    `json:"currency"`
-	Comment    string    `json:"comment"`
-	Payee      *string   `json:"payee"`
-	Category   *string   `json:"category"`
+	ID           string    `json:"id"`
+	OccurredAt   time.Time `json:"occurred_at"`
+	Amount       float64   `json:"amount"`
+	Currency     string    `json:"currency"`
+	Comment      string    `json:"comment"`
+	Payee        *string   `json:"payee"`
+	Category     *string   `json:"category"`
+	Subcategory  *string   `json:"subcategory"`
+	AccountTitle *string   `json:"account_title"`
+	Tags         []string  `json:"tags"`
 }
 
 type DailyTotal struct {
@@ -162,7 +165,7 @@ func (h *FinanceHandler) GetSpendingByCategory(w http.ResponseWriter, r *http.Re
 	}
 
 	rows, err := h.db.Query(ctx, fmt.Sprintf(`
-		SELECT COALESCE(t.category, 'Без категории') as category, SUM(%s) as total
+		SELECT COALESCE(NULLIF(TRIM(t.category), ''), 'Без категории') as category, SUM(%s) as total
 		FROM transactions t
 		LEFT JOIN accounts a ON a.id = t.account_id
 		WHERE %s
@@ -205,15 +208,23 @@ func (h *FinanceHandler) GetTransactions(w http.ResponseWriter, r *http.Request)
 	q := r.URL.Query()
 	filter := q.Get("type")
 	category := q.Get("category")
+	payee := q.Get("payee")
 	search := q.Get("search")
 	from := q.Get("from")
 	to := q.Get("to")
 	sortBy := q.Get("sort")
+	order := q.Get("order")
 	page, _ := strconv.Atoi(q.Get("page"))
 	if page < 1 {
 		page = 1
 	}
-	limit := 30
+	limit, _ := strconv.Atoi(q.Get("page_size"))
+	if limit <= 0 {
+		limit = 30
+	}
+	if limit > 250 {
+		limit = 250
+	}
 	offset := (page - 1) * limit
 
 	conditions := "t.is_transfer = false AND t.user_id = $1 AND COALESCE(a.in_balance, TRUE) = TRUE"
@@ -228,13 +239,23 @@ func (h *FinanceHandler) GetTransactions(w http.ResponseWriter, r *http.Request)
 	}
 
 	if category != "" {
-		conditions += fmt.Sprintf(" AND t.category = $%d", argN)
-		args = append(args, category)
+		if category == "__uncategorized__" || category == "Без категории" {
+			conditions += " AND NULLIF(TRIM(t.category), '') IS NULL"
+		} else {
+			conditions += fmt.Sprintf(" AND t.category = $%d", argN)
+			args = append(args, category)
+			argN++
+		}
+	}
+
+	if payee != "" {
+		conditions += fmt.Sprintf(" AND COALESCE(NULLIF(t.payee,''), NULLIF(t.comment,''), 'Без описания') = $%d", argN)
+		args = append(args, payee)
 		argN++
 	}
 
 	if search != "" {
-		conditions += fmt.Sprintf(" AND (COALESCE(t.comment,'') ILIKE $%d OR COALESCE(t.payee,'') ILIKE $%d)", argN, argN)
+		conditions += fmt.Sprintf(" AND (COALESCE(t.comment,'') ILIKE $%d OR COALESCE(t.payee,'') ILIKE $%d OR COALESCE(t.category,'') ILIKE $%d OR COALESCE(a.title,'') ILIKE $%d)", argN, argN, argN, argN)
 		args = append(args, "%"+search+"%")
 		argN++
 	}
@@ -251,20 +272,29 @@ func (h *FinanceHandler) GetTransactions(w http.ResponseWriter, r *http.Request)
 	}
 
 	orderBy := "t.occurred_at DESC"
+	direction := "DESC"
+	if order == "asc" {
+		direction = "ASC"
+	}
 	switch sortBy {
 	case "amount":
-		orderBy = "ABS(t.amount) DESC"
-	case "amount_asc":
-		orderBy = "ABS(t.amount) ASC"
+		orderBy = "ABS(t.amount) " + direction
 	case "date_asc":
 		orderBy = "t.occurred_at ASC"
+	case "amount_asc":
+		orderBy = "ABS(t.amount) ASC"
+	case "date", "occurred_at":
+		orderBy = "t.occurred_at " + direction
 	case "category":
-		orderBy = "t.category, t.occurred_at DESC"
+		orderBy = "t.category " + direction + ", t.occurred_at DESC"
+	case "payee":
+		orderBy = "t.payee " + direction + ", t.occurred_at DESC"
 	}
 
 	args = append(args, limit, offset)
 	query := fmt.Sprintf(`
-		SELECT t.id, t.occurred_at, t.amount, t.currency, COALESCE(t.comment, ''), t.payee, t.category
+		SELECT t.id, t.occurred_at, t.amount, t.currency, COALESCE(t.comment, ''),
+			t.payee, t.category, t.subcategory, a.title, COALESCE(t.tags, ARRAY[]::text[])
 		FROM transactions t
 		LEFT JOIN accounts a ON a.id = t.account_id
 		WHERE %s
@@ -283,7 +313,7 @@ func (h *FinanceHandler) GetTransactions(w http.ResponseWriter, r *http.Request)
 	txs := make([]FinanceTransaction, 0)
 	for rows.Next() {
 		var tx FinanceTransaction
-		if err := rows.Scan(&tx.ID, &tx.OccurredAt, &tx.Amount, &tx.Currency, &tx.Comment, &tx.Payee, &tx.Category); err != nil {
+		if err := rows.Scan(&tx.ID, &tx.OccurredAt, &tx.Amount, &tx.Currency, &tx.Comment, &tx.Payee, &tx.Category, &tx.Subcategory, &tx.AccountTitle, &tx.Tags); err != nil {
 			continue
 		}
 		txs = append(txs, tx)
@@ -392,7 +422,7 @@ func (h *FinanceHandler) GetCategoryList(w http.ResponseWriter, r *http.Request)
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 
 	rows, err := h.db.Query(ctx, `
-		SELECT DISTINCT COALESCE(t.category, 'Без категории')
+		SELECT DISTINCT COALESCE(NULLIF(TRIM(t.category), ''), 'Без категории')
 		FROM transactions t
 		LEFT JOIN accounts a ON a.id = t.account_id
 		WHERE t.user_id = $1

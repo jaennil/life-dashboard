@@ -7,6 +7,17 @@ export interface DateRangeParams {
   to?: string
 }
 
+export interface CollectionParams extends DateRangeParams {
+  page?: number
+  page_size?: number
+  search?: string
+  sort?: string
+  order?: 'asc' | 'desc'
+  type?: string
+  category?: string
+  payee?: string
+}
+
 export interface User {
   id: string
   username: string
@@ -177,6 +188,15 @@ function dateRangeQuery(params: DateRangeParams = {}) {
   return qs ? '?' + qs : ''
 }
 
+function collectionQuery(params: CollectionParams = {}) {
+  const p = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') p.set(key, String(value))
+  })
+  const qs = p.toString()
+  return qs ? '?' + qs : ''
+}
+
 export interface MonthStat {
   month: string
   spending: number
@@ -244,6 +264,9 @@ export interface FinanceTransaction {
   comment: string
   payee: string | null
   category: string | null
+  subcategory: string | null
+  account_title: string | null
+  tags: string[]
 }
 
 export interface FitnessSummary {
@@ -623,22 +646,13 @@ export const api = {
   getRecentTransactions: (params: DateRangeParams = {}) => get<Transaction[]>('/dashboard/transactions' + dateRangeQuery(params)),
   getMonthlyStats: () => get<MonthStat[]>('/finance/monthly'),
   getAccounts: () => get<Account[]>('/finance/accounts'),
-  getTransactions: (params: { page?: number; type?: string; category?: string; search?: string; from?: string; to?: string; sort?: string } = {}) => {
-    const p = new URLSearchParams()
-    if (params.page) p.set('page', String(params.page))
-    if (params.type) p.set('type', params.type)
-    if (params.category) p.set('category', params.category)
-    if (params.search) p.set('search', params.search)
-    if (params.from) p.set('from', params.from)
-    if (params.to) p.set('to', params.to)
-    if (params.sort) p.set('sort', params.sort)
-    return get<FinanceTransaction[]>('/finance/transactions?' + p.toString())
-  },
+  getTransactions: (params: CollectionParams = {}) =>
+    get<FinanceTransaction[]>('/finance/transactions' + collectionQuery(params)),
   getFitnessSummary: (params: DateRangeParams = {}) => get<FitnessSummary>('/fitness/summary' + dateRangeQuery(params)),
   getFitnessGolden: (params: DateRangeParams = {}) => get<FitnessGoldenMetrics>('/fitness/golden' + dateRangeQuery(params)),
   getFitnessWeekly: (params: DateRangeParams = {}) => get<WeekStat[]>('/fitness/weekly' + dateRangeQuery(params)),
-  getActivities: (params: DateRangeParams = {}) => get<Activity[]>('/fitness/activities' + dateRangeQuery(params)),
-  getWorkouts: (params: DateRangeParams = {}) => get<Workout[]>('/fitness/workouts' + dateRangeQuery(params)),
+  getActivities: (params: CollectionParams = {}) => get<Activity[]>('/fitness/activities' + collectionQuery(params)),
+  getWorkouts: (params: CollectionParams = {}) => get<Workout[]>('/fitness/workouts' + collectionQuery(params)),
   getProductivitySummary: (params: DateRangeParams = {}) => get<ProductivitySummary>('/productivity/summary' + dateRangeQuery(params)),
   getProductivityTasks: (filter: 'all' | 'overdue' | 'today' | 'upcoming' | 'stale' = 'all', params: DateRangeParams = {}) => {
     const p = new URLSearchParams()

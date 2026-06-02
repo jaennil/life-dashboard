@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { EChartsCoreOption } from 'echarts/core'
 import { Dumbbell, Flame, Heart, ChevronDown, ChevronUp, Timer, TrendingUp, Scale, Activity as ActivityIcon, Clock3, Layers3 } from 'lucide-react'
 import { EChart } from '@/components/EChart'
@@ -7,6 +8,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type FitnessSummary, type FitnessGoldenMetrics, type FitnessGoldenCard, type Activity, type Workout, type Integration } from '@/lib/api'
+import { rawDataHref } from '@/lib/raw-data'
 
 const ACTIVITY_ICONS: Record<string, string> = {
   Run: '🏃', Ride: '🚴', Swim: '🏊', Walk: '🚶', WeightTraining: '🏋️',
@@ -61,6 +63,13 @@ function fmtWeek(iso: string) {
   }
   const d = new Date(iso)
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function addDays(iso: string, days: number) {
+  const [year, month, day] = iso.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  date.setDate(date.getDate() + days)
+  return date.toISOString().split('T')[0]
 }
 
 function fmtMetric(value: number | null) {
@@ -543,6 +552,7 @@ function WorkoutRow({ workout }: { workout: Workout }) {
 
 export function Fitness() {
   const globalRange = useGlobalDateRange()
+  const navigate = useNavigate()
   const [summary, setSummary] = useState<FitnessSummary | null>(null)
   const [golden, setGolden] = useState<FitnessGoldenMetrics | null>(null)
   const [activities, setActivities] = useState<Activity[]>([])
@@ -639,6 +649,10 @@ export function Fitness() {
 
   const cards = sourceTab === 'strava' ? golden?.strava.cards ?? [] : golden?.hevy.cards ?? []
 
+  function openFitnessRaw(source: 'fitness.activities' | 'fitness.workouts', filters: Record<string, string | undefined> = {}) {
+    navigate(rawDataHref(source, { ...globalRange.params, ...filters }))
+  }
+
   async function handleSyncFitness() {
     if (!activeIntegration?.enabled) return
     setSyncing(true)
@@ -723,7 +737,14 @@ export function Fitness() {
               {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : stravaGoldenWeekly.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
               ) : (
-                <EChart option={buildStravaGoldenTrendOption(stravaGoldenWeekly)} height={240} />
+                <EChart
+                  option={buildStravaGoldenTrendOption(stravaGoldenWeekly)}
+                  height={240}
+                  onClick={(params) => {
+                    const week = String(params.name ?? '')
+                    if (week) openFitnessRaw('fitness.activities', { from: week, to: addDays(week, 6) })
+                  }}
+                />
               )}
             </div>
 
@@ -731,12 +752,21 @@ export function Fitness() {
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Типы активностей</h2>
               {loading || activityTypePie.length === 0 ? <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
                 <div className="flex items-start gap-6">
-                  <EChart option={buildDonutOption(activityTypePie, 'Всего', ' активностей')} height={180} width={180} className="shrink-0" />
+                  <EChart
+                    option={buildDonutOption(activityTypePie, 'Всего', ' активностей')}
+                    height={180}
+                    width={180}
+                    className="shrink-0"
+                    onClick={(params) => {
+                      const type = String(params.name ?? '')
+                      if (type) openFitnessRaw('fitness.activities', { type })
+                    }}
+                  />
                   <div className="flex max-h-[220px] min-w-0 flex-1 flex-col gap-2 overflow-y-auto py-1 pr-1">
                     {activityTypePie.map(segment => (
                       <button
                         key={segment.name}
-                        onClick={() => setTypeFilter(typeFilter === segment.name ? '' : segment.name)}
+                        onClick={() => openFitnessRaw('fitness.activities', { type: segment.name })}
                         className="flex items-center gap-2 text-xs hover:bg-accent/50 rounded px-1 py-0.5 transition-colors"
                       >
                         <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: segment.color }} />
@@ -855,7 +885,15 @@ export function Fitness() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <EChart option={buildHevySplitTimelineOption(hevyGoldenWeekly)} height={260} />
+                  <EChart
+                    option={buildHevySplitTimelineOption(hevyGoldenWeekly)}
+                    height={260}
+                    onClick={(params) => {
+                      const week = String(params.name ?? '')
+                      const category = String(params.seriesName ?? '').toLowerCase()
+                      if (week) openFitnessRaw('fitness.workouts', { from: week, to: addDays(week, 6), category: category || undefined })
+                    }}
+                  />
                   <div className="flex flex-wrap gap-2">
                     {(golden?.hevy.splits ?? []).filter(split => split.count > 0 || split.key !== 'other').map(split => (
                       <div key={split.key} className="rounded-full border border-border/80 bg-background/60 px-3 py-1.5 text-xs text-muted-foreground">
@@ -877,7 +915,14 @@ export function Fitness() {
               {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : hevyGoldenWeekly.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
               ) : (
-                <EChart option={buildHevyLoadOption(hevyGoldenWeekly)} height={240} />
+                <EChart
+                  option={buildHevyLoadOption(hevyGoldenWeekly)}
+                  height={240}
+                  onClick={(params) => {
+                    const week = String(params.name ?? '')
+                    if (week) openFitnessRaw('fitness.workouts', { from: week, to: addDays(week, 6) })
+                  }}
+                />
               )}
             </div>
 
@@ -885,14 +930,23 @@ export function Fitness() {
               <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Категории упражнений</h2>
               {loading || workoutCategoryPie.length === 0 ? <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
                 <div className="flex items-start gap-6">
-                  <EChart option={buildDonutOption(workoutCategoryPie, 'Всего', ' упражнений')} height={180} width={180} className="shrink-0" />
+                  <EChart
+                    option={buildDonutOption(workoutCategoryPie, 'Всего', ' упражнений')}
+                    height={180}
+                    width={180}
+                    className="shrink-0"
+                    onClick={(params) => {
+                      const category = String(params.name ?? '')
+                      if (category) openFitnessRaw('fitness.workouts', { category })
+                    }}
+                  />
                   <div className="flex max-h-[220px] min-w-0 flex-1 flex-col gap-2 overflow-y-auto py-1 pr-1">
                     {workoutCategoryPie.map(segment => (
-                      <div key={segment.name} className="flex items-center gap-2 text-xs px-1 py-0.5">
+                      <button key={segment.name} onClick={() => openFitnessRaw('fitness.workouts', { category: segment.name })} className="flex items-center gap-2 rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-accent/50">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: segment.color }} />
                         <span className="text-foreground">🏋️ {segment.name}</span>
                         <span className="text-muted-foreground">{segment.value}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </div>

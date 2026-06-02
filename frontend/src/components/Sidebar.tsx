@@ -11,6 +11,7 @@ import {
   Moon,
   Activity,
   User,
+  Database,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
@@ -23,6 +24,7 @@ const nav = [
   { to: '/productivity', icon: CheckSquare, label: 'Productivity' },
   { to: '/nutrition', icon: Salad, label: 'Nutrition' },
   { to: '/ai', icon: MessageSquare, label: 'AI Chat' },
+  { to: '/raw-data', icon: Database, label: 'Raw Data' },
 ]
 
 export function Sidebar() {
@@ -158,7 +160,7 @@ export function Sidebar() {
         className="fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 px-2 pt-2 backdrop-blur lg:hidden"
         style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
       >
-        <div className="grid grid-cols-6 gap-1">
+        <div className="flex gap-1 overflow-x-auto">
           {nav.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
@@ -166,7 +168,7 @@ export function Sidebar() {
               end={to === '/'}
               className={({ isActive }) =>
                 cn(
-                  'flex min-w-0 flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium transition-colors',
+                  'flex min-w-[72px] flex-1 flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium transition-colors',
                   isActive
                     ? 'bg-primary/10 text-primary'
                     : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
