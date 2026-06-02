@@ -17,6 +17,7 @@ import {
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
+import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import {
   api,
   type Integration,
@@ -230,6 +231,7 @@ function HabitColumn({
 }
 
 export function Productivity() {
+  const globalRange = useGlobalDateRange()
   const [summary, setSummary] = useState<ProductivitySummary | null>(null)
   const [tasks, setTasks] = useState<ProductivityTask[]>([])
   const [habitsData, setHabitsData] = useState<ProductivityHabitsResponse | null>(null)
@@ -261,33 +263,33 @@ export function Productivity() {
 
   const loadSummary = useCallback(async () => {
     try {
-      setSummary(await api.getProductivitySummary())
+      setSummary(await api.getProductivitySummary(globalRange.params))
     } catch (error) {
       console.error(error)
     }
-  }, [])
+  }, [globalRange.params])
 
   const loadTasks = useCallback(async (currentFilter: TaskFilter) => {
     setTaskLoading(true)
     try {
-      setTasks(await api.getProductivityTasks(currentFilter))
+      setTasks(await api.getProductivityTasks(currentFilter, globalRange.params))
     } catch (error) {
       console.error(error)
     } finally {
       setTaskLoading(false)
     }
-  }, [])
+  }, [globalRange.params])
 
   const loadHabits = useCallback(async () => {
     setHabitsLoading(true)
     try {
-      setHabitsData(await api.getProductivityHabits())
+      setHabitsData(await api.getProductivityHabits(globalRange.targetDate))
     } catch (error) {
       console.error(error)
     } finally {
       setHabitsLoading(false)
     }
-  }, [])
+  }, [globalRange.targetDate])
 
   useEffect(() => {
     setLoading(true)
@@ -303,7 +305,7 @@ export function Productivity() {
     setSyncing(true)
     try {
       await api.syncIntegration('todoist')
-      await Promise.all([loadSummary(), loadIntegrations(), loadTasks(filter)])
+      await Promise.all([loadSummary(), loadIntegrations(), loadTasks(filter), loadHabits()])
     } catch (error) {
       console.error(error)
     } finally {
@@ -334,7 +336,7 @@ export function Productivity() {
   async function handleToggleHabit(habit: ProductivityHabit) {
     setHabitSavingID(habit.id)
     try {
-      await api.setProductivityHabitStatus(habit.id, habit.status === 'completed' ? 'none' : 'completed')
+      await api.setProductivityHabitStatus(habit.id, habit.status === 'completed' ? 'none' : 'completed', globalRange.targetDate)
       await loadHabits()
     } catch (error) {
       console.error(error)
@@ -383,6 +385,7 @@ export function Productivity() {
         title="Productivity"
         description="Todoist отвечает за задачи, а встроенные рутины закрывают ежедневный уход и привычки без лишнего шума на экране."
         badges={[
+          ...(globalRange.label ? [{ label: globalRange.label, tone: 'primary' as const }] : []),
           { label: todoistIntegration?.enabled ? 'Todoist подключён' : 'Todoist не подключён', tone: todoistIntegration?.enabled ? 'success' : 'warning' },
           ...(habitsData ? [{ label: `${habitsData.summary.total} локальных привычек`, tone: 'primary' as const }] : []),
           ...(summary ? [{ label: `${summary.active_total} активных задач`, tone: 'muted' as const }] : []),
@@ -409,7 +412,7 @@ export function Productivity() {
           <div className="flex flex-wrap items-center gap-2">
             {habitsData ? (
               <>
-                <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">сделано сегодня {habitsData.summary.completed_today}/{habitsData.summary.total}</span>
+                <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">{globalRange.isActive ? 'сделано на дату' : 'сделано сегодня'} {habitsData.summary.completed_today}/{habitsData.summary.total}</span>
                 <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">completion rate 7д {habitsData.summary.completion_rate_7_days.toFixed(0)}%</span>
               </>
             ) : null}

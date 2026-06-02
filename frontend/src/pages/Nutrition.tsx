@@ -5,6 +5,7 @@ import { EChart } from '@/components/EChart'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
+import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type HydrationBeverageType, type HydrationMode, type Integration, type NutritionDay, type NutritionGoldenCard, type NutritionGoldenMetrics, type NutritionSummary, type NutritionTargetsInput } from '@/lib/api'
 
@@ -761,6 +762,7 @@ function NutritionDayDetails({ day }: { day: NutritionDay }) {
 }
 
 export function Nutrition() {
+  const globalRange = useGlobalDateRange()
   const [summary, setSummary] = useState<NutritionSummary | null>(null)
   const [golden, setGolden] = useState<NutritionGoldenMetrics | null>(null)
   const [daily, setDaily] = useState<NutritionDay[]>([])
@@ -793,7 +795,11 @@ export function Nutrition() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [s, g, d] = await Promise.all([api.getNutritionSummary(), api.getNutritionGolden(period), api.getNutritionDaily(period)])
+      const [s, g, d] = await Promise.all([
+        api.getNutritionSummary(globalRange.params),
+        api.getNutritionGolden(period, globalRange.params),
+        api.getNutritionDaily(period, globalRange.params),
+      ])
       setSummary(s)
       setGolden(g)
       setDaily(d)
@@ -802,7 +808,7 @@ export function Nutrition() {
     } finally {
       setLoading(false)
     }
-  }, [period])
+  }, [period, globalRange.params])
 
   const loadIntegrations = useCallback(async () => {
     try {
@@ -1101,8 +1107,9 @@ export function Nutrition() {
         description="Калории, БЖУ, вода и дневник питания в одном месте. Ежедневный hydration-трекинг живёт рядом с питанием, а редкие настройки убраны ниже."
         badges={[
           { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
+          ...(globalRange.label ? [{ label: globalRange.label, tone: 'primary' as const }] : []),
           { label: enabledNutritionIntegrations.length > 0 ? `${enabledNutritionIntegrations.length} активных источника питания` : 'Источник питания не подключён', tone: enabledNutritionIntegrations.length > 0 ? 'success' : 'warning' },
-          { label: `Период: ${period} дней`, tone: 'muted' },
+          { label: globalRange.isActive ? 'Период: глобальный фильтр' : `Период: ${period} дней`, tone: 'muted' },
         ]}
         actions={(
           <>
@@ -1115,9 +1122,9 @@ export function Nutrition() {
             />
             <div className="flex gap-1 rounded-2xl border bg-card/90 p-1 shadow-sm">
               {PERIODS.map(p => (
-                <button key={p.days} onClick={() => setPeriod(p.days)}
+                <button key={p.days} onClick={() => setPeriod(p.days)} disabled={globalRange.isActive}
                   className={cn('px-3 py-1.5 text-xs rounded-xl transition-colors',
-                    period === p.days ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
+                    period === p.days && !globalRange.isActive ? 'bg-primary text-primary-foreground' : globalRange.isActive ? 'cursor-not-allowed text-muted-foreground/50' : 'text-muted-foreground hover:bg-accent')}>
                   {p.label}
                 </button>
               ))}

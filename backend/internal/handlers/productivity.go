@@ -64,39 +64,53 @@ func (h *ProductivityHandler) GetSummary(w http.ResponseWriter, r *http.Request)
 	nextWeekStart := todayStart.AddDate(0, 0, 8)
 	staleBefore := todayStart.AddDate(0, 0, -14)
 	staleCondition := productivityStaleConditionExpr(2, 5)
+	dateRange := parseQueryDateRange(r, todayStart, todayStart.AddDate(0, 0, 6))
 
 	var summary ProductivitySummary
 	_ = h.db.QueryRow(ctx, fmt.Sprintf(`
 		SELECT
 			COUNT(*) FILTER (
 				WHERE is_active = TRUE
-			),
-			COUNT(*) FILTER (
-				WHERE is_active = TRUE
 					AND (
-						(due_at IS NOT NULL AND due_at < $2)
-						OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $3::date)
+						$6 = FALSE
+						OR (COALESCE(due_at::date, due_date) >= $7::date AND COALESCE(due_at::date, due_date) < $8::date)
 					)
 			),
 			COUNT(*) FILTER (
 				WHERE is_active = TRUE
 					AND (
-						(due_at IS NOT NULL AND due_at >= $2 AND due_at < $3)
-						OR (due_at IS NULL AND due_date = $2::date)
+						($6 = TRUE AND COALESCE(due_at::date, due_date) < $7::date)
+						OR ($6 = FALSE AND (
+							(due_at IS NOT NULL AND due_at < $2)
+							OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $3::date)
+						))
 					)
 			),
 			COUNT(*) FILTER (
 				WHERE is_active = TRUE
 					AND (
-						(due_at IS NOT NULL AND due_at >= $3 AND due_at < $4)
-						OR (due_at IS NULL AND due_date >= $3::date AND due_date < $4::date)
+						($6 = TRUE AND COALESCE(due_at::date, due_date) >= $7::date AND COALESCE(due_at::date, due_date) < $8::date)
+						OR ($6 = FALSE AND (
+							(due_at IS NOT NULL AND due_at >= $2 AND due_at < $3)
+							OR (due_at IS NULL AND due_date = $2::date)
+						))
+					)
+			),
+			COUNT(*) FILTER (
+				WHERE is_active = TRUE
+					AND (
+						($6 = TRUE AND COALESCE(due_at::date, due_date) >= $7::date AND COALESCE(due_at::date, due_date) < $8::date)
+						OR ($6 = FALSE AND (
+							(due_at IS NOT NULL AND due_at >= $3 AND due_at < $4)
+							OR (due_at IS NULL AND due_date >= $3::date AND due_date < $4::date)
+						))
 					)
 			),
 			COUNT(*) FILTER (WHERE is_active = TRUE AND is_recurring = TRUE),
 			COUNT(*) FILTER (WHERE is_active = TRUE AND %s)
 		FROM todoist_tasks
 		WHERE user_id = $1
-	`, staleCondition), userID, todayStart, tomorrowStart, nextWeekStart, staleBefore).Scan(
+	`, staleCondition), userID, todayStart, tomorrowStart, nextWeekStart, staleBefore, dateRange.HasExplicit, dateRange.Start, dateRange.EndExclusive).Scan(
 		&summary.ActiveTotal,
 		&summary.OverdueTotal,
 		&summary.DueTodayTotal,
@@ -108,13 +122,25 @@ func (h *ProductivityHandler) GetSummary(w http.ResponseWriter, r *http.Request)
 	_ = h.db.QueryRow(ctx, `
 		SELECT
 			COUNT(*) FILTER (WHERE completed_at >= $2 AND completed_at < $3),
-			COUNT(*) FILTER (WHERE completed_at >= $4 AND completed_at < $3)
+			COUNT(*) FILTER (WHERE completed_at >= $4 AND completed_at < $5)
 		FROM todoist_task_completions
 		WHERE user_id = $1
-	`, userID, todayStart, tomorrowStart, todayStart.AddDate(0, 0, -6)).Scan(
+	`, userID, dateRange.Start, dateRange.EndExclusive, todayStart.AddDate(0, 0, -6), tomorrowStart).Scan(
 		&summary.CompletedTodayTotal,
 		&summary.Completed7DaysTotal,
 	)
+	if !dateRange.HasExplicit {
+		_ = h.db.QueryRow(ctx, `
+			SELECT
+				COUNT(*) FILTER (WHERE completed_at >= $2 AND completed_at < $3),
+				COUNT(*) FILTER (WHERE completed_at >= $4 AND completed_at < $3)
+			FROM todoist_task_completions
+			WHERE user_id = $1
+		`, userID, todayStart, tomorrowStart, todayStart.AddDate(0, 0, -6)).Scan(
+			&summary.CompletedTodayTotal,
+			&summary.Completed7DaysTotal,
+		)
+	}
 
 	rows, err := h.db.Query(ctx, `
 		SELECT day::date, COUNT(*)
@@ -128,7 +154,7 @@ func (h *ProductivityHandler) GetSummary(w http.ResponseWriter, r *http.Request)
 		) tasks
 		GROUP BY day
 		ORDER BY day ASC
-	`, userID, todayStart, nextWeekStart)
+	`, userID, dateRange.Start, dateRange.EndExclusive)
 	if err == nil {
 		defer rows.Close()
 		summary.UpcomingLoad = make([]ProductivityDayBucket, 0, 7)
@@ -162,6 +188,7 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	nextWeekStart := todayStart.AddDate(0, 0, 8)
 	staleBefore := todayStart.AddDate(0, 0, -14)
 	staleCondition := productivityStaleConditionExpr(2, 5)
+	dateRange := parseQueryDateRange(r, todayStart, todayStart.AddDate(0, 0, 6))
 
 	baseWhere := `
 		WHERE user_id = $1
@@ -182,31 +209,57 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 
 	switch filter {
 	case "overdue":
-		baseWhere += `
-			AND (
-				(due_at IS NOT NULL AND due_at < $2)
-				OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $3::date)
-			)
-		`
+		if dateRange.HasExplicit {
+			baseWhere += `
+				AND COALESCE(due_at::date, due_date) < $6::date
+			`
+		} else {
+			baseWhere += `
+				AND (
+					(due_at IS NOT NULL AND due_at < $2)
+					OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $3::date)
+				)
+			`
+		}
 	case "today":
-		baseWhere += `
-			AND (
-				(due_at IS NOT NULL AND due_at >= $2 AND due_at < $3)
-				OR (due_at IS NULL AND due_date = $2::date)
-			)
-		`
+		if dateRange.HasExplicit {
+			baseWhere += `
+				AND COALESCE(due_at::date, due_date) >= $6::date
+				AND COALESCE(due_at::date, due_date) < $7::date
+			`
+		} else {
+			baseWhere += `
+				AND (
+					(due_at IS NOT NULL AND due_at >= $2 AND due_at < $3)
+					OR (due_at IS NULL AND due_date = $2::date)
+				)
+			`
+		}
 	case "upcoming":
-		baseWhere += `
-			AND (
-				(due_at IS NOT NULL AND due_at >= $3 AND due_at < $4)
-				OR (due_at IS NULL AND due_date >= $3::date AND due_date < $4::date)
-			)
-		`
+		if dateRange.HasExplicit {
+			baseWhere += `
+				AND COALESCE(due_at::date, due_date) >= $6::date
+				AND COALESCE(due_at::date, due_date) < $7::date
+			`
+		} else {
+			baseWhere += `
+				AND (
+					(due_at IS NOT NULL AND due_at >= $3 AND due_at < $4)
+					OR (due_at IS NULL AND due_date >= $3::date AND due_date < $4::date)
+				)
+			`
+		}
 	case "stale":
 		baseWhere += `
 			AND ` + staleCondition + `
 		`
 	case "all":
+		if dateRange.HasExplicit {
+			baseWhere += `
+				AND COALESCE(due_at::date, due_date) >= $6::date
+				AND COALESCE(due_at::date, due_date) < $7::date
+			`
+		}
 	default:
 		http.Error(w, "unknown filter", http.StatusBadRequest)
 		return
@@ -229,7 +282,7 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 		FROM todoist_tasks
 	`+baseWhere+orderBy+`
 		LIMIT 100
-	`, userID, todayStart, tomorrowStart, nextWeekStart, staleBefore)
+	`, userID, todayStart, tomorrowStart, nextWeekStart, staleBefore, dateRange.Start, dateRange.EndExclusive)
 	if err != nil {
 		h.logger.Error().Err(err).Str("filter", filter).Msg("query productivity tasks")
 		http.Error(w, "internal error", http.StatusInternalServerError)

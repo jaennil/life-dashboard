@@ -21,7 +21,7 @@ type NutritionHandler struct {
 
 const (
 	defaultNutritionWindowDays = 14
-	maxNutritionWindowDays     = 90
+	maxNutritionWindowDays     = 366
 )
 
 func NewNutrition(db *pgxpool.Pool, logger zerolog.Logger) *NutritionHandler {
@@ -120,6 +120,7 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().In(aiDisplayLocation)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
 	sevenDaysAgo := today.AddDate(0, 0, -6)
+	dateRange := parseQueryDateRange(r, sevenDaysAgo, today)
 
 	var s NutritionSummary
 	h.db.QueryRow(ctx, `
@@ -131,8 +132,8 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 			COALESCE(AVG(water_ml) FILTER (WHERE water_ml IS NOT NULL AND water_ml > 0), 0),
 			COUNT(*) FILTER (WHERE calories_total IS NOT NULL)
 		FROM nutrition_daily
-		WHERE date >= $1 AND user_id = $2
-	`, sevenDaysAgo, userID).Scan(&s.AvgCalories, &s.AvgProtein, &s.AvgCarbs, &s.AvgFat, &s.AvgWaterML, &s.DaysTracked)
+		WHERE date >= $1 AND date <= $3 AND user_id = $2
+	`, dateRange.Start, userID, dateRange.End).Scan(&s.AvgCalories, &s.AvgProtein, &s.AvgCarbs, &s.AvgFat, &s.AvgWaterML, &s.DaysTracked)
 
 	h.db.QueryRow(ctx, `
 		SELECT COALESCE(calories_total, 0), COALESCE(water_ml, 0)
@@ -150,7 +151,7 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		s.HydrationMode = hydrationModeStrict
 	}
 
-	hydrationRange, err := loadHydrationRange(ctx, h.db, userID, sevenDaysAgo, today, s.HydrationMode)
+	hydrationRange, err := loadHydrationRange(ctx, h.db, userID, dateRange.Start, dateRange.End, s.HydrationMode)
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("load nutrition hydration summary")
 	} else {
@@ -186,6 +187,10 @@ func (h *NutritionHandler) GetGoldenMetrics(w http.ResponseWriter, r *http.Reque
 	now := time.Now().In(aiDisplayLocation)
 	endDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
 	startDate := endDate.AddDate(0, 0, -(windowDays - 1))
+	dateRange := parseQueryDateRange(r, startDate, endDate)
+	startDate = dateRange.Start
+	endDate = dateRange.End
+	windowDays = dateRange.Days
 
 	rows, err := h.db.Query(ctx, `
 		SELECT
@@ -346,6 +351,9 @@ func (h *NutritionHandler) GetDaily(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().In(aiDisplayLocation)
 	endDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
 	startDate := endDate.AddDate(0, 0, -(windowDays - 1))
+	dateRange := parseQueryDateRange(r, startDate, endDate)
+	startDate = dateRange.Start
+	endDate = dateRange.End
 
 	targets, err := loadNutritionTargets(ctx, h.db, userID)
 	if err != nil {

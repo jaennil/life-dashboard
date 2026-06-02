@@ -2,6 +2,11 @@ import { captureAPIFailure } from '@/lib/sentry'
 
 const BASE = '/api/v1'
 
+export interface DateRangeParams {
+  from?: string
+  to?: string
+}
+
 export interface User {
   id: string
   username: string
@@ -162,6 +167,14 @@ async function postNoContent(path: string, body?: unknown, init?: RequestInit): 
 
 async function deleteNoContent(path: string): Promise<void> {
   await request(path, { method: 'DELETE' })
+}
+
+function dateRangeQuery(params: DateRangeParams = {}) {
+  const p = new URLSearchParams()
+  if (params.from) p.set('from', params.from)
+  if (params.to) p.set('to', params.to)
+  const qs = p.toString()
+  return qs ? '?' + qs : ''
 }
 
 export interface MonthStat {
@@ -606,8 +619,8 @@ export interface HealthAPIKeyInfo {
 }
 
 export const api = {
-  getDashboardSummary: () => get<DashboardSummary>('/dashboard/summary'),
-  getRecentTransactions: () => get<Transaction[]>('/dashboard/transactions'),
+  getDashboardSummary: (params: DateRangeParams = {}) => get<DashboardSummary>('/dashboard/summary' + dateRangeQuery(params)),
+  getRecentTransactions: (params: DateRangeParams = {}) => get<Transaction[]>('/dashboard/transactions' + dateRangeQuery(params)),
   getMonthlyStats: () => get<MonthStat[]>('/finance/monthly'),
   getAccounts: () => get<Account[]>('/finance/accounts'),
   getTransactions: (params: { page?: number; type?: string; category?: string; search?: string; from?: string; to?: string; sort?: string } = {}) => {
@@ -621,15 +634,21 @@ export const api = {
     if (params.sort) p.set('sort', params.sort)
     return get<FinanceTransaction[]>('/finance/transactions?' + p.toString())
   },
-  getFitnessSummary: () => get<FitnessSummary>('/fitness/summary'),
-  getFitnessGolden: () => get<FitnessGoldenMetrics>('/fitness/golden'),
-  getFitnessWeekly: () => get<WeekStat[]>('/fitness/weekly'),
-  getActivities: () => get<Activity[]>('/fitness/activities'),
-  getWorkouts: () => get<Workout[]>('/fitness/workouts'),
-  getProductivitySummary: () => get<ProductivitySummary>('/productivity/summary'),
-  getProductivityTasks: (filter: 'all' | 'overdue' | 'today' | 'upcoming' | 'stale' = 'all') =>
-    get<ProductivityTask[]>('/productivity/tasks?filter=' + encodeURIComponent(filter)),
-  getProductivityHabits: () => get<ProductivityHabitsResponse>('/productivity/habits'),
+  getFitnessSummary: (params: DateRangeParams = {}) => get<FitnessSummary>('/fitness/summary' + dateRangeQuery(params)),
+  getFitnessGolden: (params: DateRangeParams = {}) => get<FitnessGoldenMetrics>('/fitness/golden' + dateRangeQuery(params)),
+  getFitnessWeekly: (params: DateRangeParams = {}) => get<WeekStat[]>('/fitness/weekly' + dateRangeQuery(params)),
+  getActivities: (params: DateRangeParams = {}) => get<Activity[]>('/fitness/activities' + dateRangeQuery(params)),
+  getWorkouts: (params: DateRangeParams = {}) => get<Workout[]>('/fitness/workouts' + dateRangeQuery(params)),
+  getProductivitySummary: (params: DateRangeParams = {}) => get<ProductivitySummary>('/productivity/summary' + dateRangeQuery(params)),
+  getProductivityTasks: (filter: 'all' | 'overdue' | 'today' | 'upcoming' | 'stale' = 'all', params: DateRangeParams = {}) => {
+    const p = new URLSearchParams()
+    p.set('filter', filter)
+    if (params.from) p.set('from', params.from)
+    if (params.to) p.set('to', params.to)
+    return get<ProductivityTask[]>('/productivity/tasks?' + p.toString())
+  },
+  getProductivityHabits: (date?: string) =>
+    get<ProductivityHabitsResponse>('/productivity/habits' + (date ? '?date=' + encodeURIComponent(date) : '')),
   createProductivityHabit: (input: ProductivityHabitInput) =>
     postNoContent('/productivity/habits', input),
   updateProductivityHabit: (id: string, input: ProductivityHabitInput) =>
@@ -670,9 +689,21 @@ export const api = {
   deleteFinanceObligationRule: (key: string) =>
     deleteNoContent('/finance/obligation-rules/' + encodeURIComponent(key)),
   getCategoryList: () => get<string[]>('/finance/category-list'),
-  getNutritionSummary: () => get<NutritionSummary>('/nutrition/summary'),
-  getNutritionGolden: (days = 14) => get<NutritionGoldenMetrics>(`/nutrition/golden?days=${days}`),
-  getNutritionDaily: (days = 14) => get<NutritionDay[]>(`/nutrition/daily?days=${days}`),
+  getNutritionSummary: (params: DateRangeParams = {}) => get<NutritionSummary>('/nutrition/summary' + dateRangeQuery(params)),
+  getNutritionGolden: (days = 14, params: DateRangeParams = {}) => {
+    const p = new URLSearchParams()
+    p.set('days', String(days))
+    if (params.from) p.set('from', params.from)
+    if (params.to) p.set('to', params.to)
+    return get<NutritionGoldenMetrics>('/nutrition/golden?' + p.toString())
+  },
+  getNutritionDaily: (days = 14, params: DateRangeParams = {}) => {
+    const p = new URLSearchParams()
+    p.set('days', String(days))
+    if (params.from) p.set('from', params.from)
+    if (params.to) p.set('to', params.to)
+    return get<NutritionDay[]>('/nutrition/daily?' + p.toString())
+  },
   saveNutritionTargets: (input: NutritionTargetsInput) =>
     postJSON<NutritionTargets | null>('/nutrition/targets', input),
   saveNutritionWater: (input: { date?: string; delta_ml?: number; water_ml?: number }) =>
@@ -684,7 +715,7 @@ export const api = {
     postNoContent(`/integrations/${name}/toggle`, { enabled }),
   syncIntegration: (name: string) =>
     postNoContent(`/sync/${name}`),
-  getAIHistory: () => get<AIHistoryMessage[]>('/ai/history'),
+  getAIHistory: (params: DateRangeParams = {}) => get<AIHistoryMessage[]>('/ai/history' + dateRangeQuery(params)),
   getLatestAICheckup: () => get<AILatestCheckup>('/ai/checkup/latest'),
   clearAIHistory: () =>
     deleteNoContent('/ai/history'),

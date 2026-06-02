@@ -67,6 +67,14 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	var summary DashboardSummary
 	summary.Finance.Currency = "RUB"
 	summary.Checkup.HasReport = false
+	now := time.Now().In(aiDisplayLocation)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, aiDisplayLocation)
+	weekStart := todayStart.AddDate(0, 0, -int(todayStart.Weekday()))
+	financeRange := parseQueryDateRange(r, monthStart, todayStart)
+	fitnessRange := parseQueryDateRange(r, weekStart, todayStart)
+	nutritionRange := parseQueryDateRange(r, todayStart.AddDate(0, 0, -6), todayStart)
+	productivityRange := parseQueryDateRange(r, todayStart, todayStart)
 
 	// Total balance (RUB accounts only)
 	_ = h.db.QueryRow(ctx, `
@@ -75,9 +83,7 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		WHERE currency = 'RUB' AND in_balance = TRUE AND COALESCE(archived, FALSE) = FALSE AND user_id = $1
 	`, userID).Scan(&summary.Finance.TotalBalance)
 
-	// Monthly spending / income
-	now := time.Now()
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	// Period spending / income
 	_ = h.db.QueryRow(ctx, `
 		SELECT
 			COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0),
@@ -86,38 +92,36 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN accounts a ON a.id = t.account_id
 		WHERE t.currency = 'RUB'
 			AND t.occurred_at >= $1
+			AND t.occurred_at < $3
 			AND t.is_transfer = false
 			AND t.user_id = $2
 			AND COALESCE(a.in_balance, TRUE) = TRUE
-	`, monthStart, userID).Scan(&summary.Finance.MonthlySpending, &summary.Finance.MonthlyIncome)
+	`, financeRange.Start, userID, financeRange.EndExclusive).Scan(&summary.Finance.MonthlySpending, &summary.Finance.MonthlyIncome)
 
-	// Activities this week
-	weekStart := now.AddDate(0, 0, -int(now.Weekday()))
+	// Activities in selected period
 	_ = h.db.QueryRow(ctx, `
-		SELECT COUNT(*) FROM activities WHERE started_at >= $1 AND user_id = $2
-	`, weekStart, userID).Scan(&summary.Fitness.ActivitiesThisWeek)
+		SELECT COUNT(*) FROM activities WHERE started_at >= $1 AND started_at < $3 AND user_id = $2
+	`, fitnessRange.Start, userID, fitnessRange.EndExclusive).Scan(&summary.Fitness.ActivitiesThisWeek)
 
-	// Total distance this week (km)
+	// Total distance in selected period (km)
 	_ = h.db.QueryRow(ctx, `
 		SELECT COALESCE(SUM(distance_meters) / 1000.0, 0)
-		FROM activities WHERE started_at >= $1 AND user_id = $2
-	`, weekStart, userID).Scan(&summary.Fitness.TotalDistanceKm)
+		FROM activities WHERE started_at >= $1 AND started_at < $3 AND user_id = $2
+	`, fitnessRange.Start, userID, fitnessRange.EndExclusive).Scan(&summary.Fitness.TotalDistanceKm)
 
-	// Workouts this week
+	// Workouts in selected period
 	_ = h.db.QueryRow(ctx, `
-		SELECT COUNT(*) FROM workouts WHERE started_at >= $1 AND user_id = $2
-	`, weekStart, userID).Scan(&summary.Fitness.WorkoutsThisWeek)
+		SELECT COUNT(*) FROM workouts WHERE started_at >= $1 AND started_at < $3 AND user_id = $2
+	`, fitnessRange.Start, userID, fitnessRange.EndExclusive).Scan(&summary.Fitness.WorkoutsThisWeek)
 
-	// Nutrition overview (last 7 tracked days + today)
-	weekNutritionStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -6)
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	// Nutrition overview for selected period, plus today's hydration card.
 	_ = h.db.QueryRow(ctx, `
 		SELECT
 			COALESCE(AVG(calories_total), 0),
 			COUNT(*)
 		FROM nutrition_daily
-		WHERE date >= $1 AND user_id = $2
-	`, weekNutritionStart, userID).Scan(&summary.Nutrition.AvgCalories, &summary.Nutrition.DaysTracked)
+		WHERE date >= $1 AND date <= $3 AND user_id = $2
+	`, nutritionRange.Start, userID, nutritionRange.End).Scan(&summary.Nutrition.AvgCalories, &summary.Nutrition.DaysTracked)
 	_ = h.db.QueryRow(ctx, `
 		SELECT COALESCE(calories_total, 0), COALESCE(water_ml, 0)
 		FROM nutrition_daily
@@ -140,24 +144,36 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	tomorrowStart := todayStart.AddDate(0, 0, 1)
 	_ = h.db.QueryRow(ctx, `
 		SELECT
-			COUNT(*) FILTER (WHERE is_active = TRUE),
 			COUNT(*) FILTER (
 				WHERE is_active = TRUE
 					AND (
-						(due_at IS NOT NULL AND due_at < $2)
-						OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $3::date)
+						$4 = FALSE
+						OR (COALESCE(due_at::date, due_date) >= $5::date AND COALESCE(due_at::date, due_date) < $6::date)
 					)
 			),
 			COUNT(*) FILTER (
 				WHERE is_active = TRUE
 					AND (
-						(due_at IS NOT NULL AND due_at >= $2 AND due_at < $3)
-						OR (due_at IS NULL AND due_date = $2::date)
+						($4 = TRUE AND COALESCE(due_at::date, due_date) < $5::date)
+						OR ($4 = FALSE AND (
+							(due_at IS NOT NULL AND due_at < $2)
+							OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $3::date)
+						))
+					)
+			),
+			COUNT(*) FILTER (
+				WHERE is_active = TRUE
+					AND (
+						($4 = TRUE AND COALESCE(due_at::date, due_date) >= $5::date AND COALESCE(due_at::date, due_date) < $6::date)
+						OR ($4 = FALSE AND (
+							(due_at IS NOT NULL AND due_at >= $2 AND due_at < $3)
+							OR (due_at IS NULL AND due_date = $2::date)
+						))
 					)
 			)
 		FROM todoist_tasks
 		WHERE user_id = $1
-	`, userID, todayStart, tomorrowStart).Scan(
+	`, userID, todayStart, tomorrowStart, productivityRange.HasExplicit, productivityRange.Start, productivityRange.EndExclusive).Scan(
 		&summary.Productivity.ActiveTotal,
 		&summary.Productivity.OverdueTotal,
 		&summary.Productivity.DueTodayTotal,
@@ -168,7 +184,7 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		WHERE user_id = $1
 			AND completed_at >= $2
 			AND completed_at < $3
-	`, userID, todayStart, tomorrowStart).Scan(&summary.Productivity.CompletedTodayTotal)
+	`, userID, productivityRange.Start, productivityRange.EndExclusive).Scan(&summary.Productivity.CompletedTodayTotal)
 
 	// Local routines pulse
 	_ = h.db.QueryRow(ctx, `
@@ -182,7 +198,7 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		WHERE h.user_id = $1
 			AND h.source = 'manual'
 			AND h.archived = FALSE
-	`, userID, todayStart).Scan(
+	`, userID, productivityRange.End).Scan(
 		&summary.Productivity.HabitsTotal,
 		&summary.Productivity.HabitsCompletedToday,
 	)
@@ -222,6 +238,9 @@ type Transaction struct {
 func (h *DashboardHandler) GetRecentTransactions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
+	now := time.Now().In(aiDisplayLocation)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+	dateRange := parseQueryDateRange(r, todayStart.AddDate(0, 0, -29), todayStart)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT t.id, t.occurred_at, t.amount, t.currency, COALESCE(t.comment, ''), t.payee, t.is_transfer
@@ -230,9 +249,11 @@ func (h *DashboardHandler) GetRecentTransactions(w http.ResponseWriter, r *http.
 		WHERE t.is_transfer = false
 			AND t.user_id = $1
 			AND COALESCE(a.in_balance, TRUE) = TRUE
+			AND t.occurred_at >= $2
+			AND t.occurred_at < $3
 		ORDER BY t.occurred_at DESC
 		LIMIT 10
-	`, userID)
+	`, userID, dateRange.Start, dateRange.EndExclusive)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query transactions")
 		http.Error(w, "internal error", http.StatusInternalServerError)

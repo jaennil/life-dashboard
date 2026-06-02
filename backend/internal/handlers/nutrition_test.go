@@ -17,7 +17,8 @@ func TestParseNutritionWindowDays(t *testing.T) {
 		{name: "invalid uses fallback", query: "days=abc", fallback: 14, want: 14},
 		{name: "zero uses fallback", query: "days=0", fallback: 14, want: 14},
 		{name: "negative uses fallback", query: "days=-5", fallback: 14, want: 14},
-		{name: "caps to max", query: "days=365", fallback: 14, want: 90},
+		{name: "year window is valid", query: "days=365", fallback: 14, want: 365},
+		{name: "caps to max", query: "days=999", fallback: 14, want: 366},
 	}
 
 	for _, tt := range tests {

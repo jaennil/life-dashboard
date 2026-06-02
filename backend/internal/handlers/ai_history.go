@@ -25,6 +25,9 @@ type AIHistoryMessage struct {
 func (h *AIHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
+	now := time.Now().In(aiDisplayLocation)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+	dateRange := parseQueryDateRange(r, todayStart.AddDate(0, 0, -29), todayStart)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT id, role, content, created_at
@@ -32,11 +35,13 @@ func (h *AIHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 			SELECT id, role, content, created_at, message_order
 			FROM ai_chat_messages
 			WHERE user_id = $1
+				AND created_at >= $3
+				AND created_at < $4
 			ORDER BY message_order DESC
 			LIMIT $2
 		) history
 		ORDER BY message_order ASC
-	`, userID, aiHistoryLimit)
+	`, userID, aiHistoryLimit, dateRange.Start, dateRange.EndExclusive)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query ai history")
 		http.Error(w, "internal error", http.StatusInternalServerError)

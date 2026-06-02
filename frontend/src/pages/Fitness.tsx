@@ -4,6 +4,7 @@ import { Dumbbell, Flame, Heart, ChevronDown, ChevronUp, Timer, TrendingUp, Scal
 import { EChart } from '@/components/EChart'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
+import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type FitnessSummary, type FitnessGoldenMetrics, type FitnessGoldenCard, type Activity, type Workout, type Integration } from '@/lib/api'
 
@@ -541,6 +542,7 @@ function WorkoutRow({ workout }: { workout: Workout }) {
 }
 
 export function Fitness() {
+  const globalRange = useGlobalDateRange()
   const [summary, setSummary] = useState<FitnessSummary | null>(null)
   const [golden, setGolden] = useState<FitnessGoldenMetrics | null>(null)
   const [activities, setActivities] = useState<Activity[]>([])
@@ -555,10 +557,10 @@ export function Fitness() {
     setLoading(true)
     try {
       const [nextSummary, nextGolden, nextActivities, nextWorkouts] = await Promise.all([
-        api.getFitnessSummary(),
-        api.getFitnessGolden(),
-        api.getActivities(),
-        api.getWorkouts(),
+        api.getFitnessSummary(globalRange.params),
+        api.getFitnessGolden(globalRange.params),
+        api.getActivities(globalRange.params),
+        api.getWorkouts(globalRange.params),
       ])
       setSummary(nextSummary)
       setGolden(nextGolden)
@@ -569,7 +571,7 @@ export function Fitness() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [globalRange.params])
 
   const loadIntegrations = useCallback(async () => {
     try {
@@ -659,6 +661,7 @@ export function Fitness() {
           description="Strava отвечает за активности, Hevy за силовые тренировки. Переключай источник, чтобы смотреть именно тот тип нагрузки, который сейчас анализируешь."
           badges={[
             { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
+            ...(globalRange.label ? [{ label: globalRange.label, tone: 'primary' as const }] : []),
             { label: activeIntegration?.enabled ? `${activeIntegration.display_name} подключён` : 'Источник не подключён', tone: activeIntegration?.enabled ? 'success' : 'warning' },
             { label: sourceTab === 'strava' ? `${stravaTotal} активностей` : `${hevyTotal} тренировок`, tone: 'muted' },
           ]}

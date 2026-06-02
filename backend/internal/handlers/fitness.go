@@ -149,17 +149,19 @@ type FitnessGoldenMetricsResponse struct {
 func (h *FitnessHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
-	now := time.Now()
-	weekStart := now.AddDate(0, 0, -int(now.Weekday()))
+	now := time.Now().In(aiDisplayLocation)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+	weekStart := todayStart.AddDate(0, 0, -int(todayStart.Weekday()))
+	dateRange := parseQueryDateRange(r, weekStart, todayStart)
 
 	var s FitnessSummaryResponse
-	h.db.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).
+	h.db.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE started_at >= $1 AND started_at < $3 AND user_id = $2`, dateRange.Start, userID, dateRange.EndExclusive).
 		Scan(&s.ActivitiesThisWeek, &s.DistanceThisWeek)
-	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE started_at >= $1 AND user_id = $2`, weekStart, userID).
+	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE started_at >= $1 AND started_at < $3 AND user_id = $2`, dateRange.Start, userID, dateRange.EndExclusive).
 		Scan(&s.WorkoutsThisWeek)
-	h.db.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE user_id = $1`, userID).
+	h.db.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(distance_meters)/1000.0,0) FROM activities WHERE user_id = $1 AND started_at >= $2 AND started_at < $3`, userID, dateRange.Start, dateRange.EndExclusive).
 		Scan(&s.ActivitiesTotal, &s.TotalDistanceKm)
-	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE user_id = $1`, userID).
+	h.db.QueryRow(ctx, `SELECT COUNT(*) FROM workouts WHERE user_id = $1 AND started_at >= $2 AND started_at < $3`, userID, dateRange.Start, dateRange.EndExclusive).
 		Scan(&s.WorkoutsTotal)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -170,15 +172,18 @@ func (h *FitnessHandler) GetGoldenMetrics(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 	now := time.Now().In(aiDisplayLocation)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+	activityRange := parseQueryDateRange(r, todayStart.AddDate(0, 0, -56), todayStart)
+	workoutRange := parseQueryDateRange(r, todayStart.AddDate(0, 0, -89), todayStart)
 
-	activities, err := h.loadActivitiesInRange(ctx, userID, now.AddDate(0, 0, -56))
+	activities, err := h.loadActivitiesInRange(ctx, userID, activityRange.Start, activityRange.EndExclusive)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query fitness golden activities")
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	workouts, err := h.loadHevyWorkoutsInRange(ctx, userID, now.AddDate(0, 0, -90))
+	workouts, err := h.loadHevyWorkoutsInRange(ctx, userID, workoutRange.Start, workoutRange.EndExclusive)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query fitness golden workouts")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -197,6 +202,9 @@ func (h *FitnessHandler) GetGoldenMetrics(w http.ResponseWriter, r *http.Request
 func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
+	now := time.Now().In(aiDisplayLocation)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+	dateRange := parseQueryDateRange(r, todayStart.AddDate(0, 0, -69), todayStart)
 
 	rows, err := h.db.Query(ctx, `
 		WITH activity_stats AS (
@@ -205,7 +213,7 @@ func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) 
 				COUNT(*) AS activities_count,
 				COALESCE(SUM(distance_meters) / 1000.0, 0) AS km
 			FROM activities
-			WHERE started_at >= NOW() - INTERVAL '10 weeks' AND user_id = $1
+			WHERE started_at >= $2 AND started_at < $3 AND user_id = $1
 			GROUP BY DATE_TRUNC('week', started_at)
 		),
 		workout_stats AS (
@@ -213,7 +221,7 @@ func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) 
 				DATE_TRUNC('week', started_at) AS week,
 				COUNT(*) AS workouts_count
 			FROM workouts
-			WHERE started_at >= NOW() - INTERVAL '10 weeks' AND user_id = $1
+			WHERE started_at >= $2 AND started_at < $3 AND user_id = $1
 			GROUP BY DATE_TRUNC('week', started_at)
 		),
 		weeks AS (
@@ -230,7 +238,7 @@ func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) 
 		LEFT JOIN activity_stats ON activity_stats.week = weeks.week
 		LEFT JOIN workout_stats ON workout_stats.week = weeks.week
 		ORDER BY weeks.week ASC
-	`, userID)
+	`, userID, dateRange.Start, dateRange.EndExclusive)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query weekly stats")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -251,15 +259,16 @@ func (h *FitnessHandler) GetWeeklyStats(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(stats)
 }
 
-func (h *FitnessHandler) loadActivitiesInRange(ctx context.Context, userID string, since time.Time) ([]Activity, error) {
+func (h *FitnessHandler) loadActivitiesInRange(ctx context.Context, userID string, since, until time.Time) ([]Activity, error) {
 	rows, err := h.db.Query(ctx, `
 		SELECT id, type, COALESCE(name,''), started_at,
 			duration_seconds, distance_meters, calories, avg_heart_rate
 		FROM activities
 		WHERE user_id = $1
 			AND started_at >= $2
+			AND started_at < $3
 		ORDER BY started_at DESC
-	`, userID, since)
+	`, userID, since, until)
 	if err != nil {
 		return nil, err
 	}
@@ -281,15 +290,20 @@ func (h *FitnessHandler) loadActivitiesInRange(ctx context.Context, userID strin
 func (h *FitnessHandler) GetActivities(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
+	now := time.Now().In(aiDisplayLocation)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+	dateRange := parseQueryDateRange(r, todayStart.AddDate(0, 0, -29), todayStart)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT id, type, COALESCE(name,''), started_at,
 			duration_seconds, distance_meters, calories, avg_heart_rate
 		FROM activities
 		WHERE user_id = $1
+			AND started_at >= $2
+			AND started_at < $3
 		ORDER BY started_at DESC
 		LIMIT 30
-	`, userID)
+	`, userID, dateRange.Start, dateRange.EndExclusive)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query activities")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -314,8 +328,11 @@ func (h *FitnessHandler) GetActivities(w http.ResponseWriter, r *http.Request) {
 func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
+	now := time.Now().In(aiDisplayLocation)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+	dateRange := parseQueryDateRange(r, todayStart.AddDate(0, 0, -29), todayStart)
 
-	workouts, err := h.loadHevyWorkoutsInRange(ctx, userID, time.Time{})
+	workouts, err := h.loadHevyWorkoutsInRange(ctx, userID, dateRange.Start, dateRange.EndExclusive)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query workouts")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -329,18 +346,16 @@ func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(workouts)
 }
 
-func (h *FitnessHandler) loadHevyWorkoutsInRange(ctx context.Context, userID string, since time.Time) ([]Workout, error) {
-	args := []any{userID}
+func (h *FitnessHandler) loadHevyWorkoutsInRange(ctx context.Context, userID string, since, until time.Time) ([]Workout, error) {
+	args := []any{userID, since, until}
 	query := `
 		SELECT id, source, COALESCE(title,''), COALESCE(notes,''), started_at, ended_at, raw_payload
 		FROM workouts
 		WHERE user_id = $1
 			AND source = 'hevy'
+			AND started_at >= $2
+			AND started_at < $3
 	`
-	if !since.IsZero() {
-		query += ` AND started_at >= $2`
-		args = append(args, since)
-	}
 	query += ` ORDER BY started_at DESC`
 
 	type workoutRow struct {

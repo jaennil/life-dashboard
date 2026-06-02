@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Wallet, Dumbbell, TrendingUp, TrendingDown, Zap, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
+import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type DashboardSummary, type Transaction, type WeatherData, type Integration } from '@/lib/api'
 
@@ -331,6 +332,7 @@ function OverviewSectionCard({
 }
 
 export function Dashboard() {
+  const globalRange = useGlobalDateRange()
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [txs, setTxs] = useState<Transaction[]>([])
   const [weather, setWeather] = useState<WeatherData | null>(null)
@@ -343,7 +345,10 @@ export function Dashboard() {
   const loadDashboardData = useCallback(async () => {
     setLoading(true)
     try {
-      const [s, t] = await Promise.all([api.getDashboardSummary(), api.getRecentTransactions()])
+      const [s, t] = await Promise.all([
+        api.getDashboardSummary(globalRange.params),
+        api.getRecentTransactions(globalRange.params),
+      ])
       setSummary(s)
       setTxs(t)
     } catch (error) {
@@ -351,7 +356,7 @@ export function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [globalRange.params])
 
   const loadIntegrations = useCallback(async () => {
     try {
@@ -399,6 +404,8 @@ export function Dashboard() {
     (i.name === 'zenmoney' || i.name === 'strava' || i.name === 'hevy') && i.enabled
   )
   const dashboardSyncCaption = syncCaptionForSources(enabledDashboardSources)
+  const periodText = globalRange.isActive ? 'за выбранный период' : 'за эту неделю'
+  const todayText = globalRange.isActive ? 'на конец периода' : 'сегодня'
 
   async function handleSyncDashboard() {
     if (enabledDashboardSources.length === 0) return
@@ -418,27 +425,27 @@ export function Dashboard() {
   const insights: { text: string; type: 'info' | 'warn' | 'good' }[] = []
   if (summary) {
     if (summary.fitness.activities_this_week === 0 && summary.fitness.workouts_this_week === 0) {
-      insights.push({ type: 'warn', text: 'На этой неделе нет активностей. Самое время размяться!' })
+      insights.push({ type: 'warn', text: globalRange.isActive ? 'В выбранном периоде нет активностей.' : 'На этой неделе нет активностей. Самое время размяться!' })
     }
     if (summary.finance.monthly_spending > summary.finance.monthly_income && summary.finance.monthly_income > 0) {
-      insights.push({ type: 'warn', text: `Расходы (${fmt(summary.finance.monthly_spending, 'RUB')}) превышают доходы в этом месяце.` })
+      insights.push({ type: 'warn', text: `Расходы (${fmt(summary.finance.monthly_spending, 'RUB')}) превышают доходы ${globalRange.isActive ? 'за выбранный период' : 'в этом месяце'}.` })
     }
     if (summary.fitness.total_distance_km > 0) {
-      insights.push({ type: 'good', text: `За эту неделю пройдено ${summary.fitness.total_distance_km.toFixed(1)} км.` })
+      insights.push({ type: 'good', text: `${globalRange.isActive ? 'За выбранный период' : 'За эту неделю'} пройдено ${summary.fitness.total_distance_km.toFixed(1)} км.` })
     }
     if (summary.productivity.overdue_total > 0) {
       insights.push({ type: 'warn', text: `Есть overdue задачи: ${summary.productivity.overdue_total}. Лучше разобрать их до новых задач.` })
     }
     if (summary.productivity.habits_total > 0 && summary.productivity.habits_pending_today > 0) {
-      insights.push({ type: 'info', text: `По рутинам на сегодня осталось ${summary.productivity.habits_pending_today} незакрытых пунктов.` })
+      insights.push({ type: 'info', text: `По рутинам ${todayText} осталось ${summary.productivity.habits_pending_today} незакрытых пунктов.` })
     }
     if (summary.nutrition.days_tracked === 0) {
       insights.push({ type: 'warn', text: 'По питанию за последние дни нет данных. Дневник питания сейчас слепой.' })
     } else if (summary.nutrition.target_calories && summary.nutrition.avg_calories > 0) {
       if (summary.nutrition.avg_calories < summary.nutrition.target_calories * 0.8) {
-        insights.push({ type: 'warn', text: `Средние калории за 7 дней (${Math.round(summary.nutrition.avg_calories)}) заметно ниже цели (${Math.round(summary.nutrition.target_calories)}).` })
+        insights.push({ type: 'warn', text: `Средние калории ${globalRange.isActive ? 'за период' : 'за 7 дней'} (${Math.round(summary.nutrition.avg_calories)}) заметно ниже цели (${Math.round(summary.nutrition.target_calories)}).` })
       } else if (summary.nutrition.avg_calories > summary.nutrition.target_calories * 1.15) {
-        insights.push({ type: 'warn', text: `Средние калории за 7 дней (${Math.round(summary.nutrition.avg_calories)}) выше цели (${Math.round(summary.nutrition.target_calories)}).` })
+        insights.push({ type: 'warn', text: `Средние калории ${globalRange.isActive ? 'за период' : 'за 7 дней'} (${Math.round(summary.nutrition.avg_calories)}) выше цели (${Math.round(summary.nutrition.target_calories)}).` })
       }
     }
     if (summary.nutrition.target_water_ml && summary.nutrition.today_hydration_ml < summary.nutrition.target_water_ml * 0.5) {
@@ -477,44 +484,44 @@ export function Dashboard() {
     {
       to: '/fitness',
       title: 'Фитнес',
-      summary: 'Активности и силовые тренировки за текущую неделю.',
+      summary: globalRange.isActive ? 'Активности и силовые тренировки за выбранный период.' : 'Активности и силовые тренировки за текущую неделю.',
       icon: Dumbbell,
       iconClassName: 'bg-violet-500',
       metrics: [
         { label: 'Активности', value: String(summary.fitness.activities_this_week) },
         { label: 'Тренировки', value: String(summary.fitness.workouts_this_week) },
         { label: 'Км', value: `${summary.fitness.total_distance_km.toFixed(1)} км` },
-        { label: 'Статус', value: summary.fitness.activities_this_week + summary.fitness.workouts_this_week > 0 ? 'Есть движение' : 'Пустая неделя' },
+        { label: 'Статус', value: summary.fitness.activities_this_week + summary.fitness.workouts_this_week > 0 ? 'Есть движение' : globalRange.isActive ? 'Пустой период' : 'Пустая неделя' },
       ],
       note: summary.fitness.activities_this_week + summary.fitness.workouts_this_week > 0
         ? 'Можно быстро понять, где есть движение: кардио или силовые.'
-        : 'Неделя пока пустая по нагрузке.',
+        : globalRange.isActive ? 'Период пустой по нагрузке.' : 'Неделя пока пустая по нагрузке.',
     },
     {
       to: '/nutrition',
       title: 'Питание',
-      summary: 'Сегодняшние калории, среднее за неделю и попадание в цель.',
+      summary: globalRange.isActive ? 'Калории, среднее за период и попадание в цель.' : 'Сегодняшние калории, среднее за неделю и попадание в цель.',
       icon: UtensilsCrossed,
       iconClassName: 'bg-emerald-500',
       metrics: [
         { label: 'Сегодня', value: `${Math.round(summary.nutrition.today_kcal)} ккал` },
-        { label: 'Ср. 7д', value: `${Math.round(summary.nutrition.avg_calories)} ккал` },
+        { label: globalRange.isActive ? 'Ср. период' : 'Ср. 7д', value: `${Math.round(summary.nutrition.avg_calories)} ккал` },
         { label: 'Цель', value: summary.nutrition.target_calories ? `${Math.round(summary.nutrition.target_calories)} ккал` : 'не задана' },
         { label: 'Гидратация', value: `${Math.round(summary.nutrition.today_hydration_ml)} мл` },
       ],
       note: summary.nutrition.days_tracked > 0
-        ? `Дней с логами: ${summary.nutrition.days_tracked} из 7${summary.nutrition.target_water_ml ? ` · цель гидратации ${Math.round(summary.nutrition.target_water_ml)} мл` : ''}.`
+        ? `Дней с логами: ${summary.nutrition.days_tracked}${globalRange.isActive ? '' : ' из 7'}${summary.nutrition.target_water_ml ? ` · цель гидратации ${Math.round(summary.nutrition.target_water_ml)} мл` : ''}.`
         : 'Пока нет свежих данных по дневнику питания.',
     },
     {
       to: '/productivity',
       title: 'Продуктивность',
-      summary: 'Overdue, задачи на сегодня и ежедневные рутины в одном месте.',
+      summary: globalRange.isActive ? 'Задачи и ежедневные рутины в выбранном периоде.' : 'Overdue, задачи на сегодня и ежедневные рутины в одном месте.',
       icon: ListTodo,
       iconClassName: 'bg-amber-500',
       metrics: [
         { label: 'Overdue', value: String(summary.productivity.overdue_total) },
-        { label: 'Сегодня', value: String(summary.productivity.due_today_total) },
+        { label: globalRange.isActive ? 'В периоде' : 'Сегодня', value: String(summary.productivity.due_today_total) },
         { label: 'Рутины', value: `${summary.productivity.habits_completed_today}/${summary.productivity.habits_total}` },
         { label: 'Закрыто', value: String(summary.productivity.completed_today_total) },
       ],
@@ -549,6 +556,7 @@ export function Dashboard() {
         description="Быстрый срез по деньгам, активности и текущему состоянию дня. Хорошая стартовая точка перед деталями по отдельным разделам."
         badges={[
           { label: new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }), tone: 'primary' },
+          ...(globalRange.label ? [{ label: globalRange.label, tone: 'primary' as const }] : []),
           { label: enabledDashboardSources.length > 0 ? `${enabledDashboardSources.length} активных источника` : 'Нет активных источников', tone: enabledDashboardSources.length > 0 ? 'muted' : 'warning' },
           ...(weather?.city ? [{ label: weather.city, tone: 'muted' as const }] : []),
         ]}
@@ -578,7 +586,7 @@ export function Dashboard() {
             loading={loading}
           />
           <StatCard
-            title="Расходы за месяц"
+            title={globalRange.isActive ? 'Расходы за период' : 'Расходы за месяц'}
             value={summary ? fmt(summary.finance.monthly_spending, 'RUB') : '—'}
             sub={summary ? `доходы: ${fmt(summary.finance.monthly_income, 'RUB')}` : 'нет данных'}
             icon={TrendingDown}
@@ -589,8 +597,8 @@ export function Dashboard() {
             title="Активности"
             value={summary ? String(summary.fitness.activities_this_week) : '—'}
             sub={summary && summary.fitness.total_distance_km > 0
-              ? `${summary.fitness.total_distance_km.toFixed(1)} км на этой неделе`
-              : 'за эту неделю'}
+              ? `${summary.fitness.total_distance_km.toFixed(1)} км ${periodText}`
+              : periodText}
             icon={Route}
             trend={summary && summary.fitness.activities_this_week > 0 ? 'up' : undefined}
             color="bg-orange-500"
@@ -599,14 +607,14 @@ export function Dashboard() {
           <StatCard
             title="Тренировки"
             value={summary ? String(summary.fitness.workouts_this_week) : '—'}
-            sub="за эту неделю"
+            sub={periodText}
             icon={Dumbbell}
             trend={summary && summary.fitness.workouts_this_week > 0 ? 'up' : undefined}
             color="bg-violet-500"
             loading={loading}
           />
           <StatCard
-            title="Питание сегодня"
+            title={globalRange.isActive ? 'Питание за период' : 'Питание сегодня'}
             value={summary ? `${Math.round(summary.nutrition.today_kcal)} ккал` : '—'}
             sub={summary?.nutrition.target_calories
               ? `цель: ${Math.round(summary.nutrition.target_calories)} ккал · гидратация ${Math.round(summary?.nutrition.today_hydration_ml ?? 0)} мл`
@@ -618,7 +626,7 @@ export function Dashboard() {
           <StatCard
             title="Overdue"
             value={summary ? String(summary.productivity.overdue_total) : '—'}
-            sub={summary ? `сегодня: ${summary.productivity.due_today_total}` : 'нет данных'}
+            sub={summary ? `${globalRange.isActive ? 'в периоде' : 'сегодня'}: ${summary.productivity.due_today_total}` : 'нет данных'}
             icon={ListTodo}
             color="bg-amber-500"
             loading={loading}

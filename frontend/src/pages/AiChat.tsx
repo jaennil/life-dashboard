@@ -3,6 +3,7 @@ import { Send, Bot, User, Loader2, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { PageHeader } from '@/components/PageHeader'
+import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { api, type AIHistoryMessage, type AILatestCheckup } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -448,6 +449,7 @@ async function requestAIStream(url: string, payload: string, handlers: AIStreamH
 }
 
 export function AiChat() {
+  const globalRange = useGlobalDateRange()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -489,7 +491,7 @@ export function AiChat() {
     setHistoryLoading(true)
     setHistoryError('')
 
-    Promise.allSettled([api.getAIHistory(), api.getLatestAICheckup()])
+    Promise.allSettled([api.getAIHistory(globalRange.params), api.getLatestAICheckup()])
       .then(([historyResult, latestCheckupResult]) => {
         if (!active) return
 
@@ -511,7 +513,7 @@ export function AiChat() {
     return () => {
       active = false
     }
-  }, [])
+  }, [globalRange.params])
 
   async function send(text: string) {
     if (!text.trim() || loading || historyLoading) return
@@ -594,6 +596,7 @@ export function AiChat() {
         title="AI Chat"
         description="Спрашивай про финансы, тренировки, питание, задачи и checkup в одном чате."
         badges={[
+          ...(globalRange.label ? [{ label: globalRange.label, tone: 'primary' as const }] : []),
           { label: latestCheckup?.has_report ? `Последний checkup: ${latestCheckup.period_label ?? 'есть отчёт'}` : 'Checkup ещё не запускался', tone: latestCheckup?.has_report ? 'primary' : 'muted' },
           { label: messages.length > 0 ? `${messages.length} сообщений в истории` : 'История пока пустая', tone: messages.length > 0 ? 'muted' : 'warning' },
         ]}
