@@ -789,9 +789,6 @@ export function Finance() {
             { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
             { label: zenmoneyIntegration?.enabled ? 'ZenMoney подключён' : 'ZenMoney не подключён', tone: zenmoneyIntegration?.enabled ? 'success' : 'warning' },
             { label: formatAccountCount(includedAccounts.length), tone: 'muted' },
-            ...(totalDailyIncome > 0 ? [{ label: `Savings rate · ${formatRatioPercent(savingsRate)}`, tone: savingsRate != null && savingsRate >= 0.2 ? 'success' as const : savingsRate != null && savingsRate >= 0 ? 'warning' as const : 'danger' as const }] : []),
-            ...(upcomingObligationsTotal > 0 ? [{ label: `Обязательства 30д · ${fmt(upcomingObligationsTotal)}`, tone: coverageTone === 'safe' ? 'success' as const : coverageTone === 'tight' ? 'warning' as const : 'danger' as const }] : []),
-            ...(topCategory ? [{ label: `Топ: ${topCategory.category} · ${formatPercent(topCategory.amount, totalCategorySpend)}`, tone: 'muted' as const }] : []),
           ]}
           actions={(
             <PageSyncButton
@@ -806,7 +803,7 @@ export function Finance() {
 
         <ExpandablePanel
           title="Период и диапазон"
-          description="Меняй быстрый период или выставляй произвольные даты только когда реально нужно копнуть глубже."
+          description={undefined}
           open={showRangePanel}
           onToggle={() => setShowRangePanel(current => !current)}
           summary={(
@@ -817,14 +814,7 @@ export function Finance() {
               <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
                 {rangeLabel}
               </span>
-              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                {formatAccountCount(includedAccounts.length)} в балансе
-              </span>
-              {topCategory ? (
-                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                  Топ категория: {topCategory.category} · {formatPercent(topCategory.amount, totalCategorySpend)}
-                </span>
-              ) : null}
+              <InfoTooltip text="Меняй быстрый период или выставляй произвольные даты только когда реально нужно копнуть глубже." />
             </>
           )}
         >
@@ -896,21 +886,16 @@ export function Finance() {
       <div className="rounded-2xl border bg-card/70 px-5 py-4 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-wider text-foreground">Golden Metrics</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Верхняя линия теперь считает не только баланс, а реальное состояние периода: сколько ты сохранил, как быстро сжигаешь деньги и на сколько хватит ликвидного остатка.
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold uppercase tracking-wider text-foreground">Golden Metrics</p>
+              <InfoTooltip text="Считает состояние периода: сколько сохранено, как быстро сжигаются деньги и на сколько хватит ликвидного остатка." />
+            </div>
           </div>
           <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
             <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
               Период: {activePeriodLabel}
             </span>
-            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-              Диапазон: {rangeLabel}
-            </span>
-            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-              Дней в окне: {rangeDays}
-            </span>
+            <InfoTooltip text={`Диапазон: ${rangeLabel}. Дней в окне: ${rangeDays}.`} />
           </div>
         </div>
       </div>
@@ -984,12 +969,10 @@ export function Finance() {
 
       {!loading && excludedAccounts.length > 0 ? (
         <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-5 py-4">
-          <p className="text-sm font-medium text-foreground">Часть счетов исключена из общего баланса</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            ZenMoney помечает {formatAccountCount(excludedAccounts.length)} как не участвующие в общем балансе.
-            Их сумма: {fmt(excludedBalance)}. Эти счета показаны ниже отдельной секцией и не участвуют
-            в карточке "Баланс" и агрегатах по финансам.
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-foreground">Часть счетов исключена из общего баланса</p>
+            <InfoTooltip text={`ZenMoney помечает ${formatAccountCount(excludedAccounts.length)} как не участвующие в общем балансе. Их сумма: ${fmt(excludedBalance)}. Эти счета показаны ниже отдельно и не участвуют в агрегатах.`} />
+          </div>
         </div>
       ) : null}
 
@@ -999,21 +982,23 @@ export function Finance() {
             <div className="flex flex-col gap-3">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-wider text-foreground">Обязательные платежи</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Смотрим вперёд на {obligationsWindowDays} дней и автодетектим recurring списания по истории транзакций:
-                  подписки, кредиты, связь, аренду и похожие платежи. Это прогноз по паттернам, а не данные банка о будущих списаниях.
-                </p>
+                <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>Прогноз recurring списаний</span>
+                  <InfoTooltip text={`Смотрим вперёд на ${obligationsWindowDays} дней и автодетектим подписки, кредиты, связь, аренду и похожие платежи по истории транзакций. Это прогноз по паттернам, а не данные банка о будущих списаниях.`} />
+                </div>
               </div>
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                  Окно прогноза: {obligationsWindowDays} дней
+                  {obligationsWindowDays} дней
                 </span>
                 <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                  Найдено: {obligationItems.length}
+                  {obligationItems.length} найдено
                 </span>
-                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                  Ручных правил: {obligationRules.length}
-                </span>
+                {obligationRules.length > 0 ? (
+                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                    {obligationRules.length} правил
+                  </span>
+                ) : null}
                 {nextObligation ? (
                   <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
                     Следующий платёж: {fmtDate(nextObligation.next_due_at)}
@@ -1651,6 +1636,23 @@ function AccountRow({ account, muted = false }: { account: Account; muted?: bool
   )
 }
 
+function InfoTooltip({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex shrink-0">
+      <span
+        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border/80 bg-background/70 text-[11px] font-semibold text-muted-foreground transition-colors group-hover:border-primary/40 group-hover:text-primary"
+        aria-label={text}
+        role="img"
+      >
+        ?
+      </span>
+      <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 hidden w-64 -translate-x-1/2 rounded-lg border bg-card px-3 py-2 text-xs font-normal leading-5 text-muted-foreground shadow-xl group-hover:block">
+        {text}
+      </span>
+    </span>
+  )
+}
+
 function FinanceSummaryCard({
   title,
   value,
@@ -1676,7 +1678,10 @@ function FinanceSummaryCard({
     <div className={cn('rounded-2xl border bg-card/90 p-5 shadow-sm', panelClassName)}>
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
-          <p className="text-sm font-medium text-muted-foreground">{title}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-muted-foreground">{title}</p>
+            {hint ? <InfoTooltip text={hint} /> : null}
+          </div>
           {loading ? (
             <div className="h-8 w-28 animate-pulse rounded bg-muted" />
           ) : (
@@ -1689,9 +1694,6 @@ function FinanceSummaryCard({
       </div>
       <div className="mt-4 space-y-1">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{caption}</p>
-        {hint ? (
-          <p className="text-sm leading-5 text-muted-foreground">{hint}</p>
-        ) : null}
       </div>
     </div>
   )
