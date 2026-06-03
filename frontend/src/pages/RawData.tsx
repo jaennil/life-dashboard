@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Database, RotateCcw, Search } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowDown, ArrowUp, Database, RotateCcw, Search } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { PageHeader } from '@/components/PageHeader'
 import { api, type CollectionParams } from '@/lib/api'
@@ -143,7 +143,6 @@ export function RawData() {
   const [data, setData] = useState<unknown[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [expanded, setExpanded] = useState('')
   const search = params.get('search') ?? ''
   const columns = SOURCE_COLUMNS[source]
   const sort = columns.some(column => column.key === params.get('sort')) ? params.get('sort') as string : columns[0].key
@@ -254,7 +253,6 @@ export function RawData() {
           <table className="min-w-full text-left text-sm">
             <thead className="bg-background/55 text-xs uppercase text-muted-foreground">
               <tr>
-                <th className="w-10 px-4 py-3" />
                 {columns.map(column => (
                   <th key={column.key} aria-sort={sort === column.key ? order === 'asc' ? 'ascending' : 'descending' : 'none'} className="whitespace-nowrap px-4 py-3 font-medium">
                     <button type="button" onClick={() => sortByColumn(column)} className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground">
@@ -268,17 +266,13 @@ export function RawData() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {loading ? <tr><td colSpan={SOURCE_COLUMNS[source].length + 1} className="px-4 py-10 text-center text-muted-foreground">Загрузка...</td></tr>
-                : error ? <tr><td colSpan={SOURCE_COLUMNS[source].length + 1} className="px-4 py-10 text-center text-rose-300">{error}</td></tr>
-                  : rows.length === 0 ? <tr><td colSpan={SOURCE_COLUMNS[source].length + 1} className="px-4 py-10 text-center text-muted-foreground">Нет записей для выбранных фильтров</td></tr>
+              {loading ? <tr><td colSpan={SOURCE_COLUMNS[source].length} className="px-4 py-10 text-center text-muted-foreground">Загрузка...</td></tr>
+                : error ? <tr><td colSpan={SOURCE_COLUMNS[source].length} className="px-4 py-10 text-center text-rose-300">{error}</td></tr>
+                  : rows.length === 0 ? <tr><td colSpan={SOURCE_COLUMNS[source].length} className="px-4 py-10 text-center text-muted-foreground">Нет записей для выбранных фильтров</td></tr>
                     : rows.map((row, index) => (
-                      <Fragment key={`${row.id}-${index}`}>
-                        <tr className="transition-colors hover:bg-accent/30">
-                          <td className="px-4 py-3"><button type="button" onClick={() => setExpanded(expanded === row.id ? '' : row.id)} className="text-muted-foreground hover:text-foreground" title="Показать полную запись">{expanded === row.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button></td>
-                          {SOURCE_COLUMNS[source].map(column => <td key={column.key} className="max-w-[24rem] truncate whitespace-nowrap px-4 py-3 text-foreground">{row.values[column.key]}</td>)}
-                        </tr>
-                        {expanded === row.id ? <tr><td colSpan={SOURCE_COLUMNS[source].length + 1} className="bg-background/45 px-4 py-4"><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs leading-5 text-muted-foreground">{JSON.stringify(row.raw, null, 2)}</pre></td></tr> : null}
-                      </Fragment>
+                      <tr key={`${row.id}-${index}`} className="transition-colors hover:bg-accent/30">
+                        {SOURCE_COLUMNS[source].map(column => <td key={column.key} className="max-w-[24rem] truncate whitespace-nowrap px-4 py-3 text-foreground">{row.values[column.key]}</td>)}
+                      </tr>
                     ))}
             </tbody>
           </table>
