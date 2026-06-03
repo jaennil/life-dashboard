@@ -444,6 +444,11 @@ func workoutMatchesSearch(workout Workout, search string) bool {
 }
 
 func workoutMatchesCategory(workout Workout, category string) bool {
+	switch category {
+	case "push", "pull", "legs", "other":
+		return classifyWorkoutSplit(workout) == category
+	}
+
 	for _, exercise := range workout.Exercises {
 		key := strings.ToLower(exercise.Category)
 		if key == "" {

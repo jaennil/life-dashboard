@@ -225,15 +225,6 @@ export function RawData() {
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
             <input value={search} onChange={event => update({ search: event.target.value })} placeholder="Поиск по полям записи" className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground" />
           </label>
-          <label className="flex items-center gap-2 rounded-xl border bg-background px-3 py-2">
-            <span className="text-xs text-muted-foreground">Сортировка</span>
-            <select value={sort} onChange={event => {
-              const column = columns.find(item => item.key === event.target.value)
-              update({ sort: event.target.value, order: column?.defaultOrder ?? 'asc' })
-            }} className="bg-transparent text-sm text-foreground outline-none">
-              {SOURCE_COLUMNS[source].map(column => <option key={column.key} value={column.key}>{column.label}</option>)}
-            </select>
-          </label>
           <button type="button" onClick={() => update({ order: order === 'asc' ? 'desc' : 'asc' })} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border bg-background text-muted-foreground transition-colors hover:text-foreground" title={order === 'asc' ? 'По возрастанию' : 'По убыванию'}>
             {order === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
           </button>
