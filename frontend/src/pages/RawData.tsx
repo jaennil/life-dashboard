@@ -253,7 +253,7 @@ export function RawData() {
   const [data, setData] = useState<unknown[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [collapsedWorkouts, setCollapsedWorkouts] = useState<string[]>([])
+  const [expandedWorkouts, setExpandedWorkouts] = useState<string[]>([])
   const search = params.get('search') ?? ''
   const columns = SOURCE_COLUMNS[source]
   const sort = columns.some(column => column.key === params.get('sort')) ? params.get('sort') as string : columns[0].key
@@ -350,7 +350,7 @@ export function RawData() {
   }
 
   function toggleWorkout(key: string) {
-    setCollapsedWorkouts(current =>
+    setExpandedWorkouts(current =>
       current.includes(key) ? current.filter(item => item !== key) : [...current, key]
     )
   }
@@ -409,7 +409,7 @@ export function RawData() {
                 : error ? <tr><td colSpan={SOURCE_COLUMNS[source].length} className="px-4 py-10 text-center text-rose-300">{error}</td></tr>
                   : rows.length === 0 ? <tr><td colSpan={SOURCE_COLUMNS[source].length} className="px-4 py-10 text-center text-muted-foreground">Нет записей для выбранных фильтров</td></tr>
                     : source === 'fitness.workouts' ? workoutGroups.map(group => {
-                      const collapsed = collapsedWorkouts.includes(group.key)
+                      const expanded = expandedWorkouts.includes(group.key)
                       return (
                         <Fragment key={group.key}>
                           <tr key={group.key} className="bg-background/45">
@@ -419,7 +419,7 @@ export function RawData() {
                                 onClick={() => toggleWorkout(group.key)}
                                 className="flex w-full items-center gap-3 text-left transition-colors hover:text-foreground"
                               >
-                                {collapsed ? <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                                {expanded ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
                                 <span className="min-w-0 flex-1 truncate font-medium text-foreground">{group.title}</span>
                                 <span className="shrink-0 text-xs text-muted-foreground">{group.date}</span>
                                 <span className="shrink-0 rounded-full border border-border/70 bg-background/70 px-2.5 py-1 text-xs text-muted-foreground">
@@ -428,11 +428,11 @@ export function RawData() {
                               </button>
                             </td>
                           </tr>
-                          {collapsed ? null : group.rows.map((row, index) => (
+                          {expanded ? group.rows.map((row, index) => (
                             <tr key={`${row.id}-${index}`} className="transition-colors hover:bg-accent/30">
                               {SOURCE_COLUMNS[source].map(column => <td key={column.key} className="max-w-[24rem] truncate whitespace-nowrap px-4 py-3 text-foreground">{row.values[column.key]}</td>)}
                             </tr>
-                          ))}
+                          )) : null}
                         </Fragment>
                       )
                     })
