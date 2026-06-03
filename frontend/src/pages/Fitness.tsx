@@ -65,11 +65,15 @@ function fmtWeek(iso: string) {
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+function formatDateOnly(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
 function addDays(iso: string, days: number) {
   const [year, month, day] = iso.split('-').map(Number)
   const date = new Date(year, month - 1, day)
   date.setDate(date.getDate() + days)
-  return date.toISOString().split('T')[0]
+  return formatDateOnly(date)
 }
 
 function fmtMetric(value: number | null) {
@@ -890,8 +894,8 @@ export function Fitness() {
                     height={260}
                     onClick={(params) => {
                       const week = String(params.name ?? '')
-                      const category = String(params.seriesName ?? '').toLowerCase()
-                      if (week) openFitnessRaw('fitness.workouts', { from: week, to: addDays(week, 6), category: category || undefined })
+                      const split = String(params.seriesName ?? '').toLowerCase()
+                      if (week) openFitnessRaw('fitness.workouts', { from: week, to: addDays(week, 6), split: split || undefined })
                     }}
                   />
                   <div className="flex flex-wrap gap-2">

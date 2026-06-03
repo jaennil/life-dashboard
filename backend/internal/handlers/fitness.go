@@ -389,10 +389,14 @@ func (h *FitnessHandler) GetWorkouts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	search := strings.ToLower(strings.TrimSpace(q.Get("search")))
+	split := strings.ToLower(strings.TrimSpace(q.Get("split")))
 	category := strings.ToLower(strings.TrimSpace(q.Get("category")))
 	filtered := workouts[:0]
 	for _, workout := range workouts {
 		if search != "" && !workoutMatchesSearch(workout, search) {
+			continue
+		}
+		if split != "" && classifyWorkoutSplit(workout) != split {
 			continue
 		}
 		if category != "" && !workoutMatchesCategory(workout, category) {

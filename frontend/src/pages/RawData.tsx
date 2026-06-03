@@ -41,7 +41,7 @@ const SOURCE_COLUMNS: Record<RawDataSource, Column[]> = {
   ],
 }
 
-const CONTEXT_KEYS = ['type', 'category', 'payee', 'day', 'meal_type', 'metric'] as const
+const CONTEXT_KEYS = ['type', 'category', 'split', 'payee', 'day', 'meal_type', 'metric'] as const
 
 function displayDate(value?: string | null) {
   if (!value) return '—'
@@ -152,7 +152,7 @@ export function RawData() {
     const query: CollectionParams = {
       from: params.get('from') ?? undefined, to: params.get('to') ?? undefined,
       search: params.get('search') ?? undefined, type: params.get('type') ?? undefined,
-      category: params.get('category') ?? undefined, payee: params.get('payee') ?? undefined,
+      category: params.get('category') ?? undefined, split: params.get('split') ?? undefined, payee: params.get('payee') ?? undefined,
       sort: source === 'finance.transactions' && sort === 'amount' ? 'signed_amount' : sort,
       order,
       page_size: 250,
@@ -217,7 +217,7 @@ export function RawData() {
         <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center">
           <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border bg-background px-3 py-2">
             <Database className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <select value={source} onChange={event => update({ source: event.target.value, sort: undefined, search: undefined, type: undefined, category: undefined, payee: undefined, day: undefined, meal_type: undefined, metric: undefined })} className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none">
+            <select value={source} onChange={event => update({ source: event.target.value, sort: undefined, search: undefined, type: undefined, category: undefined, split: undefined, payee: undefined, day: undefined, meal_type: undefined, metric: undefined })} className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none">
               {RAW_DATA_SOURCES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </label>

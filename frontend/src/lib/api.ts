@@ -15,6 +15,7 @@ export interface CollectionParams extends DateRangeParams {
   order?: 'asc' | 'desc'
   type?: string
   category?: string
+  split?: string
   payee?: string
 }
 
