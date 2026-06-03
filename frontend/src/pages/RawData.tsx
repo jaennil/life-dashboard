@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, Database, RotateCcw, Search } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Database, RotateCcw, Search } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { PageHeader } from '@/components/PageHeader'
 import { api, type CollectionParams } from '@/lib/api'
@@ -14,6 +14,14 @@ type RawRow = {
   sortValues: Record<string, SortValue>
 }
 type Column = { key: string; label: string; defaultOrder?: 'asc' | 'desc' }
+type WorkoutGroup = {
+  key: string
+  title: string
+  date: string | number | undefined
+  exerciseCount: number
+  setCount: number
+  rows: RawRow[]
+}
 
 const SOURCE_COLUMNS: Record<RawDataSource, Column[]> = {
   'finance.transactions': [
@@ -245,6 +253,7 @@ export function RawData() {
   const [data, setData] = useState<unknown[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [collapsedWorkouts, setCollapsedWorkouts] = useState<string[]>([])
   const search = params.get('search') ?? ''
   const columns = SOURCE_COLUMNS[source]
   const sort = columns.some(column => column.key === params.get('sort')) ? params.get('sort') as string : columns[0].key
@@ -296,6 +305,37 @@ export function RawData() {
       })
   }, [data, order, params, search, sort, source])
 
+  const workoutGroups = useMemo<WorkoutGroup[]>(() => {
+    if (source !== 'fitness.workouts') return []
+
+    const groups = new Map<string, WorkoutGroup>()
+    rows.forEach(row => {
+      const key = stringify(row.raw.workout_id ?? row.id)
+      const existing = groups.get(key)
+      if (existing) {
+        existing.rows.push(row)
+        return
+      }
+      groups.set(key, {
+        key,
+        title: stringify(row.raw.workout_title ?? row.values.title),
+        date: row.values.date,
+        exerciseCount: 0,
+        setCount: 0,
+        rows: [row],
+      })
+    })
+
+    return Array.from(groups.values()).map(group => {
+      const exercises = new Set(group.rows.map(row => stringify(row.raw.exercise_name ?? row.values.exercise)).filter(value => value !== '—'))
+      return {
+        ...group,
+        exerciseCount: exercises.size,
+        setCount: group.rows.length,
+      }
+    })
+  }, [rows, source])
+
   function update(next: Record<string, string | undefined>) {
     const copy = new URLSearchParams(params)
     Object.entries(next).forEach(([key, value]) => value ? copy.set(key, value) : copy.delete(key))
@@ -307,6 +347,12 @@ export function RawData() {
       ? order === 'asc' ? 'desc' : 'asc'
       : column.defaultOrder ?? 'asc'
     update({ sort: column.key, order: nextOrder })
+  }
+
+  function toggleWorkout(key: string) {
+    setCollapsedWorkouts(current =>
+      current.includes(key) ? current.filter(item => item !== key) : [...current, key]
+    )
   }
 
   const context = CONTEXT_KEYS.flatMap(key => params.get(key) ? [{ key, value: params.get(key) as string }] : [])
@@ -362,7 +408,35 @@ export function RawData() {
               {loading ? <tr><td colSpan={SOURCE_COLUMNS[source].length} className="px-4 py-10 text-center text-muted-foreground">Загрузка...</td></tr>
                 : error ? <tr><td colSpan={SOURCE_COLUMNS[source].length} className="px-4 py-10 text-center text-rose-300">{error}</td></tr>
                   : rows.length === 0 ? <tr><td colSpan={SOURCE_COLUMNS[source].length} className="px-4 py-10 text-center text-muted-foreground">Нет записей для выбранных фильтров</td></tr>
-                    : rows.map((row, index) => (
+                    : source === 'fitness.workouts' ? workoutGroups.map(group => {
+                      const collapsed = collapsedWorkouts.includes(group.key)
+                      return (
+                        <Fragment key={group.key}>
+                          <tr key={group.key} className="bg-background/45">
+                            <td colSpan={SOURCE_COLUMNS[source].length} className="px-4 py-3">
+                              <button
+                                type="button"
+                                onClick={() => toggleWorkout(group.key)}
+                                className="flex w-full items-center gap-3 text-left transition-colors hover:text-foreground"
+                              >
+                                {collapsed ? <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                                <span className="min-w-0 flex-1 truncate font-medium text-foreground">{group.title}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground">{group.date}</span>
+                                <span className="shrink-0 rounded-full border border-border/70 bg-background/70 px-2.5 py-1 text-xs text-muted-foreground">
+                                  {group.exerciseCount} упр. · {group.setCount} сетов
+                                </span>
+                              </button>
+                            </td>
+                          </tr>
+                          {collapsed ? null : group.rows.map((row, index) => (
+                            <tr key={`${row.id}-${index}`} className="transition-colors hover:bg-accent/30">
+                              {SOURCE_COLUMNS[source].map(column => <td key={column.key} className="max-w-[24rem] truncate whitespace-nowrap px-4 py-3 text-foreground">{row.values[column.key]}</td>)}
+                            </tr>
+                          ))}
+                        </Fragment>
+                      )
+                    })
+                      : rows.map((row, index) => (
                       <tr key={`${row.id}-${index}`} className="transition-colors hover:bg-accent/30">
                         {SOURCE_COLUMNS[source].map(column => <td key={column.key} className="max-w-[24rem] truncate whitespace-nowrap px-4 py-3 text-foreground">{row.values[column.key]}</td>)}
                       </tr>
