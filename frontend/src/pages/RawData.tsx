@@ -25,8 +25,10 @@ const SOURCE_COLUMNS: Record<RawDataSource, Column[]> = {
     { key: 'distance', label: 'Дистанция', defaultOrder: 'desc' }, { key: 'duration', label: 'Длительность', defaultOrder: 'desc' }, { key: 'calories', label: 'Ккал', defaultOrder: 'desc' },
   ],
   'fitness.workouts': [
-    { key: 'date', label: 'Дата', defaultOrder: 'desc' }, { key: 'title', label: 'Тренировка', defaultOrder: 'asc' }, { key: 'source', label: 'Источник', defaultOrder: 'asc' },
-    { key: 'exercises', label: 'Упражнений', defaultOrder: 'desc' }, { key: 'sets', label: 'Сетов', defaultOrder: 'desc' }, { key: 'notes', label: 'Заметки', defaultOrder: 'asc' },
+    { key: 'date', label: 'Дата', defaultOrder: 'desc' }, { key: 'title', label: 'Тренировка', defaultOrder: 'asc' }, { key: 'exercise', label: 'Упражнение', defaultOrder: 'asc' },
+    { key: 'category', label: 'Категория', defaultOrder: 'asc' }, { key: 'set', label: 'Сет', defaultOrder: 'asc' }, { key: 'type', label: 'Тип', defaultOrder: 'asc' },
+    { key: 'weight', label: 'Вес', defaultOrder: 'desc' }, { key: 'reps', label: 'Повт.', defaultOrder: 'desc' }, { key: 'distance', label: 'Дистанция', defaultOrder: 'desc' },
+    { key: 'duration', label: 'Длит.', defaultOrder: 'desc' }, { key: 'rpe', label: 'RPE', defaultOrder: 'desc' },
   ],
   'nutrition.days': [
     { key: 'date', label: 'Дата', defaultOrder: 'desc' }, { key: 'calories', label: 'Ккал', defaultOrder: 'desc' }, { key: 'protein', label: 'Белки', defaultOrder: 'desc' },
@@ -64,6 +66,27 @@ function toSortNumber(value: unknown) {
   return Number.isFinite(number) ? number : undefined
 }
 
+function formatKg(value: unknown) {
+  const number = toSortNumber(value)
+  return number == null ? '—' : `${number.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} кг`
+}
+
+function formatMeters(value: unknown) {
+  const number = toSortNumber(value)
+  if (number == null) return '—'
+  if (number >= 1000) return `${(number / 1000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} км`
+  return `${Math.round(number)} м`
+}
+
+function formatSeconds(value: unknown) {
+  const number = toSortNumber(value)
+  if (number == null) return '—'
+  const minutes = Math.round(number / 60)
+  if (minutes < 60) return `${minutes} мин`
+  const hours = Math.floor(minutes / 60)
+  return `${hours} ч ${minutes % 60} мин`
+}
+
 function matchesContext(source: RawDataSource, raw: RawRecord, params: URLSearchParams) {
   const day = params.get('day')
   if (day && String(raw.date ?? raw.occurred_at ?? raw.started_at ?? '').slice(0, 10) !== day) return false
@@ -79,60 +102,139 @@ function recordSearch(row: RawRow) {
   return JSON.stringify(row.raw).toLocaleLowerCase('ru-RU')
 }
 
+function buildWorkoutSetRows(raw: RawRecord, index: number): RawRow[] {
+  const exercises = Array.isArray(raw.exercises) ? raw.exercises : []
+  const rows: RawRow[] = []
+
+  exercises.forEach((exercise, exerciseFallbackIndex) => {
+    const exerciseRaw = exercise as RawRecord
+    const sets = Array.isArray(exerciseRaw.sets) ? exerciseRaw.sets : []
+    const exerciseIndex = toSortNumber(exerciseRaw.index) ?? exerciseFallbackIndex
+    const exerciseName = stringify(exerciseRaw.name)
+    const category = stringify(exerciseRaw.category)
+
+    const appendRow = (setRaw: RawRecord, setFallbackIndex: number) => {
+      const setIndex = toSortNumber(setRaw.set_index) ?? setFallbackIndex
+      const rowRaw: RawRecord = {
+        ...setRaw,
+        workout_id: raw.id,
+        workout_title: raw.title,
+        started_at: raw.started_at,
+        source: raw.source,
+        exercise_name: exerciseRaw.name,
+        exercise_category: exerciseRaw.category,
+        exercise_index: exerciseIndex,
+      }
+      rows.push({
+        id: `${stringify(raw.id)}:${exerciseIndex}:${setIndex}`,
+        raw: rowRaw,
+        values: {
+          date: displayDate(raw.started_at as string),
+          title: stringify(raw.title),
+          exercise: exerciseName,
+          category,
+          set: setIndex,
+          type: stringify(setRaw.set_type),
+          weight: formatKg(setRaw.weight_kg),
+          reps: stringify(setRaw.reps),
+          distance: formatMeters(setRaw.distance_meters),
+          duration: formatSeconds(setRaw.duration_seconds),
+          rpe: stringify(setRaw.rpe),
+        },
+        sortValues: {
+          date: sortDate(raw.started_at as string),
+          title: stringify(raw.title),
+          exercise: exerciseName,
+          category,
+          set: setIndex,
+          type: stringify(setRaw.set_type),
+          weight: toSortNumber(setRaw.weight_kg),
+          reps: toSortNumber(setRaw.reps),
+          distance: toSortNumber(setRaw.distance_meters),
+          duration: toSortNumber(setRaw.duration_seconds),
+          rpe: toSortNumber(setRaw.rpe),
+        },
+      })
+    }
+
+    if (sets.length === 0) {
+      appendRow({}, 0)
+      return
+    }
+
+    sets.forEach((set, setFallbackIndex) => appendRow(set as RawRecord, setFallbackIndex))
+  })
+
+  if (rows.length > 0) return rows
+
+  return [{
+    id: stringify(raw.id ?? index),
+    raw,
+    values: {
+      date: displayDate(raw.started_at as string),
+      title: stringify(raw.title),
+      exercise: '—',
+      category: '—',
+      set: '—',
+      type: '—',
+      weight: '—',
+      reps: '—',
+      distance: '—',
+      duration: '—',
+      rpe: '—',
+    },
+    sortValues: {
+      date: sortDate(raw.started_at as string),
+      title: stringify(raw.title),
+    },
+  }]
+}
+
 function buildRows(source: RawDataSource, data: unknown[]): RawRow[] {
-  return data.map((item, index) => {
+  return data.flatMap((item, index) => {
     const raw = item as RawRecord
     switch (source) {
       case 'finance.transactions':
-        return { id: stringify(raw.id), raw, values: {
+        return [{ id: stringify(raw.id), raw, values: {
           date: displayDate(raw.occurred_at as string), payee: stringify(raw.payee), category: stringify(raw.category),
           amount: `${Number(raw.amount ?? 0).toLocaleString('ru-RU')} ${stringify(raw.currency)}`, account: stringify(raw.account_title), comment: stringify(raw.comment),
         }, sortValues: {
           date: sortDate(raw.occurred_at as string), payee: stringify(raw.payee), category: stringify(raw.category),
           amount: toSortNumber(raw.amount), account: stringify(raw.account_title), comment: stringify(raw.comment),
-        } }
+        } }]
       case 'fitness.activities':
-        return { id: stringify(raw.id), raw, values: {
+        return [{ id: stringify(raw.id), raw, values: {
           date: displayDate(raw.started_at as string), type: stringify(raw.type), name: stringify(raw.name),
           distance: raw.distance_meters ? `${(Number(raw.distance_meters) / 1000).toFixed(1)} км` : '—',
           duration: raw.duration_seconds ? `${Math.round(Number(raw.duration_seconds) / 60)} мин` : '—', calories: stringify(raw.calories),
         }, sortValues: {
           date: sortDate(raw.started_at as string), type: stringify(raw.type), name: stringify(raw.name),
           distance: toSortNumber(raw.distance_meters), duration: toSortNumber(raw.duration_seconds), calories: toSortNumber(raw.calories),
-        } }
-      case 'fitness.workouts': {
-        const exercises = Array.isArray(raw.exercises) ? raw.exercises : []
-        const sets = exercises.reduce((sum, exercise) => sum + (Array.isArray((exercise as RawRecord).sets) ? ((exercise as RawRecord).sets as unknown[]).length : 0), 0)
-        return { id: stringify(raw.id), raw, values: {
-          date: displayDate(raw.started_at as string), title: stringify(raw.title), source: stringify(raw.source),
-          exercises: exercises.length, sets, notes: stringify(raw.notes),
-        }, sortValues: {
-          date: sortDate(raw.started_at as string), title: stringify(raw.title), source: stringify(raw.source),
-          exercises: exercises.length, sets, notes: stringify(raw.notes),
-        } }
-      }
+        } }]
+      case 'fitness.workouts':
+        return buildWorkoutSetRows(raw, index)
       case 'nutrition.days':
-        return { id: stringify(raw.date ?? index), raw, values: {
+        return [{ id: stringify(raw.date ?? index), raw, values: {
           date: stringify(raw.date), calories: Math.round(Number(raw.calories ?? 0)), protein: `${Math.round(Number(raw.protein ?? 0))} г`,
           fat: `${Math.round(Number(raw.fat ?? 0))} г`, carbs: `${Math.round(Number(raw.carbs ?? 0))} г`, water: `${Math.round(Number(raw.water_ml ?? 0))} мл`,
         }, sortValues: {
           date: sortDate(raw.date as string), calories: toSortNumber(raw.calories), protein: toSortNumber(raw.protein),
           fat: toSortNumber(raw.fat), carbs: toSortNumber(raw.carbs), water: toSortNumber(raw.water_ml),
-        } }
+        } }]
       case 'productivity.tasks':
-        return { id: stringify(raw.id), raw, values: {
+        return [{ id: stringify(raw.id), raw, values: {
           due: stringify(raw.due_at ?? raw.due_date), content: stringify(raw.content), project: stringify(raw.project_name),
           section: stringify(raw.section_name), priority: Number(raw.priority ?? 0), bucket: stringify(raw.due_bucket),
         }, sortValues: {
           due: sortDate((raw.due_at ?? raw.due_date) as string), content: stringify(raw.content), project: stringify(raw.project_name),
           section: stringify(raw.section_name), priority: toSortNumber(raw.priority), bucket: stringify(raw.due_bucket),
-        } }
+        } }]
       case 'ai.messages':
-        return { id: stringify(raw.id), raw, values: {
+        return [{ id: stringify(raw.id), raw, values: {
           date: displayDate(raw.created_at as string), role: stringify(raw.role), content: stringify(raw.content),
         }, sortValues: {
           date: sortDate(raw.created_at as string), role: stringify(raw.role), content: stringify(raw.content),
-        } }
+        } }]
     }
   })
 }
