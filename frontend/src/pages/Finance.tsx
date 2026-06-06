@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BadgeRussianRuble,
@@ -22,9 +23,9 @@ import {
 } from 'lucide-react'
 import type { EChartsCoreOption } from 'echarts/core'
 import { EChart } from '@/components/EChart'
+import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
-import { PageHeader } from '@/components/PageHeader'
 import { StyledSelect } from '@/components/StyledSelect'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
@@ -79,6 +80,8 @@ type TopExpenseTooltipPoint = {
   name?: string
   value?: TooltipScalar
 }
+
+type FinanceSection = 'metrics' | 'obligations' | 'trends' | 'categories' | 'accounts'
 
 function fmt(amount: number, currency = 'RUB') {
   return new Intl.NumberFormat('ru-RU', {
@@ -618,6 +621,16 @@ export function Finance() {
   const [ruleSavingKey, setRuleSavingKey] = useState<string | null>(null)
   const [ruleError, setRuleError] = useState('')
   const [integrations, setIntegrations] = useState<Integration[]>([])
+  const [headerActionsTarget, setHeaderActionsTarget] = useState<HTMLElement | null>(() =>
+    typeof document === 'undefined' ? null : document.getElementById('global-header-actions')
+  )
+  const [openSections, setOpenSections] = useState<Record<FinanceSection, boolean>>({
+    metrics: true,
+    obligations: true,
+    trends: true,
+    categories: true,
+    accounts: true,
+  })
 
   const globalFrom = searchParams.get('from') ?? ''
   const globalTo = searchParams.get('to') ?? ''
@@ -668,6 +681,16 @@ export function Finance() {
     void loadIntegrations()
   }, [loadIntegrations])
 
+  useEffect(() => {
+    if (headerActionsTarget || typeof document === 'undefined') return
+
+    const frame = window.requestAnimationFrame(() => {
+      setHeaderActionsTarget(document.getElementById('global-header-actions'))
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [headerActionsTarget])
+
   const loadTxs = useCallback(async (p: number, replace: boolean) => {
     setTxLoading(true)
     try {
@@ -691,6 +714,10 @@ export function Finance() {
     const next = page + 1
     setPage(next)
     loadTxs(next, false)
+  }
+
+  function toggleSection(section: FinanceSection) {
+    setOpenSections(current => ({ ...current, [section]: !current[section] }))
   }
 
   const currentMonth = monthly[monthly.length - 1]
@@ -784,33 +811,35 @@ export function Finance() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4">
-        <PageHeader
-          eyebrow="Finance"
-          title="Финансы"
-          description="Баланс, cashflow, расходы и обязательства."
-          badges={[
-            { label: zenmoneyIntegration?.enabled ? 'ZenMoney подключён' : 'ZenMoney не подключён', tone: zenmoneyIntegration?.enabled ? 'success' : 'warning' },
-          ]}
-          actions={(
-            <PageSyncButton
-              label="Синхронизировать ZenMoney"
-              syncCaption={financeSyncCaption}
-              syncing={syncing}
-              disabled={!zenmoneyIntegration?.enabled}
-              onClick={handleSyncFinance}
-            />
-          )}
-        />
+      {headerActionsTarget ? createPortal(
+        (
+          <PageSyncButton
+            label="Синхронизировать ZenMoney"
+            syncCaption={financeSyncCaption}
+            syncing={syncing}
+            disabled={!zenmoneyIntegration?.enabled}
+            onClick={handleSyncFinance}
+          />
+        ),
+        headerActionsTarget
+      ) : null}
 
-      </div>
-
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Golden Metrics</h2>
-          <InfoTooltip text={`Состояние периода: ${activePeriodLabel}, ${rangeLabel}, ${rangeDays} дн. Считает cashflow, burn rate и runway.`} />
-        </div>
-      </div>
+      <ExpandablePanel
+        title="Ключевые метрики"
+        description={`Состояние периода: ${activePeriodLabel}, ${rangeLabel}, ${rangeDays} дн. Считает cashflow, burn rate и runway.`}
+        open={openSections.metrics}
+        onToggle={() => toggleSection('metrics')}
+        summary={(
+          <>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              {rangeLabel}
+            </span>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              по {includedAccounts.length} счетам
+            </span>
+          </>
+        )}
+      >
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -888,7 +917,24 @@ export function Finance() {
           </div>
         </div>
       ) : null}
+      </ExpandablePanel>
 
+      <ExpandablePanel
+        title="Обязательные платежи"
+        description={`Смотрим вперёд на ${obligationsWindowDays} дней и автодетектим recurring списания по истории транзакций.`}
+        open={openSections.obligations}
+        onToggle={() => toggleSection('obligations')}
+        summary={(
+          <>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              {obligationItems.length} найдено
+            </span>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              {fmt(upcomingObligationsTotal)}
+            </span>
+          </>
+        )}
+      >
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.92fr_1.38fr]">
         <div className="space-y-4">
           <div className="rounded-2xl border bg-card/70 px-5 py-4 shadow-sm">
@@ -1100,17 +1146,34 @@ export function Finance() {
           )}
         </div>
       </div>
+      </ExpandablePanel>
 
+      <ExpandablePanel
+        title="Динамика"
+        description="Месячный и дневной тренд доходов и расходов. Клик по графику открывает raw data с тем же периодом."
+        open={openSections.trends}
+        onToggle={() => toggleSection('trends')}
+        summary={(
+          <>
+            <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-emerald-300">
+              Доходы: {fmt(totalDailyIncome)}
+            </span>
+            <span className="rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 text-rose-300">
+              Расходы: {fmt(totalDailySpending)}
+            </span>
+          </>
+        )}
+      >
       {/* Charts row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Monthly income vs expenses */}
         <div className="rounded-2xl border bg-card p-5 shadow-sm">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Доходы и расходы</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Тренд по месяцам с фокусом на разрыв между поступлениями и тратами.
-              </p>
+              <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                Доходы и расходы
+                <InfoTooltip text="Тренд по месяцам с фокусом на разрыв между поступлениями и тратами." />
+              </h2>
             </div>
             <div className="flex flex-wrap gap-2">
               <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
@@ -1137,10 +1200,10 @@ export function Finance() {
         <div className="rounded-2xl border bg-card p-5 shadow-sm">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Расходы по дням</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Помогает увидеть всплески трат и редкие доходные дни.
-              </p>
+              <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                Расходы по дням
+                <InfoTooltip text="Помогает увидеть всплески трат и редкие доходные дни." />
+              </h2>
             </div>
             <div className="flex flex-wrap gap-2">
               {peakExpenseDay ? (
@@ -1162,17 +1225,38 @@ export function Finance() {
           )}
         </div>
       </div>
+      </ExpandablePanel>
 
+      <ExpandablePanel
+        title="Категории и топ расходов"
+        description="Категории расходов, категории доходов и крупнейшие payee за выбранный период."
+        open={openSections.categories}
+        onToggle={() => toggleSection('categories')}
+        summary={(
+          <>
+            {topCategory ? (
+              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                {topCategory.category} · {formatPercent(topCategory.amount, totalCategorySpend)}
+              </span>
+            ) : null}
+            {topPayee ? (
+              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+                {truncateLabel(topPayee.payee, 18)} · {fmt(topPayee.amount)}
+              </span>
+            ) : null}
+          </>
+        )}
+      >
       {/* Charts row 2 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Categories pie */}
         <div className="rounded-2xl border bg-card p-5 shadow-sm">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Расходы по категориям</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Легенда справа кликабельна: можно быстро отфильтровать транзакции по категории.
-              </p>
+              <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                Расходы по категориям
+                <InfoTooltip text="Легенда справа кликабельна: можно быстро отфильтровать транзакции по категории." />
+              </h2>
             </div>
             <div className="flex flex-wrap gap-2">
               {topCategory ? (
@@ -1247,10 +1331,10 @@ export function Finance() {
         <div className="rounded-2xl border bg-card p-5 shadow-sm">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Доходы по категориям</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Отдельный срез поступлений за выбранный период без переводов между счетами.
-              </p>
+              <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                Доходы по категориям
+                <InfoTooltip text="Отдельный срез поступлений за выбранный период без переводов между счетами." />
+              </h2>
             </div>
             <div className="flex flex-wrap gap-2">
               {topIncomeCategory ? (
@@ -1328,10 +1412,10 @@ export function Finance() {
         <div className="rounded-2xl border bg-card p-5 shadow-sm">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Топ расходов</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Группировка по payee из транзакций, чтобы быстро увидеть главные утечки.
-              </p>
+              <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                Топ расходов
+                <InfoTooltip text="Группировка по payee из транзакций, чтобы быстро увидеть главные утечки." />
+              </h2>
             </div>
             {topPayee ? (
               <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
@@ -1366,7 +1450,24 @@ export function Finance() {
           )}
         </div>
       </div>
+      </ExpandablePanel>
 
+      <ExpandablePanel
+        title="Счета и операции"
+        description="Счета ZenMoney и живой список транзакций за выбранный период."
+        open={openSections.accounts}
+        onToggle={() => toggleSection('accounts')}
+        summary={(
+          <>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              {formatAccountCount(includedAccounts.length)} в балансе
+            </span>
+            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
+              {txs.length} операций
+            </span>
+          </>
+        )}
+      >
       {/* Accounts + Transactions */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
         {/* Accounts */}
@@ -1374,10 +1475,10 @@ export function Finance() {
           <div className="border-b px-5 py-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Счета</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Быстрый обзор всех кошельков, карт и счетов из ZenMoney.
-                </p>
+                <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                  Счета
+                  <InfoTooltip text="Быстрый обзор всех кошельков, карт и счетов из ZenMoney." />
+                </h2>
               </div>
               {!loading ? (
                 <div className="flex flex-wrap gap-2">
@@ -1448,10 +1549,10 @@ export function Finance() {
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Транзакции</h2>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Живой список операций за выбранный период. Поиск и фильтры применяются сразу.
-                  </p>
+                  <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                    Транзакции
+                    <InfoTooltip text="Живой список операций за выбранный период. Поиск и фильтры применяются сразу." />
+                  </h2>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
@@ -1541,6 +1642,7 @@ export function Finance() {
           )}
         </div>
       </div>
+      </ExpandablePanel>
     </div>
   )
 }
