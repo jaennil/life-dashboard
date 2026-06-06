@@ -4,6 +4,7 @@ import type { EChartsCoreOption } from 'echarts/core'
 import { Activity, Droplets, Flame, GlassWater, RotateCcw, Target, UtensilsCrossed } from 'lucide-react'
 import { EChart } from '@/components/EChart'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
+import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
@@ -59,13 +60,6 @@ function fmtShort(iso: string) {
   const d = new Date(iso)
   return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`
 }
-
-const PERIODS = [
-  { label: '7д', days: 7 },
-  { label: '14д', days: 14 },
-  { label: '30д', days: 30 },
-  { label: '90д', days: 90 },
-]
 
 function fmtWeight(value?: number) {
   return typeof value === 'number' ? `${value.toFixed(1)} кг` : '—'
@@ -502,9 +496,9 @@ function buildMealsTimelineOption(
 }
 
 const GOLDEN_TONE_STYLES: Record<NutritionGoldenCard['tone'], string> = {
-  success: 'border-emerald-500/20 bg-emerald-500/[0.08]',
-  warning: 'border-amber-500/20 bg-amber-500/[0.08]',
-  danger: 'border-rose-500/20 bg-rose-500/[0.08]',
+  success: 'border-emerald-500/25 bg-card/90',
+  warning: 'border-amber-500/25 bg-card/90',
+  danger: 'border-rose-500/25 bg-card/90',
   muted: 'border-border bg-card/90',
 }
 
@@ -525,10 +519,13 @@ function NutritionGoldenMetricCard({
 }) {
   const Icon = GOLDEN_ICONS[card.key] ?? Target
   return (
-    <div className={cn('rounded-2xl border p-4 shadow-sm flex min-h-[148px] flex-col gap-3', GOLDEN_TONE_STYLES[card.tone])}>
+    <div className={cn('rounded-2xl border p-4 shadow-sm flex min-h-[112px] flex-col gap-3', GOLDEN_TONE_STYLES[card.tone])}>
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
-          <span className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">{card.title}</span>
+          <span className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
+            {card.title}
+            {!loading ? <InfoTooltip text={card.detail} className="normal-case tracking-normal" /> : null}
+          </span>
           {loading ? <div className="h-7 w-24 bg-muted rounded animate-pulse" /> : (
             <div className="text-2xl font-semibold tracking-tight text-foreground">{card.value}</div>
           )}
@@ -537,9 +534,7 @@ function NutritionGoldenMetricCard({
           <Icon className="h-4 w-4 text-foreground/80" />
         </div>
       </div>
-      {loading ? <div className="h-4 w-full bg-muted rounded animate-pulse" /> : (
-        <p className="text-sm leading-6 text-muted-foreground">{card.detail}</p>
-      )}
+      {loading ? <div className="h-4 w-full bg-muted rounded animate-pulse" /> : null}
     </div>
   )
 }
@@ -771,7 +766,7 @@ export function Nutrition() {
   const [golden, setGolden] = useState<NutritionGoldenMetrics | null>(null)
   const [daily, setDaily] = useState<NutritionDay[]>([])
   const [loading, setLoading] = useState(true)
-  const [period, setPeriod] = useState(14)
+  const period = 30
   const [mealFilter, setMealFilter] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [integrations, setIntegrations] = useState<Integration[]>([])
@@ -1120,24 +1115,13 @@ export function Nutrition() {
           { label: globalRange.isActive ? 'Период: глобальный фильтр' : `Период: ${period} дней`, tone: 'muted' },
         ]}
         actions={(
-          <>
-            <PageSyncButton
-              label={nutritionSyncLabel}
-              syncCaption={nutritionSyncCaption}
-              syncing={syncing}
-              disabled={enabledNutritionIntegrations.length === 0}
-              onClick={handleSyncNutrition}
-            />
-            <div className="flex gap-1 rounded-2xl border bg-card/90 p-1 shadow-sm">
-              {PERIODS.map(p => (
-                <button key={p.days} onClick={() => setPeriod(p.days)} disabled={globalRange.isActive}
-                  className={cn('px-3 py-1.5 text-xs rounded-xl transition-colors',
-                    period === p.days && !globalRange.isActive ? 'bg-primary text-primary-foreground' : globalRange.isActive ? 'cursor-not-allowed text-muted-foreground/50' : 'text-muted-foreground hover:bg-accent')}>
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </>
+          <PageSyncButton
+            label={nutritionSyncLabel}
+            syncCaption={nutritionSyncCaption}
+            syncing={syncing}
+            disabled={enabledNutritionIntegrations.length === 0}
+            onClick={handleSyncNutrition}
+          />
         )}
       />
 
@@ -1157,10 +1141,10 @@ export function Nutrition() {
       <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Гидратация</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Чистая вода живёт отдельно, а режим гидратации решает, считать ли чай и кофе частью цели.
-            </p>
+            <h2 className="inline-flex items-center gap-2 text-sm font-semibold text-foreground uppercase tracking-wider">
+              Гидратация
+              <InfoTooltip text="Чистая вода живёт отдельно, а режим гидратации решает, считать ли чай и кофе частью цели." />
+            </h2>
           </div>
           <div className={cn('rounded-full border px-3 py-1 text-xs font-medium', HYDRATION_MODE_ACCENT[hydrationMode])}>
             {hydrationModeLabel(hydrationMode)} · {typeof waterTarget === 'number' ? `цель ${Math.round(waterTarget)} мл` : 'цель не задана'}
@@ -1181,7 +1165,7 @@ export function Nutrition() {
               {hydrationModeLabel(mode)}
             </button>
           ))}
-          <span className="self-center text-xs text-muted-foreground">{HYDRATION_MODE_NOTES[hydrationMode]}</span>
+          <InfoTooltip text={HYDRATION_MODE_NOTES[hydrationMode]} className="self-center" />
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)] xl:items-start">
@@ -1190,12 +1174,12 @@ export function Nutrition() {
               <div>
                 <p className="text-[11px] uppercase tracking-wide text-cyan-200/80">Сегодня в цель</p>
                 <p className="mt-2 text-3xl font-bold text-foreground">{Math.round(todayHydration)} <span className="text-base font-medium text-muted-foreground">мл</span></p>
-                <p className="mt-2 text-xs text-muted-foreground">
+                <p className="mt-2 text-xs font-medium text-cyan-100">
                   {typeof waterTarget === 'number'
                     ? waterTargetLeft === 0
-                      ? 'Цель по гидратации на сегодня закрыта.'
-                      : `До цели осталось ${Math.round(waterTargetLeft ?? 0)} мл.`
-                    : 'Можно сохранить цель по воде в ручных целях и видеть прогресс.'}
+                      ? 'Цель закрыта'
+                      : `Осталось ${Math.round(waterTargetLeft ?? 0)} мл`
+                    : 'Цель не задана'}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-cyan-200">💧 Вода {Math.round(todayWater)} мл</span>
@@ -1324,10 +1308,10 @@ export function Nutrition() {
         <div className="mt-5 border-t border-border/70 pt-5">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">Гидратация по дням</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Видно отдельно чистую воду, counted hydration и напитки, которые в цель не идут. Это не смешивается с калориями и БЖУ.
-              </p>
+              <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-foreground uppercase tracking-wider">
+                Гидратация по дням
+                <InfoTooltip text="Показывает отдельно чистую воду, counted hydration и напитки, которые в цель не идут. Это не смешивается с калориями и БЖУ." />
+              </h3>
             </div>
             <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
               <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
@@ -1440,10 +1424,10 @@ export function Nutrition() {
 
         {/* Meal structure */}
         <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-1">Структура приёмов пищи</h2>
-          <p className="mb-4 text-xs text-muted-foreground">
-            Не просто сумма за период, а расклад по дням: видно, когда завтрак/обед/ужин реально присутствуют и какой приём пищи тащит калории.
-          </p>
+          <h2 className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-foreground uppercase tracking-wider">
+            Структура приёмов пищи
+            <InfoTooltip text="Расклад по дням: видно, когда завтрак, обед и ужин реально присутствуют и какой приём пищи тащит калории." />
+          </h2>
           {loading || mealStats.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (
             <div className="flex flex-col gap-5">
               <EChart
@@ -1494,7 +1478,7 @@ export function Nutrition() {
 
       <ExpandablePanel
         title="Цели питания и ручные настройки"
-        description="Редко меняется. Основные цели уже участвуют в UI и AI, поэтому форму можно держать свернутой."
+        description={undefined}
         open={showTargetsPanel}
         onToggle={() => setShowTargetsPanel(current => !current)}
         summary={(
@@ -1553,9 +1537,11 @@ export function Nutrition() {
               <p className="mt-1 text-lg font-bold text-cyan-100">{fmtOptionalNumber(targets?.target_water_ml, ' мл')}</p>
             </div>
             <div className={cn('rounded-xl p-3', hydrationMode === 'flexible' ? 'bg-emerald-500/10' : 'bg-cyan-500/10')}>
-              <p className="text-[10px] text-muted-foreground">Режим гидратации</p>
+              <p className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                Режим гидратации
+                <InfoTooltip text={HYDRATION_MODE_NOTES[hydrationMode]} />
+              </p>
               <p className="mt-1 text-lg font-bold text-foreground">{hydrationModeLabel(hydrationMode)}</p>
-              <p className="mt-1 text-[10px] text-muted-foreground">{HYDRATION_MODE_NOTES[hydrationMode]}</p>
             </div>
           </div>
 
@@ -1576,10 +1562,10 @@ export function Nutrition() {
 
           <div className="rounded-xl border border-dashed bg-muted/20 p-4">
             <div className="mb-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground">Ручные цели</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Заполняй только то, чего не хватает в FatSecret, или то, что хочешь переопределить вручную.
-              </p>
+              <h3 className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-foreground">
+                Ручные цели
+                <InfoTooltip text="Заполняй только то, чего не хватает в FatSecret, или то, что хочешь переопределить вручную." />
+              </h3>
               {targets?.manual?.updated_at ? (
                 <p className="mt-1 text-[11px] text-muted-foreground">Последнее ручное обновление: {fmtSyncTime(targets.manual.updated_at)}</p>
               ) : null}

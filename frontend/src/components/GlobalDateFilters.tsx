@@ -148,7 +148,7 @@ export function GlobalDateFilters() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+        <div className="flex min-w-0 flex-1 flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center xl:justify-end">
           <div className="flex flex-wrap gap-1 rounded-lg border bg-background/70 p-1">
             {QUICK_RANGES.map(item => (
               <button
@@ -230,6 +230,8 @@ export function GlobalDateFilters() {
               aria-label="Конец периода"
             />
           </div>
+
+          <div id="global-header-actions" className="flex min-w-0 shrink-0 justify-start empty:hidden xl:justify-end" />
         </div>
       </div>
     </div>
