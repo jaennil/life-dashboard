@@ -939,6 +939,7 @@ export function Nutrition() {
       await Promise.all([loadData(), loadIntegrations()])
     } catch (error) {
       console.error(error)
+      throw error
     } finally {
       setSyncing(false)
     }
@@ -1105,10 +1106,7 @@ export function Nutrition() {
         title="Питание"
         description="Калории, БЖУ, вода и дневник питания в одном месте. Ежедневный hydration-трекинг живёт рядом с питанием, а редкие настройки убраны ниже."
         badges={[
-          { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
-          ...(globalRange.label ? [{ label: globalRange.label, tone: 'primary' as const }] : []),
           { label: enabledNutritionIntegrations.length > 0 ? `${enabledNutritionIntegrations.length} активных источника питания` : 'Источник питания не подключён', tone: enabledNutritionIntegrations.length > 0 ? 'success' : 'warning' },
-          { label: globalRange.isActive ? 'Период: глобальный фильтр' : `Период: ${period} дней`, tone: 'muted' },
         ]}
         actions={(
           <PageSyncButton

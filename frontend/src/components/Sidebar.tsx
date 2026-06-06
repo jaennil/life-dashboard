@@ -1,4 +1,5 @@
-import { NavLink } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   Wallet,
@@ -12,6 +13,8 @@ import {
   Activity,
   User,
   Database,
+  MoreHorizontal,
+  X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
@@ -27,9 +30,26 @@ const nav = [
   { to: '/raw-data', icon: Database, label: 'Raw Data' },
 ]
 
+const mobilePrimary = nav.filter(item => ['/', '/finance', '/fitness', '/nutrition'].includes(item.to))
+const mobileMore = [
+  ...nav.filter(item => ['/productivity', '/ai', '/raw-data'].includes(item.to)),
+  { to: '/settings', icon: Settings, label: 'Settings' },
+]
+
 export function Sidebar() {
+  const [moreOpen, setMoreOpen] = useState(false)
+  const location = useLocation()
   const { theme, toggle } = useTheme()
   const { user } = useAuth()
+
+  useEffect(() => {
+    if (!moreOpen) return
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setMoreOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [moreOpen])
 
   return (
     <>
@@ -56,18 +76,6 @@ export function Sidebar() {
               ? <Sun className="h-4 w-4" />
               : <Moon className="h-4 w-4" />}
           </button>
-          <NavLink
-            to="/settings"
-            className={({ isActive }) =>
-              cn(
-                'flex h-10 w-10 items-center justify-center rounded-xl border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
-                isActive && 'border-primary/30 bg-primary/10 text-primary'
-              )
-            }
-            aria-label="Открыть настройки"
-          >
-            <Settings className="h-4 w-4" />
-          </NavLink>
         </div>
       </header>
 
@@ -156,12 +164,37 @@ export function Sidebar() {
         </div>
       </aside>
 
+      {moreOpen ? (
+        <div className="fixed inset-0 z-50 bg-black/55 lg:hidden" onClick={() => setMoreOpen(false)}>
+          <div className="absolute inset-x-3 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] rounded-lg border bg-card p-3 shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="mb-2 flex items-center justify-between px-2 py-1">
+              <p className="text-sm font-medium text-foreground">More</p>
+              <button type="button" onClick={() => setMoreOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Закрыть меню">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {mobileMore.map(({ to, icon: Icon, label }) => (
+                <NavLink key={to} to={to} onClick={() => setMoreOpen(false)} className={({ isActive }) => cn('flex items-center gap-3 rounded-lg border px-3 py-3 text-sm', isActive ? 'border-primary/30 bg-primary/10 text-primary' : 'bg-background text-muted-foreground')}>
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </NavLink>
+              ))}
+              <button type="button" onClick={toggle} className="flex items-center gap-3 rounded-lg border bg-background px-3 py-3 text-left text-sm text-muted-foreground">
+                {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <nav
         className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 px-2 pt-2 backdrop-blur lg:hidden"
         style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
       >
         <div className="flex gap-1 overflow-x-auto">
-          {nav.map(({ to, icon: Icon, label }) => (
+          {mobilePrimary.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
@@ -179,6 +212,18 @@ export function Sidebar() {
               <span className="truncate">{label}</span>
             </NavLink>
           ))}
+          <button
+            type="button"
+            onClick={() => setMoreOpen(current => !current)}
+            aria-expanded={moreOpen}
+            className={cn(
+              'flex min-w-[72px] flex-1 flex-col items-center gap-1 rounded-lg px-2 py-2 text-[11px] font-medium transition-colors',
+              mobileMore.some(item => location.pathname === item.to) || moreOpen ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+            )}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+            <span>More</span>
+          </button>
         </div>
       </nav>
     </>

@@ -19,6 +19,7 @@ function isIOS() {
 }
 
 export function InstallPrompt() {
+  const [ready, setReady] = useState(false)
   const [dismissed, setDismissed] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem(DISMISS_KEY) === '1'
@@ -57,7 +58,13 @@ export function InstallPrompt() {
     }
   }, [dismissed, installed, ios])
 
-  const visible = !dismissed && !installed && (ios || deferredPrompt !== null)
+  useEffect(() => {
+    if (dismissed || installed) return
+    const timeout = window.setTimeout(() => setReady(true), 15000)
+    return () => window.clearTimeout(timeout)
+  }, [dismissed, installed])
+
+  const visible = ready && !dismissed && !installed && (ios || deferredPrompt !== null)
 
   if (!visible) return null
 
@@ -79,8 +86,8 @@ export function InstallPrompt() {
   return (
     <div
       className={cn(
-        'fixed z-50 rounded-3xl border bg-card/95 p-4 shadow-2xl backdrop-blur',
-        'left-4 right-4 bottom-24 lg:left-auto lg:right-6 lg:bottom-6 lg:max-w-sm'
+        'fixed z-50 rounded-lg border bg-card/95 p-3 shadow-2xl backdrop-blur',
+        'left-3 right-3 bottom-24 lg:left-auto lg:right-6 lg:bottom-6 lg:max-w-sm'
       )}
     >
       <div className="flex items-start gap-3">
@@ -95,8 +102,8 @@ export function InstallPrompt() {
               <span className="font-medium text-foreground"> «На экран Домой»</span>.
             </p>
           ) : mode === 'prompt' ? (
-            <p className="mt-1 text-sm text-muted-foreground">
-              Установи приложение на главный экран, чтобы запускать его в fullscreen и быстрее открывать нужные вкладки.
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Быстрый запуск с домашнего экрана и полноэкранный режим.
             </p>
           ) : (
             <p className="mt-1 text-sm text-muted-foreground">
@@ -107,7 +114,7 @@ export function InstallPrompt() {
             {mode === 'prompt' ? (
               <button
                 onClick={() => { void handleInstall() }}
-                className="inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
               >
                 <Smartphone className="h-4 w-4" />
                 Установить
@@ -115,7 +122,7 @@ export function InstallPrompt() {
             ) : null}
             <button
               onClick={dismiss}
-              className="inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             >
               Позже
             </button>

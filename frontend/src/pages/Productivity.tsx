@@ -308,6 +308,7 @@ export function Productivity() {
       await Promise.all([loadSummary(), loadIntegrations(), loadTasks(filter), loadHabits()])
     } catch (error) {
       console.error(error)
+      throw error
     } finally {
       setSyncing(false)
     }
@@ -385,7 +386,6 @@ export function Productivity() {
         title="Productivity"
         description="Todoist отвечает за задачи, а встроенные рутины закрывают ежедневный уход и привычки без лишнего шума на экране."
         badges={[
-          ...(globalRange.label ? [{ label: globalRange.label, tone: 'primary' as const }] : []),
           { label: todoistIntegration?.enabled ? 'Todoist подключён' : 'Todoist не подключён', tone: todoistIntegration?.enabled ? 'success' : 'warning' },
           ...(habitsData ? [{ label: `${habitsData.summary.total} локальных привычек`, tone: 'primary' as const }] : []),
           ...(summary ? [{ label: `${summary.active_total} активных задач`, tone: 'muted' as const }] : []),

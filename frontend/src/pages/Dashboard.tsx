@@ -417,6 +417,7 @@ export function Dashboard() {
       await Promise.all([loadDashboardData(), loadIntegrations()])
     } catch (error) {
       console.error(error)
+      throw error
     } finally {
       setSyncing(false)
     }
@@ -555,8 +556,6 @@ export function Dashboard() {
         title="Dashboard"
         description="Быстрый срез по деньгам, активности и текущему состоянию дня. Хорошая стартовая точка перед деталями по отдельным разделам."
         badges={[
-          { label: new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }), tone: 'primary' },
-          ...(globalRange.label ? [{ label: globalRange.label, tone: 'primary' as const }] : []),
           { label: enabledDashboardSources.length > 0 ? `${enabledDashboardSources.length} активных источника` : 'Нет активных источников', tone: enabledDashboardSources.length > 0 ? 'muted' : 'warning' },
           ...(weather?.city ? [{ label: weather.city, tone: 'muted' as const }] : []),
         ]}

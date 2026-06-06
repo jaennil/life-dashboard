@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
+import { CalendarRange, ChevronLeft, ChevronRight, RotateCcw, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const MONTHS = [
@@ -65,6 +65,10 @@ function readMode(value: string | null): RangeMode {
 
 export function GlobalDateFilters() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const [customOpen, setCustomOpen] = useState(false)
+  const [draftFrom, setDraftFrom] = useState('')
+  const [draftTo, setDraftTo] = useState('')
+  const customRef = useRef<HTMLDivElement | null>(null)
   const today = useMemo(() => new Date(), [])
   const year = readNumber(searchParams.get('year'), today.getFullYear(), 2000, 2100)
   const month = readNumber(searchParams.get('month'), today.getMonth() + 1, 1, 12)
@@ -82,6 +86,25 @@ export function GlobalDateFilters() {
     () => Array.from({ length: 8 }, (_, index) => today.getFullYear() + 1 - index),
     [today]
   )
+
+  useEffect(() => {
+    if (!customOpen) return
+
+    function close(event: MouseEvent) {
+      if (!customRef.current?.contains(event.target as Node)) setCustomOpen(false)
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setCustomOpen(false)
+    }
+
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [customOpen])
 
   function updateRange(next: {
     mode: RangeMode
@@ -125,20 +148,27 @@ export function GlobalDateFilters() {
     setSearchParams(params)
   }
 
-  function updateCustom(key: 'from' | 'to', value: string) {
-    const params = new URLSearchParams(searchParams)
-    params.set('range', 'custom')
-    params.set('year', String(year))
-    params.set('month', String(month))
-    if (value) params.set(key, value)
-    else params.delete(key)
-    setSearchParams(params)
+  function openCustom() {
+    setDraftFrom(selectedFrom)
+    setDraftTo(selectedTo)
+    setCustomOpen(true)
+  }
+
+  function applyCustom() {
+    if (!draftFrom || !draftTo || draftFrom > draftTo) return
+    updateRange({ mode: 'custom', year, month, from: draftFrom, to: draftTo })
+    setCustomOpen(false)
+  }
+
+  function rangeLabel() {
+    const format = (value: string) => value.split('-').reverse().join('.')
+    return `${format(selectedFrom)} — ${format(selectedTo)}`
   }
 
   return (
     <div className="sticky top-[calc(4.75rem+env(safe-area-inset-top))] z-30 mx-auto mb-4 w-full max-w-[1560px] lg:top-0 lg:mb-5">
-      <div className="flex justify-center rounded-lg border bg-card/95 p-3 shadow-sm backdrop-blur">
-        <div className="flex min-w-0 flex-col items-center gap-3 xl:flex-row xl:flex-wrap xl:justify-center">
+      <div className="relative flex flex-wrap items-center justify-center gap-2 rounded-lg border bg-card/95 p-2 shadow-sm backdrop-blur">
+        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2">
           <div className="flex flex-wrap gap-1 rounded-lg border bg-background/70 p-1">
             {QUICK_RANGES.map(item => (
               <button
@@ -160,65 +190,89 @@ export function GlobalDateFilters() {
             ))}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-[auto_auto_auto_auto_auto]">
-            <button
-              onClick={() => moveMonth(-1)}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              aria-label="Предыдущий месяц"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <select
-              value={month}
-              onChange={event => applyMonth(year, Number(event.target.value))}
-              className="h-10 rounded-lg border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
-              aria-label="Месяц"
-            >
-              {MONTHS.map(item => (
-                <option key={item.value} value={item.value}>{item.label}</option>
-              ))}
-            </select>
-            <select
-              value={year}
-              onChange={event => mode === 'year' ? applyYear(Number(event.target.value)) : applyMonth(Number(event.target.value), month)}
-              className="h-10 rounded-lg border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
-              aria-label="Год"
-            >
-              {years.map(item => (
-                <option key={item} value={item}>{item}</option>
-              ))}
-            </select>
-            <button
-              onClick={() => moveMonth(1)}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              aria-label="Следующий месяц"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-            <button
-              onClick={reset}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              aria-label="Сбросить глобальный период"
-            >
-              <RotateCcw className="h-4 w-4" />
-            </button>
-          </div>
+          {mode === 'month' ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => moveMonth(-1)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                aria-label="Предыдущий месяц"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <select
+                value={month}
+                onChange={event => applyMonth(year, Number(event.target.value))}
+                className="h-10 rounded-lg border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                aria-label="Месяц"
+              >
+                {MONTHS.map(item => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+              <select
+                value={year}
+                onChange={event => applyMonth(Number(event.target.value), month)}
+                className="h-10 rounded-lg border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                aria-label="Год"
+              >
+                {years.map(item => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => moveMonth(1)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                aria-label="Следующий месяц"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          ) : null}
 
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="date"
-              value={selectedFrom}
-              onChange={event => updateCustom('from', event.target.value)}
-              className="h-10 min-w-0 rounded-lg border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
-              aria-label="Начало периода"
-            />
-            <input
-              type="date"
-              value={selectedTo}
-              onChange={event => updateCustom('to', event.target.value)}
-              className="h-10 min-w-0 rounded-lg border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
-              aria-label="Конец периода"
-            />
+          {mode === 'year' ? (
+            <div className="flex items-center gap-2">
+              <button onClick={() => applyYear(year - 1)} className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Предыдущий год">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <select value={year} onChange={event => applyYear(Number(event.target.value))} className="h-10 rounded-lg border bg-background px-3 text-sm text-foreground outline-none focus:border-primary" aria-label="Год">
+                {years.map(item => <option key={item} value={item}>{item}</option>)}
+              </select>
+              <button onClick={() => applyYear(year + 1)} className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Следующий год">
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          ) : null}
+
+          <div ref={customRef} className="relative">
+            <button
+              type="button"
+              onClick={openCustom}
+              aria-expanded={customOpen}
+              className={cn(
+                'inline-flex h-10 items-center gap-2 rounded-lg border bg-background px-3 text-sm transition-colors hover:bg-accent',
+                mode === 'custom' ? 'border-primary/40 text-primary' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <CalendarRange className="h-4 w-4" />
+              <span className="hidden sm:inline">{rangeLabel()}</span>
+              <span className="sm:hidden">Даты</span>
+            </button>
+            {customOpen ? (
+              <div className="absolute right-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-lg border bg-card p-3 shadow-xl">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-foreground">Произвольный период</p>
+                  <button type="button" onClick={() => setCustomOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Закрыть выбор периода"><X className="h-4 w-4" /></button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-xs text-muted-foreground">От<input type="date" value={draftFrom} onChange={event => setDraftFrom(event.target.value)} className="mt-1 h-10 w-full rounded-lg border bg-background px-2 text-sm text-foreground outline-none focus:border-primary" /></label>
+                  <label className="text-xs text-muted-foreground">До<input type="date" value={draftTo} onChange={event => setDraftTo(event.target.value)} className="mt-1 h-10 w-full rounded-lg border bg-background px-2 text-sm text-foreground outline-none focus:border-primary" /></label>
+                </div>
+                <div className="mt-3 flex justify-end gap-2">
+                  <button type="button" onClick={() => { reset(); setCustomOpen(false) }} className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"><RotateCcw className="h-3.5 w-3.5" />Сбросить</button>
+                  <button type="button" onClick={applyCustom} disabled={!draftFrom || !draftTo || draftFrom > draftTo} className="h-9 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50">Применить</button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div id="global-header-actions" className="flex min-w-0 shrink-0 justify-start empty:hidden xl:justify-end" />

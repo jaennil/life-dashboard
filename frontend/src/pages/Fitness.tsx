@@ -661,6 +661,7 @@ export function Fitness() {
       await Promise.all([loadData(), loadIntegrations()])
     } catch (error) {
       console.error(error)
+      throw error
     } finally {
       setSyncing(false)
     }
@@ -674,8 +675,6 @@ export function Fitness() {
           title="Фитнес"
           description="Strava отвечает за активности, Hevy за силовые тренировки. Переключай источник, чтобы смотреть именно тот тип нагрузки, который сейчас анализируешь."
           badges={[
-            { label: new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }), tone: 'primary' },
-            ...(globalRange.label ? [{ label: globalRange.label, tone: 'primary' as const }] : []),
             { label: activeIntegration?.enabled ? `${activeIntegration.display_name} подключён` : 'Источник не подключён', tone: activeIntegration?.enabled ? 'success' : 'warning' },
             { label: sourceTab === 'strava' ? `${stravaTotal} активностей` : `${hevyTotal} тренировок`, tone: 'muted' },
           ]}

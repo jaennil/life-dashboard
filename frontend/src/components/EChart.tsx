@@ -6,6 +6,7 @@ import {
   TooltipComponent,
   TitleComponent,
   GraphicComponent,
+  AriaComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import {
@@ -26,6 +27,7 @@ registerECharts([
   TooltipComponent,
   TitleComponent,
   GraphicComponent,
+  AriaComponent,
   CanvasRenderer,
 ])
 
@@ -36,9 +38,10 @@ type EChartProps = {
   className?: string
   settings?: SetOptionOpts
   onClick?: (params: ECElementEvent) => void
+  ariaLabel?: string
 }
 
-export function EChart({ option, height, width = '100%', className, settings, onClick }: EChartProps) {
+export function EChart({ option, height, width = '100%', className, settings, onClick, ariaLabel = 'Визуализация данных' }: EChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<ECharts | null>(null)
 
@@ -64,7 +67,7 @@ export function EChart({ option, height, width = '100%', className, settings, on
 
   useEffect(() => {
     if (!chartRef.current) return
-    chartRef.current.setOption(option, settings ?? { notMerge: true })
+    chartRef.current.setOption({ aria: { enabled: true }, ...option }, settings ?? { notMerge: true })
   }, [option, settings])
 
   useEffect(() => {
@@ -83,6 +86,8 @@ export function EChart({ option, height, width = '100%', className, settings, on
       ref={containerRef}
       className={className}
       style={{ width, height }}
+      role="img"
+      aria-label={ariaLabel}
     />
   )
 }

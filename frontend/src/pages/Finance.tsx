@@ -22,7 +22,6 @@ import {
 } from 'lucide-react'
 import type { EChartsCoreOption } from 'echarts/core'
 import { EChart } from '@/components/EChart'
-import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
@@ -50,13 +49,6 @@ const MONTH_LABELS: Record<string, string> = {
   '05': 'Май', '06': 'Июн', '07': 'Июл', '08': 'Авг',
   '09': 'Сен', '10': 'Окт', '11': 'Ноя', '12': 'Дек',
 }
-
-const PERIODS = [
-  { label: 'Неделя', days: 7 },
-  { label: 'Месяц', days: 30 },
-  { label: '3 мес', days: 90 },
-  { label: 'Год', days: 365 },
-]
 
 type TooltipScalar = number | string | null | undefined
 
@@ -611,10 +603,7 @@ export function Finance() {
   const [sort, setSort] = useState<SortType>('')
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('')
-  const [period, setPeriod] = useState(30)
-  const [customFrom, setCustomFrom] = useState('')
-  const [customTo, setCustomTo] = useState('')
-  const [showRangePanel, setShowRangePanel] = useState(false)
+  const period = 30
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
@@ -627,8 +616,8 @@ export function Finance() {
   const globalFrom = searchParams.get('from') ?? ''
   const globalTo = searchParams.get('to') ?? ''
   const hasGlobalRange = Boolean(globalFrom || globalTo)
-  const from = globalFrom || customFrom || dateOffset(period)
-  const to = globalTo || customTo || undefined
+  const from = globalFrom || dateOffset(period)
+  const to = globalTo || undefined
 
   function openFinanceRaw(filters: Record<string, string | undefined> = {}) {
     navigate(rawDataHref('finance.transactions', { from, to, ...filters }))
@@ -708,12 +697,9 @@ export function Finance() {
   const excludedBalance = excludedAccounts
     .filter(a => a.currency === 'RUB')
     .reduce((sum, a) => sum + a.balance, 0)
-  const hasCustomRange = Boolean(customFrom || customTo || hasGlobalRange)
   const effectiveTo = to || new Date().toISOString().split('T')[0]
   const rangeLabel = formatRangeLabel(from, to)
-  const activePeriodLabel = hasCustomRange
-    ? hasGlobalRange ? 'Глобальный диапазон' : 'Произвольный диапазон'
-    : PERIODS.find(item => item.days === period)?.label ?? 'Месяц'
+  const activePeriodLabel = hasGlobalRange ? 'Глобальный диапазон' : '30 дней'
   const totalCategorySpend = categories.reduce((sum, category) => sum + category.amount, 0)
   const topCategory = categories[0]
   const totalCategoryIncome = incomeCategories.reduce((sum, category) => sum + category.amount, 0)
@@ -750,10 +736,6 @@ export function Finance() {
       ? 'tight'
       : 'shortfall'
 
-  useEffect(() => {
-    if (hasCustomRange) setShowRangePanel(true)
-  }, [hasCustomRange])
-
   async function handleSyncFinance() {
     if (!zenmoneyIntegration?.enabled) return
     setSyncing(true)
@@ -762,6 +744,7 @@ export function Finance() {
       await Promise.all([loadPageData(), loadIntegrations()])
     } catch (error) {
       console.error(error)
+      throw error
     } finally {
       setSyncing(false)
     }
@@ -804,7 +787,6 @@ export function Finance() {
             { label: zenmoneyIntegration?.enabled ? 'ZenMoney подключён' : 'ZenMoney не подключён', tone: zenmoneyIntegration?.enabled ? 'success' : 'warning' },
             { label: formatAccountCount(includedAccounts.length), tone: 'muted' },
           ]}
-          className="p-5"
           actions={(
             <PageSyncButton
               label="Синхронизировать ZenMoney"
@@ -816,81 +798,6 @@ export function Finance() {
           )}
         />
 
-        {!hasGlobalRange ? (
-          <ExpandablePanel
-            title="Период и диапазон"
-            description={undefined}
-            open={showRangePanel}
-            onToggle={() => setShowRangePanel(current => !current)}
-            summary={(
-              <>
-                <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 font-medium uppercase tracking-wide text-primary">
-                  {activePeriodLabel}
-                </span>
-                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                  {rangeLabel}
-                </span>
-                <InfoTooltip text="Меняй быстрый период или выставляй произвольные даты только когда реально нужно копнуть глубже." />
-              </>
-            )}
-          >
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <p className="max-w-2xl text-sm text-foreground">
-                {hasCustomRange
-                  ? 'Показываем произвольный диапазон без усреднений по календарным периодам.'
-                  : `Быстрый срез за ${activePeriodLabel.toLowerCase()} с фокусом на реальный cashflow и структуру трат.`}
-              </p>
-
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="flex flex-wrap gap-1 rounded-xl border bg-background/60 p-1">
-                  {PERIODS.map(p => (
-                    <button
-                      key={p.days}
-                      onClick={() => { setPeriod(p.days); setCustomFrom(''); setCustomTo('') }}
-                      className={cn(
-                        'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-                        period === p.days && !customFrom
-                          ? 'bg-primary text-primary-foreground shadow-sm'
-                          : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                      )}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[auto_auto_auto]">
-                  <label className="flex min-w-[128px] flex-col gap-1">
-                    <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">С даты</span>
-                    <input
-                      type="date"
-                      value={customFrom}
-                      onChange={e => setCustomFrom(e.target.value)}
-                      className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary"
-                    />
-                  </label>
-                  <label className="flex min-w-[128px] flex-col gap-1">
-                    <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">По дату</span>
-                    <input
-                      type="date"
-                      value={customTo}
-                      onChange={e => setCustomTo(e.target.value)}
-                      className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary"
-                    />
-                  </label>
-                  {hasCustomRange ? (
-                    <button
-                      onClick={() => { setCustomFrom(''); setCustomTo('') }}
-                      className="self-end rounded-lg border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                    >
-                      Сбросить
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </ExpandablePanel>
-        ) : null}
       </div>
 
       <div className="flex items-center justify-between gap-3">

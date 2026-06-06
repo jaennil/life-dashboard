@@ -3,8 +3,14 @@ import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 
 export function PageHeader({
+  eyebrow,
+  title,
+  description,
+  badges = [],
   actions,
   className,
+  compactOnMobile = false,
+  hideDescriptionOnMobile = false,
 }: {
   eyebrow?: string
   title: string
@@ -29,15 +35,45 @@ export function PageHeader({
     return () => window.cancelAnimationFrame(frame)
   }, [target])
 
-  if (!actions) return null
-
-  if (target) return createPortal(actions, target)
-
-  if (typeof document !== 'undefined') return null
-
   return (
-    <div className={cn('flex flex-wrap items-center justify-end gap-3', className)}>
-      {actions}
-    </div>
+    <>
+      {actions && target ? createPortal(actions, target) : null}
+      <header className={cn('flex min-w-0 flex-col gap-3', compactOnMobile && 'gap-2 sm:gap-3', className)}>
+        {eyebrow ? (
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">{eyebrow}</p>
+        ) : null}
+        <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-end sm:gap-4">
+          <h1 className="shrink-0 text-2xl font-semibold text-foreground">{title}</h1>
+          <p className={cn(
+            'max-w-3xl text-sm leading-5 text-muted-foreground',
+            hideDescriptionOnMobile && 'hidden sm:block',
+          )}>
+            {description}
+          </p>
+        </div>
+        {badges.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {badges.map((badge, index) => (
+              <span
+                key={`${badge.label}-${index}`}
+                className={cn(
+                  'rounded-full border px-2.5 py-1 text-xs',
+                  badge.tone === 'primary' && 'border-primary/25 bg-primary/10 text-primary',
+                  badge.tone === 'success' && 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
+                  badge.tone === 'warning' && 'border-amber-500/25 bg-amber-500/10 text-amber-200',
+                  badge.tone === 'danger' && 'border-rose-500/25 bg-rose-500/10 text-rose-300',
+                  (!badge.tone || badge.tone === 'muted') && 'border-border bg-card text-muted-foreground',
+                )}
+              >
+                {badge.label}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {actions && !target && typeof document === 'undefined' ? (
+          <div className="flex flex-wrap items-center gap-3">{actions}</div>
+        ) : null}
+      </header>
+    </>
   )
 }

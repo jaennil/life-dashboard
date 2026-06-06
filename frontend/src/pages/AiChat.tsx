@@ -596,7 +596,6 @@ export function AiChat() {
         title="AI Chat"
         description="Спрашивай про финансы, тренировки, питание, задачи и checkup в одном чате."
         badges={[
-          ...(globalRange.label ? [{ label: globalRange.label, tone: 'primary' as const }] : []),
           { label: latestCheckup?.has_report ? `Последний checkup: ${latestCheckup.period_label ?? 'есть отчёт'}` : 'Checkup ещё не запускался', tone: latestCheckup?.has_report ? 'primary' : 'muted' },
           { label: messages.length > 0 ? `${messages.length} сообщений в истории` : 'История пока пустая', tone: messages.length > 0 ? 'muted' : 'warning' },
         ]}
