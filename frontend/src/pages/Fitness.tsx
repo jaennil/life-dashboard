@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { EChartsCoreOption } from 'echarts/core'
 import { Dumbbell, Flame, Heart, ChevronDown, ChevronUp, Timer, TrendingUp, Scale, Activity as ActivityIcon, Clock3, Layers3 } from 'lucide-react'
 import { EChart } from '@/components/EChart'
+import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
@@ -448,7 +449,10 @@ function GoldenMetricCard({
     <div className={cn('rounded-2xl border p-4 shadow-sm flex min-h-[148px] flex-col gap-3', GOLDEN_TONE_STYLES[card.tone])}>
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
-          <span className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">{card.title}</span>
+          <span className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
+            {card.title}
+            {!loading ? <InfoTooltip text={card.detail} className="normal-case tracking-normal" /> : null}
+          </span>
           {loading ? <div className="h-7 w-24 bg-muted rounded animate-pulse" /> : (
             <div className="text-2xl font-semibold tracking-tight text-foreground">{card.value}</div>
           )}
@@ -457,9 +461,7 @@ function GoldenMetricCard({
           <Icon className="h-4 w-4 text-foreground/80" />
         </div>
       </div>
-      {loading ? <div className="h-4 w-full bg-muted rounded animate-pulse" /> : (
-        <p className="text-sm leading-6 text-muted-foreground">{card.detail}</p>
-      )}
+      {loading ? <div className="h-4 w-full bg-muted rounded animate-pulse" /> : null}
     </div>
   )
 }
@@ -730,8 +732,10 @@ export function Fitness() {
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <div className="mb-4">
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Consistency и объём</h2>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">Километры, количество сессий и активных дней по неделям. Это быстрее показывает просадку режима, чем голый total.</p>
+                <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                  Consistency и объём
+                  <InfoTooltip text="Километры, количество сессий и активных дней по неделям. Это быстрее показывает просадку режима, чем голый total." />
+                </h2>
               </div>
               {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : stravaGoldenWeekly.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
@@ -843,8 +847,10 @@ export function Fitness() {
           <div className="grid gap-6 lg:grid-cols-[1.2fr,0.8fr] lg:items-start">
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <div className="mb-4">
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Прогресс по упражнениям</h2>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">Смотрим последние рабочие сеты по одним и тем же упражнениям и показываем, где вес или повторы реально выросли.</p>
+                <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                  Прогресс по упражнениям
+                  <InfoTooltip text="Смотрим последние рабочие сеты по одним и тем же упражнениям и показываем, где вес или повторы реально выросли." />
+                </h2>
               </div>
               {loading ? (
                 <div className="space-y-3">
@@ -875,8 +881,10 @@ export function Fitness() {
 
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <div className="mb-4">
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Баланс сплита по неделям</h2>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">Не просто итоговый `push / pull / legs`, а как сплит складывался неделя за неделей. Так видно перекос, а не только финальную сумму.</p>
+                <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                  Баланс сплита по неделям
+                  <InfoTooltip text="Не просто итоговый push / pull / legs, а как сплит складывался неделя за неделей. Так видно перекос, а не только финальную сумму." />
+                </h2>
               </div>
               {loading ? <div className="h-64 bg-muted rounded animate-pulse" /> : hevyGoldenWeekly.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border/80 bg-background/30 px-4 py-8 text-sm text-muted-foreground">
@@ -908,8 +916,10 @@ export function Fitness() {
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <div className="mb-4">
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Нагрузка по неделям</h2>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">Количество тренировок само по себе слабо говорит о нагрузке. Здесь видно, сколько сетов реально набежало за неделю.</p>
+                <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                  Нагрузка по неделям
+                  <InfoTooltip text="Количество тренировок само по себе слабо говорит о нагрузке. Здесь видно, сколько сетов реально набежало за неделю." />
+                </h2>
               </div>
               {loading ? <div className="h-48 bg-muted rounded animate-pulse" /> : hevyGoldenWeekly.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>

@@ -15,6 +15,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
+import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { StyledSelect } from '@/components/StyledSelect'
@@ -50,21 +51,23 @@ const ROUTINES: Array<{ key: HabitRoutine; label: string; icon: ElementType; acc
 function StatCard({ title, value, sub, icon: Icon, color }: {
   title: string
   value: string
-  sub: string
+  sub?: string
   icon: ElementType
   color: string
 }) {
   return (
     <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-muted-foreground">{title}</span>
+        <span className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          {title}
+          {sub ? <InfoTooltip text={sub} /> : null}
+        </span>
         <div className={cn('flex items-center justify-center w-8 h-8 rounded-lg', color)}>
           <Icon className="w-4 h-4 text-white" />
         </div>
       </div>
       <div>
         <div className="text-2xl font-bold text-foreground">{value}</div>
-        <div className="text-xs text-muted-foreground mt-1">{sub}</div>
       </div>
     </div>
   )
@@ -405,10 +408,10 @@ export function Productivity() {
       <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Рутины и уход</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Свои ежедневные чеклисты внутри Life Dashboard. Отмечай факт выполнения, а AI увидит утренние и вечерние привычки как отдельный источник.
-            </p>
+            <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+              Рутины и уход
+              <InfoTooltip text="Свои ежедневные чеклисты внутри Life Dashboard. Отмечай факт выполнения, а AI увидит утренние и вечерние привычки как отдельный источник." />
+            </h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {habitsData ? (

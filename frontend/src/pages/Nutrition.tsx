@@ -1326,9 +1326,6 @@ export function Nutrition() {
                   <GlassWater className="h-5 w-5" />
                 </div>
                 <p className="mt-4 text-sm font-medium text-foreground">Пока нет логов по гидратации</p>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Добавь воду, чай или кофе в quick log выше. Когда появятся первые записи, здесь будет видно, что идёт в цель, а что считается отдельно.
-                </p>
               </div>
             </div>
           ) : (
@@ -1703,9 +1700,9 @@ export function Nutrition() {
           <div className="p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-xs font-medium text-muted-foreground">Таймлайн по дням</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Кликни по бару, чтобы раскрыть состав конкретного дня ниже.
+                <p className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  Таймлайн по дням
+                  <InfoTooltip text="Кликни по бару, чтобы раскрыть состав конкретного дня ниже." />
                 </p>
               </div>
               {selectedDay ? (

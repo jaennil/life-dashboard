@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Wallet, Dumbbell, TrendingUp, TrendingDown, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight } from 'lucide-react'
+import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
@@ -29,7 +30,7 @@ function StatCard({
 }: {
   title: string
   value: string
-  sub: string
+  sub?: string
   icon: React.ElementType
   trend?: 'up' | 'down'
   color: string
@@ -38,7 +39,10 @@ function StatCard({
   return (
     <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-muted-foreground">{title}</span>
+        <span className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          {title}
+          {sub ? <InfoTooltip text={sub} /> : null}
+        </span>
         <div className={cn('flex items-center justify-center w-8 h-8 rounded-lg', color)}>
           <Icon className="w-4 h-4 text-white" />
         </div>
@@ -52,7 +56,6 @@ function StatCard({
         <div className="flex items-center gap-1 mt-1">
           {trend === 'up' && <TrendingUp className="w-3 h-3 text-emerald-500" />}
           {trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
-          <span className="text-xs text-muted-foreground">{sub}</span>
         </div>
       </div>
     </div>
@@ -283,8 +286,10 @@ function OverviewSectionCard({
             <Icon className="h-4 w-4 text-white" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground">{title}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{summary}</p>
+            <p className="inline-flex items-center gap-2 text-sm font-semibold text-foreground">
+              {title}
+              <InfoTooltip text={note ? `${summary} ${note}` : summary} />
+            </p>
           </div>
         </div>
         <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
@@ -310,9 +315,6 @@ function OverviewSectionCard({
         </div>
       )}
 
-      {note ? (
-        <p className="mt-4 text-xs text-muted-foreground">{note}</p>
-      ) : null}
     </Link>
   )
 }
@@ -580,10 +582,10 @@ export function Dashboard() {
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Срез по разделам</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Самое важное по финансам, фитнесу, питанию, задачам и AI без перехода по вкладкам.
-            </p>
+            <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+              Срез по разделам
+              <InfoTooltip text="Самое важное по финансам, фитнесу, питанию, задачам и AI без перехода по вкладкам." />
+            </h2>
           </div>
         </div>
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">

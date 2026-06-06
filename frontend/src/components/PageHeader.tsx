@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { InfoTooltip } from '@/components/InfoTooltip'
 import { cn } from '@/lib/utils'
 
 export function PageHeader({
@@ -43,13 +44,13 @@ export function PageHeader({
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">{eyebrow}</p>
         ) : null}
         <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-end sm:gap-4">
-          <h1 className="shrink-0 text-2xl font-semibold text-foreground">{title}</h1>
-          <p className={cn(
-            'max-w-3xl text-sm leading-5 text-muted-foreground',
-            hideDescriptionOnMobile && 'hidden sm:block',
-          )}>
-            {description}
-          </p>
+          <h1 className="inline-flex shrink-0 items-center gap-2 text-2xl font-semibold text-foreground">
+            {title}
+            <InfoTooltip
+              text={description}
+              className={cn(hideDescriptionOnMobile && 'hidden sm:inline-flex')}
+            />
+          </h1>
         </div>
         {badges.length > 0 ? (
           <div className="flex flex-wrap gap-2">

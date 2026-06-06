@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BadgeRussianRuble,
@@ -180,6 +180,11 @@ function formatAccountCount(count: number) {
   if (mod10 === 1 && mod100 !== 11) return `${count} счёт`
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} счёта`
   return `${count} счетов`
+}
+
+function formatAccountCountDative(count: number) {
+  if (count === 1) return `${count} счёту`
+  return `${count} счетам`
 }
 
 function getAccountVisual(type: string): { icon: LucideIcon; accent: string; bg: string } {
@@ -786,7 +791,6 @@ export function Finance() {
           description="Баланс, cashflow, расходы и обязательства."
           badges={[
             { label: zenmoneyIntegration?.enabled ? 'ZenMoney подключён' : 'ZenMoney не подключён', tone: zenmoneyIntegration?.enabled ? 'success' : 'warning' },
-            { label: formatAccountCount(includedAccounts.length), tone: 'muted' },
           ]}
           actions={(
             <PageSyncButton
@@ -816,8 +820,12 @@ export function Finance() {
           iconClassName="bg-blue-500"
           loading={loading}
           value={fmt(totalBalance)}
-          caption={`${formatAccountCount(includedAccounts.length)} участвуют в общем балансе`}
-          hint={excludedAccounts.length > 0 ? `${fmt(excludedBalance)} ещё лежит вне общего баланса` : 'Счета вне баланса сейчас не влияют на цифру сверху'}
+          caption={(
+            <>
+              по <span className="font-semibold text-foreground">{includedAccounts.length}</span> {formatAccountCountDative(includedAccounts.length).replace(`${includedAccounts.length} `, '')}
+            </>
+          )}
+          hint={excludedAccounts.length > 0 ? `Ликвидный баланс считается по счетам, участвующим в общем балансе. ${fmt(excludedBalance)} ещё лежит вне общего баланса.` : 'Ликвидный баланс считается по счетам, участвующим в общем балансе.'}
         />
 
         <FinanceSummaryCard
@@ -827,8 +835,8 @@ export function Finance() {
           loading={loading}
           value={fmtSigned(periodNet)}
           valueClassName={periodNet >= 0 ? 'text-emerald-300' : 'text-rose-300'}
-          caption={`${activePeriodLabel} · ${rangeLabel}`}
-          hint={`Доходы ${fmt(totalDailyIncome)} • расходы ${fmt(totalDailySpending)}`}
+          caption={rangeLabel}
+          hint={`Net cashflow за период: доходы ${fmt(totalDailyIncome)} минус расходы ${fmt(totalDailySpending)}. Период: ${activePeriodLabel}.`}
         />
 
         <FinanceSummaryCard
@@ -838,8 +846,7 @@ export function Finance() {
           loading={loading}
           value={formatRatioPercent(savingsRate)}
           valueClassName={savingsRate != null && savingsRate >= 0.2 ? 'text-emerald-300' : savingsRate != null && savingsRate >= 0 ? 'text-amber-200' : 'text-rose-300'}
-          caption="доля дохода, которую ты сохранил"
-          hint={totalDailyIncome > 0 ? `Если опускаться ниже 0%, ты уже проедаешь доход` : 'В выбранном диапазоне нет доходов, savings rate не считается'}
+          hint={totalDailyIncome > 0 ? 'Savings rate — доля дохода, которую ты сохранил. Если опускаться ниже 0%, ты уже проедаешь доход.' : 'В выбранном диапазоне нет доходов, savings rate не считается.'}
         />
 
         <FinanceSummaryCard
@@ -848,8 +855,7 @@ export function Finance() {
           iconClassName="bg-orange-500"
           loading={loading}
           value={fmt(avgDailySpending)}
-          caption="средний расход в день"
-          hint={`За ${rangeDays} дн. это даёт темп ${fmt(monthlyBurnProjection)} / 30 дн.`}
+          hint={`Burn rate — средний расход в день. За ${rangeDays} дн. это даёт темп ${fmt(monthlyBurnProjection)} / 30 дн.`}
         />
 
         <FinanceSummaryCard
@@ -859,8 +865,7 @@ export function Finance() {
           loading={loading}
           value={formatRunway(runwayDays)}
           valueClassName={Number.isFinite(runwayDays) && runwayDays >= 90 ? 'text-violet-200' : Number.isFinite(runwayDays) && runwayDays >= 30 ? 'text-amber-200' : 'text-rose-300'}
-          caption="на сколько хватит ликвидного баланса"
-          hint={avgDailySpending > 0 ? 'Расчёт по текущему burn rate, без новых доходов' : 'Расходов в диапазоне нет, runway не ограничен'}
+          hint={avgDailySpending > 0 ? 'Runway — на сколько хватит ликвидного баланса. Расчёт по текущему burn rate, без новых доходов.' : 'Расходов в диапазоне нет, runway не ограничен.'}
         />
 
         <FinanceSummaryCard
@@ -870,8 +875,8 @@ export function Finance() {
           loading={loading}
           value={formatRatioPercent(topThreeShare)}
           valueClassName={topThreeShare != null && topThreeShare > 0.7 ? 'text-rose-300' : topThreeShare != null && topThreeShare > 0.55 ? 'text-amber-200' : 'text-cyan-200'}
-          caption="топ-3 категории в выбранном периоде"
-          hint={topThreeCategories.length > 0 ? `${concentrationLeaders} формируют основную массу трат` : 'Появится, когда в диапазоне будут категории расходов'}
+          caption={topThreeCategories.length > 0 ? concentrationLeaders : undefined}
+          hint={topThreeCategories.length > 0 ? 'Концентрация расходов — доля топ-3 категорий в выбранном периоде.' : 'Появится, когда в диапазоне будут категории расходов.'}
         />
       </div>
 
@@ -889,11 +894,10 @@ export function Finance() {
           <div className="rounded-2xl border bg-card/70 px-5 py-4 shadow-sm">
             <div className="flex flex-col gap-3">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-wider text-foreground">Обязательные платежи</p>
-                <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                  <span>Прогноз recurring списаний</span>
+                <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                  Обязательные платежи
                   <InfoTooltip text={`Смотрим вперёд на ${obligationsWindowDays} дней и автодетектим подписки, кредиты, связь, аренду и похожие платежи по истории транзакций. Это прогноз по паттернам, а не данные банка о будущих списаниях.`} />
-                </div>
+                </p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
@@ -923,10 +927,9 @@ export function Finance() {
               iconClassName={upcomingObligationsTotal > 0 ? 'bg-rose-500' : 'bg-slate-500'}
               loading={loading}
               value={fmt(upcomingObligationsTotal)}
-              caption="прогноз recurring списаний от сегодня"
               hint={nextObligation
-                ? `${nextObligation.name} придёт ${fmtDate(nextObligation.next_due_at)} и даст ${fmt(nextObligation.projected_total)} в окне`
-                : 'Пока не нашли устойчивых recurring списаний в истории транзакций'}
+                ? `Прогноз recurring списаний от сегодня. ${nextObligation.name} придёт ${fmtDate(nextObligation.next_due_at)} и даст ${fmt(nextObligation.projected_total)} в окне.`
+                : 'Прогноз recurring списаний от сегодня. Пока не нашли устойчивых recurring списаний в истории транзакций.'}
             />
 
             <FinanceSummaryCard
@@ -936,19 +939,18 @@ export function Finance() {
               loading={loading}
               value={formatCoverageMultiple(obligationCoverageRatio)}
               valueClassName={coverageTone === 'safe' ? 'text-emerald-300' : coverageTone === 'tight' ? 'text-amber-200' : 'text-rose-300'}
-              caption="ликвидный баланс / обязательства ближайших 30 дней"
               hint={upcomingObligationsTotal > 0
-                ? `Баланс ${fmt(totalBalance)} против обязательств ${fmt(upcomingObligationsTotal)} → ${obligationCoverageGap >= 0 ? `запас ${fmt(obligationCoverageGap)}` : `дефицит ${fmt(Math.abs(obligationCoverageGap))}`}`
-                : 'Обязательства не найдены, поэтому coverage сейчас не ограничен'}
+                ? `Coverage — ликвидный баланс / обязательства ближайших ${obligationsWindowDays} дней. Баланс ${fmt(totalBalance)} против обязательств ${fmt(upcomingObligationsTotal)} → ${obligationCoverageGap >= 0 ? `запас ${fmt(obligationCoverageGap)}` : `дефицит ${fmt(Math.abs(obligationCoverageGap))}`}.`
+                : 'Обязательства не найдены, поэтому coverage сейчас не ограничен.'}
             />
           </div>
 
           <div className="rounded-2xl border bg-card/70 p-5 shadow-sm">
             <div className="flex flex-col gap-3">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-wider text-foreground">Ручные правила</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Если эвристика ошиблась, можно закрепить recurring-платёж или навсегда выкинуть шумный merchant из прогноза.
+                <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                  Ручные правила
+                  <InfoTooltip text="Если эвристика ошиблась, можно закрепить recurring-платёж или навсегда выкинуть шумный merchant из прогноза." />
                 </p>
               </div>
               {ruleError ? (
@@ -1000,10 +1002,10 @@ export function Finance() {
         <div className="rounded-2xl border bg-card p-5 shadow-sm">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Что именно попадёт в ближайшие {obligationsWindowDays} дней</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Список отсортирован по ближайшей дате списания. Если регулярный платёж будет повторяться несколько раз за окно, это видно в projected total.
-              </p>
+              <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+                Что попадёт в ближайшие {obligationsWindowDays} дней
+                <InfoTooltip text="Список отсортирован по ближайшей дате списания. Если регулярный платёж будет повторяться несколько раз за окно, это видно в projected total." />
+              </h2>
             </div>
             {obligationItems.length > 0 ? (
               <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
@@ -1593,7 +1595,7 @@ function FinanceSummaryCard({
 }: {
   title: string
   value: string
-  caption: string
+  caption?: ReactNode
   hint?: string
   valueClassName?: string
   icon: LucideIcon
@@ -1607,7 +1609,7 @@ function FinanceSummaryCard({
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            {hint ? <InfoTooltip text={hint} className="opacity-0 transition-opacity group-hover/card:opacity-100" /> : null}
+            {hint ? <InfoTooltip text={hint} /> : null}
           </div>
           {loading ? (
             <div className="h-8 w-28 animate-pulse rounded bg-muted" />
@@ -1619,9 +1621,11 @@ function FinanceSummaryCard({
           <Icon className="h-5 w-5" />
         </div>
       </div>
-      <div className="mt-4 space-y-1">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{caption}</p>
-      </div>
+      {caption ? (
+        <div className="mt-4 space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">{caption}</p>
+        </div>
+      ) : null}
     </div>
   )
 }

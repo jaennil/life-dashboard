@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { InfoTooltip } from '@/components/InfoTooltip'
 import { cn } from '@/lib/utils'
 
 export function ExpandablePanel({
@@ -28,10 +29,10 @@ export function ExpandablePanel({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 space-y-2">
           <div className="space-y-1">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">{title}</h2>
-            {description ? (
-              <p className="text-sm text-muted-foreground">{description}</p>
-            ) : null}
+            <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+              {title}
+              {description ? <InfoTooltip text={description} className="normal-case tracking-normal" /> : null}
+            </h2>
           </div>
           {summary ? (
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
