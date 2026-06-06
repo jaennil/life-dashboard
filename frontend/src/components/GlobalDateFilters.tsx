@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { CalendarDays, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const MONTHS = [
@@ -136,19 +136,9 @@ export function GlobalDateFilters() {
   }
 
   return (
-    <div className="sticky top-[calc(4.75rem+env(safe-area-inset-top))] z-30 mx-auto mb-4 w-full max-w-[1560px] lg:top-4 lg:mb-5">
-      <div className="flex flex-col gap-3 rounded-lg border bg-card/95 p-3 shadow-sm backdrop-blur xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <CalendarDays className="h-4 w-4" />
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-foreground">Период данных</p>
-            <p className="truncate text-xs text-muted-foreground">{selectedFrom || 'начало'} — {selectedTo || 'сегодня'}</p>
-          </div>
-        </div>
-
-        <div className="flex min-w-0 flex-1 flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center xl:justify-end">
+    <div className="sticky top-[calc(4.75rem+env(safe-area-inset-top))] z-30 mx-auto mb-4 w-full max-w-[1560px] lg:top-0 lg:mb-5">
+      <div className="flex justify-center rounded-lg border bg-card/95 p-3 shadow-sm backdrop-blur">
+        <div className="flex min-w-0 flex-col items-center gap-3 xl:flex-row xl:flex-wrap xl:justify-center">
           <div className="flex flex-wrap gap-1 rounded-lg border bg-background/70 p-1">
             {QUICK_RANGES.map(item => (
               <button
