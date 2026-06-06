@@ -8,6 +8,7 @@ import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
+import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type HydrationBeverageType, type HydrationMode, type Integration, type NutritionDay, type NutritionGoldenCard, type NutritionGoldenMetrics, type NutritionSummary, type NutritionTargetsInput } from '@/lib/api'
 import { rawDataHref } from '@/lib/raw-data'
@@ -47,11 +48,6 @@ const HYDRATION_BEVERAGES: Array<{ type: HydrationBeverageType; label: string; s
   { type: 'milkshake', label: 'Коктейль', short: 'Коктейль', emoji: '🥤', amount: 330, color: '#fb7185' },
   { type: 'other', label: 'Прочее', short: 'Прочее', emoji: '🧃', amount: 250, color: '#94a3b8' },
 ]
-const CHART_TEXT = '#e5eefc'
-const CHART_MUTED = 'rgba(148, 163, 184, 0.85)'
-const CHART_GRID = 'rgba(148, 163, 184, 0.12)'
-const CHART_TOOLTIP = 'rgba(15, 23, 42, 0.96)'
-
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }

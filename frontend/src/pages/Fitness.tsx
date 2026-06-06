@@ -6,6 +6,7 @@ import { EChart } from '@/components/EChart'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
+import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type FitnessSummary, type FitnessGoldenMetrics, type FitnessGoldenCard, type Activity, type Workout, type Integration } from '@/lib/api'
 import { rawDataHref } from '@/lib/raw-data'
@@ -22,11 +23,6 @@ const TYPE_COLORS: Record<string, string> = {
 
 const FALLBACK_COLORS = ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#3b82f6', '#10b981', '#eab308', '#f43f5e']
 const DECIMAL_FORMATTER = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
-const CHART_TEXT = '#e5eefc'
-const CHART_MUTED = 'rgba(148, 163, 184, 0.85)'
-const CHART_GRID = 'rgba(148, 163, 184, 0.12)'
-const CHART_TOOLTIP = 'rgba(15, 23, 42, 0.96)'
-
 type FitnessSource = 'strava' | 'hevy'
 
 function activityIcon(type: string) { return ACTIVITY_ICONS[type] ?? '⚡' }

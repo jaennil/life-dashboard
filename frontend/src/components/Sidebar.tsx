@@ -34,7 +34,7 @@ export function Sidebar() {
   return (
     <>
       <header
-        className="fixed inset-x-0 top-0 z-40 flex items-center justify-between border-b bg-card/95 px-4 backdrop-blur lg:hidden"
+        className="fixed inset-x-0 top-0 z-40 flex items-center justify-between border-b bg-background/95 px-4 backdrop-blur lg:hidden"
         style={{ paddingTop: 'env(safe-area-inset-top)', height: 'calc(4rem + env(safe-area-inset-top))' }}
       >
         <div className="flex min-w-0 items-center gap-3">
@@ -71,10 +71,10 @@ export function Sidebar() {
         </div>
       </header>
 
-      <aside className="fixed left-0 top-0 hidden h-screen w-56 shrink-0 flex-col border-r bg-card/95 backdrop-blur lg:flex">
+      <aside className="fixed left-0 top-0 hidden h-screen w-56 shrink-0 flex-col border-r bg-background/95 backdrop-blur lg:flex">
         <div className="border-b px-4 py-4">
           <div className="flex items-center gap-3 rounded-2xl border bg-background/70 px-3 py-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary shadow-[0_10px_30px_rgba(59,130,246,0.35)]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary">
               <Activity className="h-4 w-4 text-primary-foreground" />
             </div>
             <div className="min-w-0">
@@ -157,7 +157,7 @@ export function Sidebar() {
       </aside>
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 px-2 pt-2 backdrop-blur lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 px-2 pt-2 backdrop-blur lg:hidden"
         style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
       >
         <div className="flex gap-1 overflow-x-auto">

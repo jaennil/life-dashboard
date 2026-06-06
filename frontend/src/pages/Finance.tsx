@@ -26,6 +26,7 @@ import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
+import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import {
   api,
@@ -56,11 +57,6 @@ const PERIODS = [
   { label: '3 мес', days: 90 },
   { label: 'Год', days: 365 },
 ]
-
-const CHART_TEXT = '#e5eefc'
-const CHART_MUTED = 'rgba(148, 163, 184, 0.85)'
-const CHART_GRID = 'rgba(148, 163, 184, 0.12)'
-const CHART_TOOLTIP = 'rgba(15, 23, 42, 0.96)'
 
 type TooltipScalar = number | string | null | undefined
 

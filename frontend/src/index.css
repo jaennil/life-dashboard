@@ -18,32 +18,33 @@
 }
 
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222 47% 11%;
+  --background: 220 20% 97%;
+  --foreground: 222 20% 12%;
   --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 47%;
-  --border: 214 32% 91%;
-  --primary: 221 83% 53%;
-  --primary-foreground: 210 40% 98%;
-  --accent: 210 40% 96%;
-  --accent-foreground: 222 47% 11%;
+  --card-foreground: 222 20% 12%;
+  --muted: 220 16% 93%;
+  --muted-foreground: 220 9% 43%;
+  --border: 220 14% 86%;
+  --primary: 217 91% 60%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 220 16% 93%;
+  --accent-foreground: 222 20% 12%;
   --radius: 0.5rem;
 }
 
 .dark {
-  --background: 222 47% 11%;
-  --foreground: 210 40% 98%;
-  --card: 222 47% 14%;
-  --card-foreground: 210 40% 98%;
-  --muted: 217 33% 17%;
-  --muted-foreground: 215 20% 65%;
-  --border: 217 33% 20%;
+  color-scheme: dark;
+  --background: 220 27% 6%;
+  --foreground: 220 14% 91%;
+  --card: 225 18% 11%;
+  --card-foreground: 220 14% 91%;
+  --muted: 222 16% 15%;
+  --muted-foreground: 220 10% 59%;
+  --border: 222 15% 19%;
   --primary: 217 91% 60%;
-  --primary-foreground: 222 47% 11%;
-  --accent: 217 33% 17%;
-  --accent-foreground: 210 40% 98%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 222 16% 16%;
+  --accent-foreground: 220 14% 91%;
 }
 
 * {
@@ -60,10 +61,6 @@ body,
 body {
   margin: 0;
   background-color: hsl(var(--background));
-  background-image:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.08), transparent 26%),
-    radial-gradient(circle at 85% 12%, rgba(16, 185, 129, 0.06), transparent 18%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 12%);
   color: hsl(var(--foreground));
   font-family: "SF Pro Display", "SF Pro Text", Inter, ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -76,23 +73,8 @@ body {
   padding: calc(5rem + env(safe-area-inset-top)) 1rem calc(6.75rem + env(safe-area-inset-bottom));
 }
 
-.dark body {
-  background-image:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 28%),
-    radial-gradient(circle at 85% 10%, rgba(16, 185, 129, 0.08), transparent 20%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 12%);
-}
-
 .app-shell-main::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  height: 320px;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 10% 0%, rgba(59, 130, 246, 0.12), transparent 32%),
-    radial-gradient(circle at 90% 0%, rgba(236, 72, 153, 0.08), transparent 26%);
-  opacity: 0.8;
+  display: none;
 }
 
 .page-shell {
@@ -115,11 +97,8 @@ body {
   border: 1px solid hsl(var(--border));
   border-radius: 1.5rem;
   padding: 1.5rem;
-  background:
-    linear-gradient(180deg, rgba(59, 130, 246, 0.08), transparent 55%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 16%),
-    hsl(var(--card));
-  box-shadow: 0 20px 48px rgba(2, 6, 23, 0.14);
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 ::selection {

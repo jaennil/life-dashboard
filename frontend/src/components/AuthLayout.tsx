@@ -21,12 +21,11 @@ export function AuthLayout({
 }) {
   return (
     <div className="relative min-h-screen overflow-hidden bg-background px-4 py-6 sm:px-6 lg:px-8">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.12),transparent_28%)]" />
-      <div className="relative mx-auto grid min-h-[calc(100vh-3rem)] w-full max-w-6xl overflow-hidden rounded-[28px] border bg-card/92 shadow-[0_32px_80px_rgba(2,6,23,0.24)] backdrop-blur xl:grid-cols-[1.08fr_0.92fr]">
-        <aside className="hidden border-r bg-[linear-gradient(180deg,rgba(59,130,246,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.04),transparent)] p-10 xl:flex xl:flex-col xl:justify-between">
+      <div className="relative mx-auto grid min-h-[calc(100vh-3rem)] w-full max-w-6xl overflow-hidden rounded-[28px] border bg-card shadow-xl xl:grid-cols-[1.08fr_0.92fr]">
+        <aside className="hidden border-r bg-background/55 p-10 xl:flex xl:flex-col xl:justify-between">
           <div className="space-y-8">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary shadow-[0_10px_30px_rgba(59,130,246,0.35)]">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary">
                 <Activity className="h-5 w-5 text-primary-foreground" />
               </div>
               <div>

@@ -3,7 +3,9 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { initSentry } from '@/lib/sentry'
+import { applyTheme, getPreferredTheme } from '@/lib/theme'
 
+applyTheme(getPreferredTheme())
 initSentry()
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
