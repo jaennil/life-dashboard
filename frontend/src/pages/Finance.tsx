@@ -177,14 +177,6 @@ function formatCoverageMultiple(ratio: number | null) {
   return `${ratio.toFixed(1)}x`
 }
 
-function formatAccountCount(count: number) {
-  const mod10 = count % 10
-  const mod100 = count % 100
-  if (mod10 === 1 && mod100 !== 11) return `${count} счёт`
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} счёта`
-  return `${count} счетов`
-}
-
 function formatAccountCountDative(count: number) {
   if (count === 1) return `${count} счёту`
   return `${count} счетам`
@@ -829,16 +821,6 @@ export function Finance() {
         description={`Состояние периода: ${activePeriodLabel}, ${rangeLabel}, ${rangeDays} дн. Считает cashflow, burn rate и runway.`}
         open={openSections.metrics}
         onToggle={() => toggleSection('metrics')}
-        summary={(
-          <>
-            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-              {rangeLabel}
-            </span>
-            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-              по {includedAccounts.length} счетам
-            </span>
-          </>
-        )}
       >
 
       {/* Summary cards */}
@@ -909,14 +891,6 @@ export function Finance() {
         />
       </div>
 
-      {!loading && excludedAccounts.length > 0 ? (
-        <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-5 py-4">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium text-foreground">Часть счетов исключена из общего баланса</p>
-            <InfoTooltip text={`ZenMoney помечает ${formatAccountCount(excludedAccounts.length)} как не участвующие в общем балансе. Их сумма: ${fmt(excludedBalance)}. Эти счета показаны ниже отдельно и не участвуют в агрегатах.`} />
-          </div>
-        </div>
-      ) : null}
       </ExpandablePanel>
 
       <ExpandablePanel
@@ -924,48 +898,9 @@ export function Finance() {
         description={`Смотрим вперёд на ${obligationsWindowDays} дней и автодетектим recurring списания по истории транзакций.`}
         open={openSections.obligations}
         onToggle={() => toggleSection('obligations')}
-        summary={(
-          <>
-            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-              {obligationItems.length} найдено
-            </span>
-            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-              {fmt(upcomingObligationsTotal)}
-            </span>
-          </>
-        )}
       >
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.92fr_1.38fr]">
         <div className="space-y-4">
-          <div className="rounded-2xl border bg-card/70 px-5 py-4 shadow-sm">
-            <div className="flex flex-col gap-3">
-              <div>
-                <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
-                  Обязательные платежи
-                  <InfoTooltip text={`Смотрим вперёд на ${obligationsWindowDays} дней и автодетектим подписки, кредиты, связь, аренду и похожие платежи по истории транзакций. Это прогноз по паттернам, а не данные банка о будущих списаниях.`} />
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                  {obligationsWindowDays} дней
-                </span>
-                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                  {obligationItems.length} найдено
-                </span>
-                {obligationRules.length > 0 ? (
-                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                    {obligationRules.length} правил
-                  </span>
-                ) : null}
-                {nextObligation ? (
-                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                    Следующий платёж: {fmtDate(nextObligation.next_due_at)}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-1">
             <FinanceSummaryCard
               title={`Обязательства ${obligationsWindowDays}д`}
@@ -1153,16 +1088,6 @@ export function Finance() {
         description="Месячный и дневной тренд доходов и расходов. Клик по графику открывает raw data с тем же периодом."
         open={openSections.trends}
         onToggle={() => toggleSection('trends')}
-        summary={(
-          <>
-            <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-emerald-300">
-              Доходы: {fmt(totalDailyIncome)}
-            </span>
-            <span className="rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 text-rose-300">
-              Расходы: {fmt(totalDailySpending)}
-            </span>
-          </>
-        )}
       >
       {/* Charts row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1232,20 +1157,6 @@ export function Finance() {
         description="Категории расходов, категории доходов и крупнейшие payee за выбранный период."
         open={openSections.categories}
         onToggle={() => toggleSection('categories')}
-        summary={(
-          <>
-            {topCategory ? (
-              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                {topCategory.category} · {formatPercent(topCategory.amount, totalCategorySpend)}
-              </span>
-            ) : null}
-            {topPayee ? (
-              <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-                {truncateLabel(topPayee.payee, 18)} · {fmt(topPayee.amount)}
-              </span>
-            ) : null}
-          </>
-        )}
       >
       {/* Charts row 2 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1457,16 +1368,6 @@ export function Finance() {
         description="Счета ZenMoney и живой список транзакций за выбранный период."
         open={openSections.accounts}
         onToggle={() => toggleSection('accounts')}
-        summary={(
-          <>
-            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-              {formatAccountCount(includedAccounts.length)} в балансе
-            </span>
-            <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1">
-              {txs.length} операций
-            </span>
-          </>
-        )}
       >
       {/* Accounts + Transactions */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
@@ -1493,12 +1394,6 @@ export function Finance() {
                 </div>
               ) : null}
             </div>
-            {!loading ? (
-              <p className="mt-1 text-xs text-muted-foreground">
-                {formatAccountCount(includedAccounts.length)} в балансе
-                {excludedAccounts.length > 0 ? ` • ${formatAccountCount(excludedAccounts.length)} вне баланса` : ''}
-              </p>
-            ) : null}
           </div>
           {loading ? (
             <div className="divide-y">
