@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { CalendarRange, ChevronLeft, ChevronRight, RotateCcw, X } from 'lucide-react'
+import { StyledSelect } from '@/components/StyledSelect'
 import { cn } from '@/lib/utils'
 
 const MONTHS = [
@@ -199,26 +200,26 @@ export function GlobalDateFilters() {
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              <select
+              <StyledSelect
                 value={month}
                 onChange={event => applyMonth(year, Number(event.target.value))}
-                className="h-10 rounded-lg border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                className="w-32"
                 aria-label="Месяц"
               >
                 {MONTHS.map(item => (
                   <option key={item.value} value={item.value}>{item.label}</option>
                 ))}
-              </select>
-              <select
+              </StyledSelect>
+              <StyledSelect
                 value={year}
                 onChange={event => applyMonth(Number(event.target.value), month)}
-                className="h-10 rounded-lg border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                className="w-24"
                 aria-label="Год"
               >
                 {years.map(item => (
                   <option key={item} value={item}>{item}</option>
                 ))}
-              </select>
+              </StyledSelect>
               <button
                 onClick={() => moveMonth(1)}
                 className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -234,9 +235,9 @@ export function GlobalDateFilters() {
               <button onClick={() => applyYear(year - 1)} className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Предыдущий год">
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              <select value={year} onChange={event => applyYear(Number(event.target.value))} className="h-10 rounded-lg border bg-background px-3 text-sm text-foreground outline-none focus:border-primary" aria-label="Год">
+              <StyledSelect value={year} onChange={event => applyYear(Number(event.target.value))} className="w-24" aria-label="Год">
                 {years.map(item => <option key={item} value={item}>{item}</option>)}
-              </select>
+              </StyledSelect>
               <button onClick={() => applyYear(year + 1)} className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Следующий год">
                 <ChevronRight className="h-4 w-4" />
               </button>

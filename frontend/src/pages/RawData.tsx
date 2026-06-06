@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Database, RotateCcw, Search } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { PageHeader } from '@/components/PageHeader'
+import { StyledSelect } from '@/components/StyledSelect'
 import { api, type CollectionParams } from '@/lib/api'
 import { RAW_DATA_SOURCES, type RawDataSource } from '@/lib/raw-data'
 
@@ -365,9 +366,9 @@ export function RawData() {
         <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center">
           <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border bg-background px-3 py-2">
             <Database className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <select value={source} onChange={event => update({ source: event.target.value, sort: undefined, search: undefined, type: undefined, category: undefined, split: undefined, payee: undefined, day: undefined, meal_type: undefined, metric: undefined })} className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none">
+            <StyledSelect value={source} onChange={event => update({ source: event.target.value, sort: undefined, search: undefined, type: undefined, category: undefined, split: undefined, payee: undefined, day: undefined, meal_type: undefined, metric: undefined })} wrapperClassName="flex-1" className="border-0 bg-transparent pl-0 hover:bg-transparent focus:border-transparent">
               {RAW_DATA_SOURCES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
+            </StyledSelect>
           </label>
           <label className="flex min-w-0 flex-[2] items-center gap-2 rounded-xl border bg-background px-3 py-2">
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" />

@@ -7,6 +7,7 @@ import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
+import { StyledSelect } from '@/components/StyledSelect'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
@@ -1241,15 +1242,15 @@ export function Nutrition() {
               ))}
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              <select
+              <StyledSelect
                 value={customHydrationType}
                 onChange={e => setCustomHydrationType(e.target.value as HydrationBeverageType)}
-                className="rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                className="rounded-xl focus:ring-2 focus:ring-ring"
               >
                 {HYDRATION_BEVERAGES.map(beverage => (
                   <option key={beverage.type} value={beverage.type}>{beverage.label}</option>
                 ))}
-              </select>
+              </StyledSelect>
               <input
                 type="text"
                 inputMode="decimal"

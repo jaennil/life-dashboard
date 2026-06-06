@@ -25,6 +25,7 @@ import { EChart } from '@/components/EChart'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
+import { StyledSelect } from '@/components/StyledSelect'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import {
@@ -1486,25 +1487,25 @@ export function Finance() {
                     className="w-full rounded-lg border bg-background pl-8 pr-3 py-2 text-xs outline-none transition-colors focus:border-primary"
                   />
                 </div>
-                <select
+                <StyledSelect
                   value={catFilter}
                   onChange={e => setCatFilter(e.target.value)}
-                  className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary"
+                  className="text-xs"
                 >
                   <option value="">Все категории</option>
                   {categoryList.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select
+                </StyledSelect>
+                <StyledSelect
                   value={sort}
                   onChange={e => setSort(e.target.value as SortType)}
-                  className="rounded-lg border bg-background px-3 py-2 text-xs outline-none transition-colors focus:border-primary"
+                  className="text-xs"
                 >
                   <option value="">По дате ↓</option>
                   <option value="date_asc">По дате ↑</option>
                   <option value="amount">По сумме ↓</option>
                   <option value="amount_asc">По сумме ↑</option>
                   <option value="category">По категории</option>
-                </select>
+                </StyledSelect>
               </div>
             </div>
           </div>

@@ -17,6 +17,7 @@ import {
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
+import { StyledSelect } from '@/components/StyledSelect'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import {
   api,
@@ -544,15 +545,16 @@ export function Productivity() {
           </label>
           <label className="w-full lg:w-48">
             <span className="mb-1 block text-[11px] text-muted-foreground">Когда</span>
-            <select
+            <StyledSelect
               value={habitForm.routine}
               onChange={(event) => setHabitForm(current => ({ ...current, routine: event.target.value as HabitRoutine }))}
-              className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+              wrapperClassName="w-full"
+              className="h-11 rounded-xl bg-card focus:ring-2 focus:ring-ring"
             >
               {ROUTINES.map(routine => (
                 <option key={routine.key} value={routine.key}>{routine.label}</option>
               ))}
-            </select>
+            </StyledSelect>
           </label>
           <label className="w-full lg:w-56">
             <span className="mb-1 block text-[11px] text-muted-foreground">Группа</span>
