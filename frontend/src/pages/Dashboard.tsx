@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Wallet, Dumbbell, TrendingUp, TrendingDown, Zap, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight } from 'lucide-react'
+import { Wallet, Dumbbell, TrendingUp, TrendingDown, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight } from 'lucide-react'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
@@ -55,20 +55,6 @@ function StatCard({
           <span className="text-xs text-muted-foreground">{sub}</span>
         </div>
       </div>
-    </div>
-  )
-}
-
-function InsightCard({ text, type }: { text: string; type: 'info' | 'warn' | 'good' }) {
-  const colors = {
-    info: 'border-blue-500/20 bg-blue-500/5',
-    warn: 'border-amber-500/20 bg-amber-500/5',
-    good: 'border-emerald-500/20 bg-emerald-500/5',
-  }
-  return (
-    <div className={cn('rounded-2xl border border-white/5 px-4 py-3 text-sm text-foreground shadow-sm', colors[type])}>
-      <Zap className="inline w-3 h-3 mr-1 opacity-70" />
-      {text}
     </div>
   )
 }
@@ -405,7 +391,6 @@ export function Dashboard() {
   )
   const dashboardSyncCaption = syncCaptionForSources(enabledDashboardSources)
   const periodText = globalRange.isActive ? 'за выбранный период' : 'за эту неделю'
-  const todayText = globalRange.isActive ? 'на конец периода' : 'сегодня'
 
   async function handleSyncDashboard() {
     if (enabledDashboardSources.length === 0) return
@@ -421,48 +406,6 @@ export function Dashboard() {
     } finally {
       setSyncing(false)
     }
-  }
-
-  const insights: { text: string; type: 'info' | 'warn' | 'good' }[] = []
-  if (summary) {
-    if (summary.fitness.activities_this_week === 0 && summary.fitness.workouts_this_week === 0) {
-      insights.push({ type: 'warn', text: globalRange.isActive ? 'В выбранном периоде нет активностей.' : 'На этой неделе нет активностей. Самое время размяться!' })
-    }
-    if (summary.finance.monthly_spending > summary.finance.monthly_income && summary.finance.monthly_income > 0) {
-      insights.push({ type: 'warn', text: `Расходы (${fmt(summary.finance.monthly_spending, 'RUB')}) превышают доходы ${globalRange.isActive ? 'за выбранный период' : 'в этом месяце'}.` })
-    }
-    if (summary.fitness.total_distance_km > 0) {
-      insights.push({ type: 'good', text: `${globalRange.isActive ? 'За выбранный период' : 'За эту неделю'} пройдено ${summary.fitness.total_distance_km.toFixed(1)} км.` })
-    }
-    if (summary.productivity.overdue_total > 0) {
-      insights.push({ type: 'warn', text: `Есть overdue задачи: ${summary.productivity.overdue_total}. Лучше разобрать их до новых задач.` })
-    }
-    if (summary.productivity.habits_total > 0 && summary.productivity.habits_pending_today > 0) {
-      insights.push({ type: 'info', text: `По рутинам ${todayText} осталось ${summary.productivity.habits_pending_today} незакрытых пунктов.` })
-    }
-    if (summary.nutrition.days_tracked === 0) {
-      insights.push({ type: 'warn', text: 'По питанию за последние дни нет данных. Дневник питания сейчас слепой.' })
-    } else if (summary.nutrition.target_calories && summary.nutrition.avg_calories > 0) {
-      if (summary.nutrition.avg_calories < summary.nutrition.target_calories * 0.8) {
-        insights.push({ type: 'warn', text: `Средние калории ${globalRange.isActive ? 'за период' : 'за 7 дней'} (${Math.round(summary.nutrition.avg_calories)}) заметно ниже цели (${Math.round(summary.nutrition.target_calories)}).` })
-      } else if (summary.nutrition.avg_calories > summary.nutrition.target_calories * 1.15) {
-        insights.push({ type: 'warn', text: `Средние калории ${globalRange.isActive ? 'за период' : 'за 7 дней'} (${Math.round(summary.nutrition.avg_calories)}) выше цели (${Math.round(summary.nutrition.target_calories)}).` })
-      }
-    }
-    if (summary.nutrition.target_water_ml && summary.nutrition.today_hydration_ml < summary.nutrition.target_water_ml * 0.5) {
-      insights.push({ type: 'info', text: `По гидратации сегодня ${Math.round(summary.nutrition.today_hydration_ml)} мл из цели ${Math.round(summary.nutrition.target_water_ml)} мл.` })
-    }
-    if (!summary.checkup.has_report) {
-      insights.push({ type: 'info', text: 'AI-checkup ещё не запускался. Имеет смысл сделать первый обзор по всем сферам.' })
-    } else if (summary.checkup.generated_at) {
-      const ageDays = (Date.now() - new Date(summary.checkup.generated_at).getTime()) / (1000 * 60 * 60 * 24)
-      if (ageDays >= 7) {
-        insights.push({ type: 'info', text: `Последний AI-checkup был ${fmtDateTime(summary.checkup.generated_at)}. Пора обновить обзор.` })
-      }
-    }
-  }
-  if (insights.length === 0) {
-    insights.push({ type: 'info', text: 'Подключи больше источников данных чтобы получать персональные инсайты.' })
   }
 
   const sectionCards = summary ? [
@@ -647,14 +590,6 @@ export function Dashboard() {
           {sectionCards.map(card => (
             <OverviewSectionCard key={card.title} {...card} loading={loading} />
           ))}
-        </div>
-      </div>
-
-      {/* AI Insights */}
-      <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Что требует внимания</h2>
-        <div className="flex flex-col gap-2">
-          {insights.slice(0, 5).map((ins, i) => <InsightCard key={i} {...ins} />)}
         </div>
       </div>
 
