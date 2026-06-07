@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Wallet, Dumbbell, TrendingUp, TrendingDown, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight, GripVertical, EyeOff, RotateCcw, Minimize2, Maximize2, ArrowUp, ArrowDown } from 'lucide-react'
+import { Wallet, Dumbbell, TrendingUp, TrendingDown, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight, GripVertical, EyeOff, RotateCcw, Pencil } from 'lucide-react'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
@@ -13,6 +13,7 @@ const WIDGET_LAYOUT_KEY = 'dashboard_widget_layout_v1'
 
 type WidgetId = 'weather' | 'stats' | 'overview' | 'transactions'
 type WidgetSize = 'compact' | 'standard' | 'wide' | 'full'
+type ResizeCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 
 interface WidgetLayout {
   id: WidgetId
@@ -387,109 +388,83 @@ function DashboardWidget({
   layout,
   dragging,
   children,
-  canMoveUp,
-  canMoveDown,
+  editing,
   onDragStart,
   onDragEnd,
   onDrop,
-  onMove,
-  onResize,
+  onResizeStart,
   onHide,
 }: {
   layout: WidgetLayout
   dragging: boolean
   children: ReactNode
-  canMoveUp: boolean
-  canMoveDown: boolean
+  editing: boolean
   onDragStart: (id: WidgetId, event: DragEvent<HTMLButtonElement>) => void
   onDragEnd: () => void
   onDrop: (id: WidgetId, event: DragEvent<HTMLElement>) => void
-  onMove: (id: WidgetId, direction: -1 | 1) => void
-  onResize: (id: WidgetId, direction: -1 | 1) => void
+  onResizeStart: (id: WidgetId, corner: ResizeCorner, event: PointerEvent<HTMLSpanElement>) => void
   onHide: (id: WidgetId) => void
 }) {
-  const sizeIndex = WIDGET_SIZES.indexOf(layout.size)
-  const canShrink = sizeIndex > 0
-  const canGrow = sizeIndex < WIDGET_SIZES.length - 1
-
   return (
     <section
+      data-widget-id={layout.id}
       className={cn(
         'min-w-0 transition-opacity',
         WIDGET_SIZE_CLASS[layout.size],
         dragging && 'opacity-50'
       )}
-      onDragOver={event => event.preventDefault()}
-      onDrop={event => onDrop(layout.id, event)}
+      onDragOver={event => editing && event.preventDefault()}
+      onDrop={event => editing && onDrop(layout.id, event)}
     >
-      <div className="mb-2 flex min-w-0 items-center justify-between gap-3 px-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <button
-            type="button"
-            draggable
-            onDragStart={event => onDragStart(layout.id, event)}
-            onDragEnd={onDragEnd}
-            aria-label={`Переместить ${layout.label}`}
-            title="Переместить"
-            className="inline-flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
-          >
-            <GripVertical className="h-4 w-4" />
-          </button>
-          <h2 className="truncate text-sm font-semibold uppercase tracking-wider text-foreground">{layout.label}</h2>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={() => onMove(layout.id, -1)}
-            disabled={!canMoveUp}
-            aria-label={`Поднять ${layout.label}`}
-            title="Поднять"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
-          >
-            <ArrowUp className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onMove(layout.id, 1)}
-            disabled={!canMoveDown}
-            aria-label={`Опустить ${layout.label}`}
-            title="Опустить"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
-          >
-            <ArrowDown className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onResize(layout.id, -1)}
-            disabled={!canShrink}
-            aria-label={`Уменьшить ${layout.label}`}
-            title="Уменьшить"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
-          >
-            <Minimize2 className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onResize(layout.id, 1)}
-            disabled={!canGrow}
-            aria-label={`Увеличить ${layout.label}`}
-            title="Увеличить"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
-          >
-            <Maximize2 className="h-4 w-4" />
-          </button>
+      {editing ? (
+        <div className="mb-2 flex min-w-0 items-center justify-between gap-3 px-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              draggable
+              onDragStart={event => onDragStart(layout.id, event)}
+              onDragEnd={onDragEnd}
+              aria-label={`Переместить ${layout.label}`}
+              title="Переместить"
+              className="inline-flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
+            >
+              <GripVertical className="h-4 w-4" />
+            </button>
+            <h2 className="truncate text-sm font-semibold uppercase tracking-wider text-foreground">{layout.label}</h2>
+          </div>
           <button
             type="button"
             onClick={() => onHide(layout.id)}
             aria-label={`Скрыть ${layout.label}`}
             title="Скрыть"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <EyeOff className="h-4 w-4" />
           </button>
         </div>
+      ) : null}
+      <div className={cn('relative min-w-0', editing && 'rounded-2xl outline outline-1 outline-dashed outline-primary/35')}>
+        {children}
+        {editing ? (
+          <>
+            {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as ResizeCorner[]).map(corner => (
+              <span
+                key={corner}
+                data-resize-corner={corner}
+                role="presentation"
+                onPointerDown={event => onResizeStart(layout.id, corner, event)}
+                className={cn(
+                  'absolute z-10 h-5 w-5 cursor-nwse-resize rounded-full border border-primary/45 bg-background/95 shadow-sm',
+                  corner === 'top-left' && '-left-2 -top-2 cursor-nwse-resize',
+                  corner === 'top-right' && '-right-2 -top-2 cursor-nesw-resize',
+                  corner === 'bottom-left' && '-bottom-2 -left-2 cursor-nesw-resize',
+                  corner === 'bottom-right' && '-bottom-2 -right-2 cursor-nwse-resize'
+                )}
+              />
+            ))}
+          </>
+        ) : null}
       </div>
-      <div className="min-w-0">{children}</div>
     </section>
   )
 }
@@ -506,6 +481,7 @@ export function Dashboard() {
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [widgetLayout, setWidgetLayout] = useState(loadWidgetLayout)
   const [draggingWidget, setDraggingWidget] = useState<WidgetId | null>(null)
+  const [editingWidgets, setEditingWidgets] = useState(false)
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true)
@@ -595,16 +571,6 @@ export function Dashboard() {
     setWidgetLayout(defaultWidgetLayout())
   }
 
-  function handleResizeWidget(id: WidgetId, direction: -1 | 1) {
-    setWidgetLayout(current => {
-      const next = { ...current }
-      const sizeIndex = WIDGET_SIZES.indexOf(next[id].size)
-      const nextSize = WIDGET_SIZES[Math.max(0, Math.min(WIDGET_SIZES.length - 1, sizeIndex + direction))]
-      next[id] = { ...next[id], size: nextSize }
-      return next
-    })
-  }
-
   function handleHideWidget(id: WidgetId) {
     setWidgetLayout(current => ({
       ...current,
@@ -619,28 +585,8 @@ export function Dashboard() {
     }))
   }
 
-  function handleMoveWidget(id: WidgetId, direction: -1 | 1) {
-    setWidgetLayout(current => {
-      const visibleIds = WIDGET_IDS
-        .filter(widgetId => !current[widgetId].hidden)
-        .sort((a, b) => current[a].order - current[b].order)
-      const index = visibleIds.indexOf(id)
-      const nextIndex = index + direction
-      if (index < 0 || nextIndex < 0 || nextIndex >= visibleIds.length) return current
-
-      const reordered = [...visibleIds]
-      const [moved] = reordered.splice(index, 1)
-      reordered.splice(nextIndex, 0, moved)
-
-      const next = { ...current }
-      reordered.forEach((widgetId, order) => {
-        next[widgetId] = { ...next[widgetId], order }
-      })
-      return next
-    })
-  }
-
   function handleDragWidgetStart(id: WidgetId, event: DragEvent<HTMLButtonElement>) {
+    if (!editingWidgets) return
     setDraggingWidget(id)
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', id)
@@ -678,6 +624,43 @@ export function Dashboard() {
 
       return next
     })
+  }
+
+  function handleResizeWidgetStart(id: WidgetId, corner: ResizeCorner, event: PointerEvent<HTMLSpanElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const win = event.currentTarget.ownerDocument.defaultView
+    if (!win) return
+    const resizeWindow = win
+
+    const initialX = event.clientX
+    const initialSizeIndex = WIDGET_SIZES.indexOf(widgetLayout[id].size)
+    const horizontalSign = corner.endsWith('left') ? -1 : 1
+    const stepPx = 180
+
+    function onPointerMove(moveEvent: globalThis.PointerEvent) {
+      const signedDelta = (moveEvent.clientX - initialX) * horizontalSign
+      const steps = Math.trunc(signedDelta / stepPx)
+      const nextSizeIndex = Math.max(0, Math.min(WIDGET_SIZES.length - 1, initialSizeIndex + steps))
+
+      setWidgetLayout(current => {
+        const nextSize = WIDGET_SIZES[nextSizeIndex]
+        if (current[id].size === nextSize) return current
+        return {
+          ...current,
+          [id]: { ...current[id], size: nextSize },
+        }
+      })
+    }
+
+    function onPointerUp() {
+      resizeWindow.removeEventListener('pointermove', onPointerMove)
+      resizeWindow.removeEventListener('pointerup', onPointerUp)
+    }
+
+    resizeWindow.addEventListener('pointermove', onPointerMove)
+    resizeWindow.addEventListener('pointerup', onPointerUp)
   }
 
   const sectionCards = summary ? [
@@ -901,7 +884,7 @@ export function Dashboard() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed bg-card/60 px-3 py-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {hiddenWidgets.length > 0 ? (
+          {editingWidgets && hiddenWidgets.length > 0 ? (
             <>
               <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Скрытые</span>
               {hiddenWidgets.map(widget => (
@@ -916,33 +899,51 @@ export function Dashboard() {
               ))}
             </>
           ) : (
-            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Виджеты</span>
+            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              {editingWidgets ? 'Редактирование виджетов' : 'Виджеты'}
+            </span>
           )}
         </div>
-        <button
-          type="button"
-          onClick={handleResetWidgetLayout}
-          className="inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-          Сбросить
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {editingWidgets ? (
+            <button
+              type="button"
+              onClick={handleResetWidgetLayout}
+              className="inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Сбросить
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setEditingWidgets(value => !value)}
+            aria-pressed={editingWidgets}
+            className={cn(
+              'inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors',
+              editingWidgets
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            )}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {editingWidgets ? 'Готово' : 'Edit'}
+          </button>
+        </div>
       </div>
 
       {visibleWidgets.length > 0 ? (
         <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-12">
-          {visibleWidgets.map((widget, index) => (
+          {visibleWidgets.map(widget => (
             <DashboardWidget
               key={widget.id}
               layout={widget}
               dragging={draggingWidget === widget.id}
-              canMoveUp={index > 0}
-              canMoveDown={index < visibleWidgets.length - 1}
+              editing={editingWidgets}
               onDragStart={handleDragWidgetStart}
               onDragEnd={() => setDraggingWidget(null)}
               onDrop={handleDropWidget}
-              onMove={handleMoveWidget}
-              onResize={handleResizeWidget}
+              onResizeStart={handleResizeWidgetStart}
               onHide={handleHideWidget}
             >
               {widgetContent[widget.id]}
