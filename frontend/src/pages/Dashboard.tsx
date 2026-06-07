@@ -1,142 +1,46 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Wallet, Dumbbell, TrendingUp, TrendingDown, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight, GripVertical, EyeOff, RotateCcw, Pencil } from 'lucide-react'
+import { Responsive as ResponsiveGridLayout, useContainerWidth } from 'react-grid-layout'
+import { Wallet, Dumbbell, TrendingUp, TrendingDown, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight, EyeOff, RotateCcw, Pencil } from 'lucide-react'
+import 'react-grid-layout/css/styles.css'
+import 'react-resizable/css/styles.css'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type DashboardSummary, type Transaction, type WeatherData, type Integration } from '@/lib/api'
+import {
+  applyGridLayout,
+  DASHBOARD_GRID_COLS,
+  DASHBOARD_GRID_ROW_HEIGHT,
+  DASHBOARD_WIDGET_LABELS,
+  DASHBOARD_WIDGETS,
+  DEFAULT_DASHBOARD_LAYOUT,
+  normalizeDashboardLayout,
+  setWidgetHidden,
+  toResponsiveLayouts,
+  visibleWidgetIds,
+  type DashboardGridLayout,
+  type DashboardLayoutState,
+  type DashboardWidgetId,
+} from '@/lib/dashboard-layout'
 
 const LOC_KEY = 'weather_location'
-const WIDGET_LAYOUT_KEY = 'dashboard_widget_layout_v1'
-const METRIC_WIDGET_LAYOUT_KEY = 'dashboard_metric_widget_layout_v1'
+const DASHBOARD_LAYOUT_KEY = 'dashboard_grid_layout_v2'
 
-type WidgetId = 'weather' | 'stats' | 'overview' | 'transactions'
-type MetricWidgetId = 'balance' | 'spending' | 'activities' | 'workouts' | 'nutrition' | 'overdue'
-type WidgetSize = 'compact' | 'standard' | 'wide' | 'full'
-type ResizeCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
-
-interface WidgetLayout {
-  id: WidgetId
-  label: string
-  order: number
-  size: WidgetSize
-  hidden: boolean
-}
-
-interface MetricWidgetLayout {
-  id: MetricWidgetId
-  label: string
-  order: number
-  size: WidgetSize
-  height: number
-  hidden: boolean
-}
-
-const WIDGET_IDS: WidgetId[] = ['weather', 'stats', 'overview', 'transactions']
-const METRIC_WIDGET_IDS: MetricWidgetId[] = ['balance', 'spending', 'activities', 'workouts', 'nutrition', 'overdue']
-const WIDGET_SIZES: WidgetSize[] = ['compact', 'standard', 'wide', 'full']
-
-const DEFAULT_WIDGET_LAYOUT: Record<WidgetId, WidgetLayout> = {
-  weather: { id: 'weather', label: 'Погода', order: 0, size: 'compact', hidden: false },
-  stats: { id: 'stats', label: 'Метрики', order: 1, size: 'wide', hidden: false },
-  overview: { id: 'overview', label: 'Срез по разделам', order: 2, size: 'wide', hidden: false },
-  transactions: { id: 'transactions', label: 'Транзакции', order: 3, size: 'compact', hidden: false },
-}
-
-const WIDGET_SIZE_CLASS: Record<WidgetSize, string> = {
-  compact: 'xl:col-span-4',
-  standard: 'xl:col-span-6',
-  wide: 'xl:col-span-8',
-  full: 'xl:col-span-12',
-}
-
-const DEFAULT_METRIC_WIDGET_LAYOUT: Record<MetricWidgetId, MetricWidgetLayout> = {
-  balance: { id: 'balance', label: 'Баланс', order: 0, size: 'compact', height: 132, hidden: false },
-  spending: { id: 'spending', label: 'Расходы за месяц', order: 1, size: 'compact', height: 132, hidden: false },
-  activities: { id: 'activities', label: 'Активности', order: 2, size: 'compact', height: 132, hidden: false },
-  workouts: { id: 'workouts', label: 'Тренировки', order: 3, size: 'compact', height: 132, hidden: false },
-  nutrition: { id: 'nutrition', label: 'Питание', order: 4, size: 'compact', height: 132, hidden: false },
-  overdue: { id: 'overdue', label: 'Overdue', order: 5, size: 'compact', height: 132, hidden: false },
-}
-
-const METRIC_WIDGET_SIZE_CLASS: Record<WidgetSize, string> = {
-  compact: 'md:col-span-2',
-  standard: 'md:col-span-3',
-  wide: 'md:col-span-4',
-  full: 'md:col-span-6',
-}
-
-function defaultWidgetLayout() {
-  return Object.fromEntries(
-    WIDGET_IDS.map(id => [id, { ...DEFAULT_WIDGET_LAYOUT[id] }])
-  ) as Record<WidgetId, WidgetLayout>
-}
-
-function loadWidgetLayout() {
-  if (typeof localStorage === 'undefined') return defaultWidgetLayout()
+function loadDashboardLayout(): DashboardLayoutState {
+  if (typeof localStorage === 'undefined') return normalizeDashboardLayout(DEFAULT_DASHBOARD_LAYOUT)
 
   try {
-    const saved = JSON.parse(localStorage.getItem(WIDGET_LAYOUT_KEY) || 'null') as Partial<Record<WidgetId, Partial<WidgetLayout>>> | null
-    if (!saved) return defaultWidgetLayout()
-
-    const layout = defaultWidgetLayout()
-    for (const id of WIDGET_IDS) {
-      const item = saved[id]
-      if (!item) continue
-
-      layout[id] = {
-        ...layout[id],
-        order: typeof item.order === 'number' ? item.order : layout[id].order,
-        size: item.size && WIDGET_SIZES.includes(item.size) ? item.size : layout[id].size,
-        hidden: typeof item.hidden === 'boolean' ? item.hidden : layout[id].hidden,
-      }
-    }
-    return layout
+    return normalizeDashboardLayout(JSON.parse(localStorage.getItem(DASHBOARD_LAYOUT_KEY) || 'null'))
   } catch {
-    return defaultWidgetLayout()
+    return normalizeDashboardLayout(DEFAULT_DASHBOARD_LAYOUT)
   }
 }
 
-function persistWidgetLayout(layout: Record<WidgetId, WidgetLayout>) {
-  localStorage.setItem(WIDGET_LAYOUT_KEY, JSON.stringify(layout))
-}
-
-function defaultMetricWidgetLayout() {
-  return Object.fromEntries(
-    METRIC_WIDGET_IDS.map(id => [id, { ...DEFAULT_METRIC_WIDGET_LAYOUT[id] }])
-  ) as Record<MetricWidgetId, MetricWidgetLayout>
-}
-
-function loadMetricWidgetLayout() {
-  if (typeof localStorage === 'undefined') return defaultMetricWidgetLayout()
-
-  try {
-    const saved = JSON.parse(localStorage.getItem(METRIC_WIDGET_LAYOUT_KEY) || 'null') as Partial<Record<MetricWidgetId, Partial<MetricWidgetLayout>>> | null
-    if (!saved) return defaultMetricWidgetLayout()
-
-    const layout = defaultMetricWidgetLayout()
-    for (const id of METRIC_WIDGET_IDS) {
-      const item = saved[id]
-      if (!item) continue
-
-      layout[id] = {
-        ...layout[id],
-        order: typeof item.order === 'number' ? item.order : layout[id].order,
-        size: item.size && WIDGET_SIZES.includes(item.size) ? item.size : layout[id].size,
-        height: typeof item.height === 'number' ? Math.max(120, Math.min(420, item.height)) : layout[id].height,
-        hidden: typeof item.hidden === 'boolean' ? item.hidden : layout[id].hidden,
-      }
-    }
-    return layout
-  } catch {
-    return defaultMetricWidgetLayout()
-  }
-}
-
-function persistMetricWidgetLayout(layout: Record<MetricWidgetId, MetricWidgetLayout>) {
-  localStorage.setItem(METRIC_WIDGET_LAYOUT_KEY, JSON.stringify(layout))
+function persistDashboardLayout(layout: DashboardLayoutState) {
+  localStorage.setItem(DASHBOARD_LAYOUT_KEY, JSON.stringify(normalizeDashboardLayout(layout)))
 }
 
 interface SavedLocation { lat: number; lon: number; city: string }
@@ -448,175 +352,45 @@ function OverviewSectionCard({
   )
 }
 
-function DashboardWidget({
-  layout,
-  dragging,
-  children,
+function DashboardGridItem({
+  id,
   editing,
-  editable = true,
-  onDragStart,
-  onDragEnd,
-  onDrop,
-  onResizeStart,
+  children,
   onHide,
 }: {
-  layout: WidgetLayout
-  dragging: boolean
-  children: ReactNode
+  id: DashboardWidgetId
   editing: boolean
-  editable?: boolean
-  onDragStart: (id: WidgetId, event: DragEvent<HTMLButtonElement>) => void
-  onDragEnd: () => void
-  onDrop: (id: WidgetId, event: DragEvent<HTMLElement>) => void
-  onResizeStart: (id: WidgetId, corner: ResizeCorner, event: PointerEvent<HTMLSpanElement>) => void
-  onHide: (id: WidgetId) => void
+  children: ReactNode
+  onHide: (id: DashboardWidgetId) => void
 }) {
   return (
     <section
-      data-widget-id={layout.id}
+      data-widget-id={id}
       className={cn(
-        'min-w-0 transition-opacity',
-        WIDGET_SIZE_CLASS[layout.size],
-        dragging && 'opacity-50'
+        'dashboard-grid-widget h-full min-w-0',
+        editing && 'is-editing cursor-grab active:cursor-grabbing'
       )}
-      onDragOver={event => editing && event.preventDefault()}
-      onDrop={event => editing && onDrop(layout.id, event)}
-    >
-      {editing && editable ? (
-        <div className="mb-2 flex min-w-0 items-center justify-between gap-3 px-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              draggable
-              onDragStart={event => onDragStart(layout.id, event)}
-              onDragEnd={onDragEnd}
-              aria-label={`Переместить ${layout.label}`}
-              title="Переместить"
-              className="inline-flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
-            >
-              <GripVertical className="h-4 w-4" />
-            </button>
-            <h2 className="truncate text-sm font-semibold uppercase tracking-wider text-foreground">{layout.label}</h2>
-          </div>
-          <button
-            type="button"
-            onClick={() => onHide(layout.id)}
-            aria-label={`Скрыть ${layout.label}`}
-            title="Скрыть"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <EyeOff className="h-4 w-4" />
-          </button>
-        </div>
-      ) : null}
-      <div className={cn('relative min-w-0', editing && editable && 'rounded-2xl outline outline-1 outline-dashed outline-primary/35')}>
-        {children}
-        {editing && editable ? (
-          <>
-            {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as ResizeCorner[]).map(corner => (
-              <span
-                key={corner}
-                data-resize-corner={corner}
-                role="presentation"
-                onPointerDown={event => onResizeStart(layout.id, corner, event)}
-                className={cn(
-                  'absolute z-10 h-5 w-5 cursor-nwse-resize rounded-full border border-primary/45 bg-background/95 shadow-sm',
-                  corner === 'top-left' && '-left-2 -top-2 cursor-nwse-resize',
-                  corner === 'top-right' && '-right-2 -top-2 cursor-nesw-resize',
-                  corner === 'bottom-left' && '-bottom-2 -left-2 cursor-nesw-resize',
-                  corner === 'bottom-right' && '-bottom-2 -right-2 cursor-nwse-resize'
-                )}
-              />
-            ))}
-          </>
-        ) : null}
-      </div>
-    </section>
-  )
-}
-
-function MetricDashboardWidget({
-  layout,
-  dragging,
-  children,
-  editing,
-  onDragStart,
-  onDragEnd,
-  onDrop,
-  onResizeStart,
-  onHide,
-}: {
-  layout: MetricWidgetLayout
-  dragging: boolean
-  children: ReactNode
-  editing: boolean
-  onDragStart: (id: MetricWidgetId, event: DragEvent<HTMLButtonElement>) => void
-  onDragEnd: () => void
-  onDrop: (id: MetricWidgetId, event: DragEvent<HTMLElement>) => void
-  onResizeStart: (id: MetricWidgetId, corner: ResizeCorner, event: PointerEvent<HTMLSpanElement>) => void
-  onHide: (id: MetricWidgetId) => void
-}) {
-  return (
-    <article
-      data-metric-widget-id={layout.id}
-      className={cn(
-        'min-w-0 self-start transition-opacity',
-        METRIC_WIDGET_SIZE_CLASS[layout.size],
-        dragging && 'opacity-50'
-      )}
-      onDragOver={event => editing && event.preventDefault()}
-      onDrop={event => editing && onDrop(layout.id, event)}
     >
       {editing ? (
-        <div className="mb-2 flex items-center justify-between gap-2 px-1">
+        <>
+          <span className="pointer-events-none absolute left-2 top-2 z-20 max-w-[calc(100%-4rem)] truncate rounded-md border bg-background/95 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground shadow-sm">
+            {DASHBOARD_WIDGET_LABELS[id]}
+          </span>
           <button
             type="button"
-            draggable
-            onDragStart={event => onDragStart(layout.id, event)}
-            onDragEnd={onDragEnd}
-            aria-label={`Переместить ${layout.label}`}
-            title="Переместить"
-            className="inline-flex h-7 w-7 cursor-grab items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
-          >
-            <GripVertical className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onHide(layout.id)}
-            aria-label={`Скрыть ${layout.label}`}
+            onClick={() => onHide(id)}
+            aria-label={`Скрыть ${DASHBOARD_WIDGET_LABELS[id]}`}
             title="Скрыть"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="dashboard-widget-action absolute right-2 top-2 z-30 inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-background/95 text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
           >
             <EyeOff className="h-4 w-4" />
           </button>
-        </div>
+        </>
       ) : null}
-      <div
-        className={cn('relative min-w-0', editing && 'rounded-2xl outline outline-1 outline-dashed outline-primary/35')}
-        style={{ height: layout.height }}
-      >
+      <div className="dashboard-widget-content h-full min-w-0 overflow-hidden">
         {children}
-        {editing ? (
-          <>
-            {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as ResizeCorner[]).map(corner => (
-              <span
-                key={corner}
-                data-metric-resize-corner={corner}
-                role="presentation"
-                onPointerDown={event => onResizeStart(layout.id, corner, event)}
-                className={cn(
-                  'absolute z-10 h-5 w-5 rounded-full border border-primary/45 bg-background/95 shadow-sm',
-                  corner === 'top-left' && '-left-2 -top-2 cursor-nwse-resize',
-                  corner === 'top-right' && '-right-2 -top-2 cursor-nesw-resize',
-                  corner === 'bottom-left' && '-bottom-2 -left-2 cursor-nesw-resize',
-                  corner === 'bottom-right' && '-bottom-2 -right-2 cursor-nwse-resize'
-                )}
-              />
-            ))}
-          </>
-        ) : null}
       </div>
-    </article>
+    </section>
   )
 }
 
@@ -630,15 +404,9 @@ export function Dashboard() {
   const [showPicker, setShowPicker] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [integrations, setIntegrations] = useState<Integration[]>([])
-  const [widgetLayout, setWidgetLayout] = useState(() => {
-    const layout = loadWidgetLayout()
-    layout.stats = { ...layout.stats, size: 'wide', hidden: false }
-    return layout
-  })
-  const [metricWidgetLayout, setMetricWidgetLayout] = useState(loadMetricWidgetLayout)
-  const [draggingWidget, setDraggingWidget] = useState<WidgetId | null>(null)
-  const [draggingMetricWidget, setDraggingMetricWidget] = useState<MetricWidgetId | null>(null)
+  const [dashboardLayout, setDashboardLayout] = useState(loadDashboardLayout)
   const [editingWidgets, setEditingWidgets] = useState(false)
+  const { width: gridWidth, containerRef: gridContainerRef, mounted: gridMounted } = useContainerWidth({ initialWidth: 1200 })
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true)
@@ -699,12 +467,8 @@ export function Dashboard() {
   }, [loadDashboardData, loadIntegrations])
 
   useEffect(() => {
-    persistWidgetLayout(widgetLayout)
-  }, [widgetLayout])
-
-  useEffect(() => {
-    persistMetricWidgetLayout(metricWidgetLayout)
-  }, [metricWidgetLayout])
+    persistDashboardLayout(dashboardLayout)
+  }, [dashboardLayout])
 
   const enabledDashboardSources = integrations.filter(i =>
     (i.name === 'zenmoney' || i.name === 'strava' || i.name === 'hevy') && i.enabled
@@ -729,195 +493,20 @@ export function Dashboard() {
   }
 
   function handleResetWidgetLayout() {
-    setWidgetLayout(defaultWidgetLayout())
-    setMetricWidgetLayout(defaultMetricWidgetLayout())
+    setDashboardLayout(normalizeDashboardLayout(DEFAULT_DASHBOARD_LAYOUT))
   }
 
-  function handleHideWidget(id: WidgetId) {
-    setWidgetLayout(current => ({
-      ...current,
-      [id]: { ...current[id], hidden: true },
-    }))
+  function handleHideWidget(id: DashboardWidgetId) {
+    setDashboardLayout(current => setWidgetHidden(current, id, true))
   }
 
-  function handleShowWidget(id: WidgetId) {
-    setWidgetLayout(current => ({
-      ...current,
-      [id]: { ...current[id], hidden: false },
-    }))
+  function handleShowWidget(id: DashboardWidgetId) {
+    setDashboardLayout(current => setWidgetHidden(current, id, false))
   }
 
-  function handleHideMetricWidget(id: MetricWidgetId) {
-    setMetricWidgetLayout(current => ({
-      ...current,
-      [id]: { ...current[id], hidden: true },
-    }))
-  }
-
-  function handleShowMetricWidget(id: MetricWidgetId) {
-    setMetricWidgetLayout(current => ({
-      ...current,
-      [id]: { ...current[id], hidden: false },
-    }))
-  }
-
-  function handleDragWidgetStart(id: WidgetId, event: DragEvent<HTMLButtonElement>) {
+  function handleGridLayoutChange(layout: DashboardGridLayout) {
     if (!editingWidgets) return
-    setDraggingWidget(id)
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', id)
-  }
-
-  function handleDropWidget(targetId: WidgetId, event: DragEvent<HTMLElement>) {
-    event.preventDefault()
-    const draggedId = (event.dataTransfer.getData('text/plain') || draggingWidget) as WidgetId | null
-    setDraggingWidget(null)
-
-    if (!draggedId || draggedId === targetId || !WIDGET_IDS.includes(draggedId)) return
-
-    setWidgetLayout(current => {
-      const visibleIds = WIDGET_IDS
-        .filter(id => !current[id].hidden)
-        .sort((a, b) => current[a].order - current[b].order)
-      const fromIndex = visibleIds.indexOf(draggedId)
-      const toIndex = visibleIds.indexOf(targetId)
-      if (fromIndex < 0 || toIndex < 0) return current
-
-      const reordered = [...visibleIds]
-      reordered.splice(fromIndex, 1)
-      reordered.splice(toIndex, 0, draggedId)
-
-      const next = { ...current }
-      reordered.forEach((id, order) => {
-        next[id] = { ...next[id], order }
-      })
-      WIDGET_IDS
-        .filter(id => current[id].hidden)
-        .sort((a, b) => current[a].order - current[b].order)
-        .forEach((id, index) => {
-          next[id] = { ...next[id], order: reordered.length + index }
-        })
-
-      return next
-    })
-  }
-
-  function handleDragMetricWidgetStart(id: MetricWidgetId, event: DragEvent<HTMLButtonElement>) {
-    if (!editingWidgets) return
-    setDraggingMetricWidget(id)
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', id)
-  }
-
-  function handleDropMetricWidget(targetId: MetricWidgetId, event: DragEvent<HTMLElement>) {
-    event.preventDefault()
-    const draggedId = (event.dataTransfer.getData('text/plain') || draggingMetricWidget) as MetricWidgetId | null
-    setDraggingMetricWidget(null)
-
-    if (!draggedId || draggedId === targetId || !METRIC_WIDGET_IDS.includes(draggedId)) return
-
-    setMetricWidgetLayout(current => {
-      const visibleIds = METRIC_WIDGET_IDS
-        .filter(id => !current[id].hidden)
-        .sort((a, b) => current[a].order - current[b].order)
-      const fromIndex = visibleIds.indexOf(draggedId)
-      const toIndex = visibleIds.indexOf(targetId)
-      if (fromIndex < 0 || toIndex < 0) return current
-
-      const reordered = [...visibleIds]
-      reordered.splice(fromIndex, 1)
-      reordered.splice(toIndex, 0, draggedId)
-
-      const next = { ...current }
-      reordered.forEach((id, order) => {
-        next[id] = { ...next[id], order }
-      })
-      METRIC_WIDGET_IDS
-        .filter(id => current[id].hidden)
-        .sort((a, b) => current[a].order - current[b].order)
-        .forEach((id, index) => {
-          next[id] = { ...next[id], order: reordered.length + index }
-        })
-
-      return next
-    })
-  }
-
-  function handleResizeWidgetStart(id: WidgetId, corner: ResizeCorner, event: PointerEvent<HTMLSpanElement>) {
-    event.preventDefault()
-    event.stopPropagation()
-
-    const win = event.currentTarget.ownerDocument.defaultView
-    if (!win) return
-    const resizeWindow = win
-
-    const initialX = event.clientX
-    const initialSizeIndex = WIDGET_SIZES.indexOf(widgetLayout[id].size)
-    const horizontalSign = corner.endsWith('left') ? -1 : 1
-    const stepPx = 180
-
-    function onPointerMove(moveEvent: globalThis.PointerEvent) {
-      const signedDelta = (moveEvent.clientX - initialX) * horizontalSign
-      const steps = Math.trunc(signedDelta / stepPx)
-      const nextSizeIndex = Math.max(0, Math.min(WIDGET_SIZES.length - 1, initialSizeIndex + steps))
-
-      setWidgetLayout(current => {
-        const nextSize = WIDGET_SIZES[nextSizeIndex]
-        if (current[id].size === nextSize) return current
-        return {
-          ...current,
-          [id]: { ...current[id], size: nextSize },
-        }
-      })
-    }
-
-    function onPointerUp() {
-      resizeWindow.removeEventListener('pointermove', onPointerMove)
-      resizeWindow.removeEventListener('pointerup', onPointerUp)
-    }
-
-    resizeWindow.addEventListener('pointermove', onPointerMove)
-    resizeWindow.addEventListener('pointerup', onPointerUp)
-  }
-
-  function handleResizeMetricWidgetStart(id: MetricWidgetId, corner: ResizeCorner, event: PointerEvent<HTMLSpanElement>) {
-    event.preventDefault()
-    event.stopPropagation()
-
-    const resizeWindow = event.currentTarget.ownerDocument.defaultView
-    if (!resizeWindow) return
-
-    const initialX = event.clientX
-    const initialY = event.clientY
-    const initialSizeIndex = WIDGET_SIZES.indexOf(metricWidgetLayout[id].size)
-    const initialHeight = metricWidgetLayout[id].height
-    const horizontalSign = corner.endsWith('left') ? -1 : 1
-    const verticalSign = corner.startsWith('top') ? -1 : 1
-    const stepPx = 120
-
-    function onPointerMove(moveEvent: globalThis.PointerEvent) {
-      const signedDelta = (moveEvent.clientX - initialX) * horizontalSign
-      const steps = Math.trunc(signedDelta / stepPx)
-      const nextSizeIndex = Math.max(0, Math.min(WIDGET_SIZES.length - 1, initialSizeIndex + steps))
-      const nextHeight = Math.max(120, Math.min(420, initialHeight + ((moveEvent.clientY - initialY) * verticalSign)))
-
-      setMetricWidgetLayout(current => {
-        const nextSize = WIDGET_SIZES[nextSizeIndex]
-        if (current[id].size === nextSize && current[id].height === nextHeight) return current
-        return {
-          ...current,
-          [id]: { ...current[id], size: nextSize, height: nextHeight },
-        }
-      })
-    }
-
-    function onPointerUp() {
-      resizeWindow?.removeEventListener('pointermove', onPointerMove)
-      resizeWindow?.removeEventListener('pointerup', onPointerUp)
-    }
-
-    resizeWindow.addEventListener('pointermove', onPointerMove)
-    resizeWindow.addEventListener('pointerup', onPointerUp)
+    setDashboardLayout(current => applyGridLayout(current, layout))
   }
 
   const sectionCards = summary ? [
@@ -1003,24 +592,14 @@ export function Dashboard() {
     },
   ] : []
 
-  const visibleWidgets = WIDGET_IDS
-    .map(id => widgetLayout[id])
-    .filter(widget => !widget.hidden)
-    .sort((a, b) => a.order - b.order)
-  const hiddenWidgets = WIDGET_IDS
-    .map(id => widgetLayout[id])
-    .filter(widget => widget.id !== 'stats' && widget.hidden)
-    .sort((a, b) => a.order - b.order)
-  const visibleMetricWidgets = METRIC_WIDGET_IDS
-    .map(id => metricWidgetLayout[id])
-    .filter(widget => !widget.hidden)
-    .sort((a, b) => a.order - b.order)
-  const hiddenMetricWidgets = METRIC_WIDGET_IDS
-    .map(id => metricWidgetLayout[id])
-    .filter(widget => widget.hidden)
-    .sort((a, b) => a.order - b.order)
+  const visibleWidgets = visibleWidgetIds(dashboardLayout)
+  const hiddenWidgets = DASHBOARD_WIDGETS.filter(id => dashboardLayout.widgets[id].hidden)
+  const responsiveLayouts = useMemo(() => toResponsiveLayouts(dashboardLayout), [dashboardLayout])
 
-  const metricWidgetContent: Record<MetricWidgetId, ReactNode> = {
+  const widgetContent: Record<DashboardWidgetId, ReactNode> = {
+    weather: (
+      <WeatherCard weather={weather} loading={weatherLoading} onPickLocation={() => setShowPicker(true)} />
+    ),
     balance: (
       <StatCard
         title="Баланс"
@@ -1086,37 +665,6 @@ export function Dashboard() {
         color="bg-amber-500"
         loading={loading}
       />
-    ),
-  }
-
-  const widgetContent: Record<WidgetId, ReactNode> = {
-    weather: (
-      <WeatherCard weather={weather} loading={weatherLoading} onPickLocation={() => setShowPicker(true)} />
-    ),
-    stats: (
-      visibleMetricWidgets.length > 0 ? (
-        <div className="grid min-w-0 grid-cols-1 content-start gap-4 md:grid-cols-6">
-          {visibleMetricWidgets.map(widget => (
-            <MetricDashboardWidget
-              key={widget.id}
-              layout={widget}
-              dragging={draggingMetricWidget === widget.id}
-              editing={editingWidgets}
-              onDragStart={handleDragMetricWidgetStart}
-              onDragEnd={() => setDraggingMetricWidget(null)}
-              onDrop={handleDropMetricWidget}
-              onResizeStart={handleResizeMetricWidgetStart}
-              onHide={handleHideMetricWidget}
-            >
-              {metricWidgetContent[widget.id]}
-            </MetricDashboardWidget>
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-2xl border border-dashed bg-card/60 px-5 py-8 text-center text-sm text-muted-foreground">
-          Все метрики скрыты
-        </div>
-      )
     ),
     overview: (
       <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
@@ -1185,27 +733,17 @@ export function Dashboard() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed bg-card/60 px-3 py-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {editingWidgets && (hiddenWidgets.length > 0 || hiddenMetricWidgets.length > 0) ? (
+          {editingWidgets && hiddenWidgets.length > 0 ? (
             <>
               <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Скрытые</span>
-              {hiddenWidgets.map(widget => (
+              {hiddenWidgets.map(id => (
                 <button
-                  key={widget.id}
+                  key={id}
                   type="button"
-                  onClick={() => handleShowWidget(widget.id)}
+                  onClick={() => handleShowWidget(id)}
                   className="inline-flex items-center gap-1.5 rounded-lg border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
                 >
-                  {widget.label}
-                </button>
-              ))}
-              {hiddenMetricWidgets.map(widget => (
-                <button
-                  key={widget.id}
-                  type="button"
-                  onClick={() => handleShowMetricWidget(widget.id)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-                >
-                  {widget.label}
+                  {DASHBOARD_WIDGET_LABELS[id]}
                 </button>
               ))}
             </>
@@ -1244,23 +782,42 @@ export function Dashboard() {
       </div>
 
       {visibleWidgets.length > 0 ? (
-        <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-12">
-          {visibleWidgets.map(widget => (
-            <DashboardWidget
-              key={widget.id}
-              layout={widget}
-              dragging={draggingWidget === widget.id}
-              editing={editingWidgets}
-              editable={widget.id !== 'stats'}
-              onDragStart={handleDragWidgetStart}
-              onDragEnd={() => setDraggingWidget(null)}
-              onDrop={handleDropWidget}
-              onResizeStart={handleResizeWidgetStart}
-              onHide={handleHideWidget}
+        <div ref={gridContainerRef} className="min-w-0">
+          {gridMounted ? (
+            <ResponsiveGridLayout
+              className={cn('dashboard-grid -mx-2', editingWidgets && 'is-editing')}
+              width={gridWidth}
+              layouts={responsiveLayouts}
+              breakpoints={{ lg: 1200, md: 768, sm: 0 }}
+              cols={DASHBOARD_GRID_COLS}
+              rowHeight={DASHBOARD_GRID_ROW_HEIGHT}
+              margin={[16, 16]}
+              containerPadding={[8, 0]}
+              dragConfig={{
+                enabled: editingWidgets,
+                bounded: true,
+                cancel: '.dashboard-widget-action',
+                threshold: 4,
+              }}
+              resizeConfig={{
+                enabled: editingWidgets,
+                handles: ['se', 'sw', 'ne', 'nw'],
+              }}
+              onLayoutChange={handleGridLayoutChange}
             >
-              {widgetContent[widget.id]}
-            </DashboardWidget>
-          ))}
+              {visibleWidgets.map(id => (
+                <div key={id} className="min-w-0">
+                  <DashboardGridItem
+                    id={id}
+                    editing={editingWidgets}
+                    onHide={handleHideWidget}
+                  >
+                    {widgetContent[id]}
+                  </DashboardGridItem>
+                </div>
+              ))}
+            </ResponsiveGridLayout>
+          ) : null}
         </div>
       ) : (
         <div className="rounded-2xl border border-dashed bg-card/60 px-5 py-8 text-center text-sm text-muted-foreground">
