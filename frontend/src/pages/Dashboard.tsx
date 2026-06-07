@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Wallet, Dumbbell, TrendingUp, TrendingDown, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight } from 'lucide-react'
+import { Wallet, Dumbbell, TrendingUp, TrendingDown, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight, GripVertical, EyeOff, RotateCcw, Minimize2, Maximize2, ArrowUp, ArrowDown } from 'lucide-react'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
@@ -9,6 +9,70 @@ import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type DashboardSummary, type Transaction, type WeatherData, type Integration } from '@/lib/api'
 
 const LOC_KEY = 'weather_location'
+const WIDGET_LAYOUT_KEY = 'dashboard_widget_layout_v1'
+
+type WidgetId = 'weather' | 'stats' | 'overview' | 'transactions'
+type WidgetSize = 'compact' | 'standard' | 'wide' | 'full'
+
+interface WidgetLayout {
+  id: WidgetId
+  label: string
+  order: number
+  size: WidgetSize
+  hidden: boolean
+}
+
+const WIDGET_IDS: WidgetId[] = ['weather', 'stats', 'overview', 'transactions']
+const WIDGET_SIZES: WidgetSize[] = ['compact', 'standard', 'wide', 'full']
+
+const DEFAULT_WIDGET_LAYOUT: Record<WidgetId, WidgetLayout> = {
+  weather: { id: 'weather', label: 'Погода', order: 0, size: 'compact', hidden: false },
+  stats: { id: 'stats', label: 'Метрики', order: 1, size: 'wide', hidden: false },
+  overview: { id: 'overview', label: 'Срез по разделам', order: 2, size: 'wide', hidden: false },
+  transactions: { id: 'transactions', label: 'Транзакции', order: 3, size: 'compact', hidden: false },
+}
+
+const WIDGET_SIZE_CLASS: Record<WidgetSize, string> = {
+  compact: 'xl:col-span-4',
+  standard: 'xl:col-span-6',
+  wide: 'xl:col-span-8',
+  full: 'xl:col-span-12',
+}
+
+function defaultWidgetLayout() {
+  return Object.fromEntries(
+    WIDGET_IDS.map(id => [id, { ...DEFAULT_WIDGET_LAYOUT[id] }])
+  ) as Record<WidgetId, WidgetLayout>
+}
+
+function loadWidgetLayout() {
+  if (typeof localStorage === 'undefined') return defaultWidgetLayout()
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(WIDGET_LAYOUT_KEY) || 'null') as Partial<Record<WidgetId, Partial<WidgetLayout>>> | null
+    if (!saved) return defaultWidgetLayout()
+
+    const layout = defaultWidgetLayout()
+    for (const id of WIDGET_IDS) {
+      const item = saved[id]
+      if (!item) continue
+
+      layout[id] = {
+        ...layout[id],
+        order: typeof item.order === 'number' ? item.order : layout[id].order,
+        size: item.size && WIDGET_SIZES.includes(item.size) ? item.size : layout[id].size,
+        hidden: typeof item.hidden === 'boolean' ? item.hidden : layout[id].hidden,
+      }
+    }
+    return layout
+  } catch {
+    return defaultWidgetLayout()
+  }
+}
+
+function persistWidgetLayout(layout: Record<WidgetId, WidgetLayout>) {
+  localStorage.setItem(WIDGET_LAYOUT_KEY, JSON.stringify(layout))
+}
 
 interface SavedLocation { lat: number; lon: number; city: string }
 
@@ -319,6 +383,117 @@ function OverviewSectionCard({
   )
 }
 
+function DashboardWidget({
+  layout,
+  dragging,
+  children,
+  canMoveUp,
+  canMoveDown,
+  onDragStart,
+  onDragEnd,
+  onDrop,
+  onMove,
+  onResize,
+  onHide,
+}: {
+  layout: WidgetLayout
+  dragging: boolean
+  children: ReactNode
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onDragStart: (id: WidgetId, event: DragEvent<HTMLButtonElement>) => void
+  onDragEnd: () => void
+  onDrop: (id: WidgetId, event: DragEvent<HTMLElement>) => void
+  onMove: (id: WidgetId, direction: -1 | 1) => void
+  onResize: (id: WidgetId, direction: -1 | 1) => void
+  onHide: (id: WidgetId) => void
+}) {
+  const sizeIndex = WIDGET_SIZES.indexOf(layout.size)
+  const canShrink = sizeIndex > 0
+  const canGrow = sizeIndex < WIDGET_SIZES.length - 1
+
+  return (
+    <section
+      className={cn(
+        'min-w-0 transition-opacity',
+        WIDGET_SIZE_CLASS[layout.size],
+        dragging && 'opacity-50'
+      )}
+      onDragOver={event => event.preventDefault()}
+      onDrop={event => onDrop(layout.id, event)}
+    >
+      <div className="mb-2 flex min-w-0 items-center justify-between gap-3 px-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            draggable
+            onDragStart={event => onDragStart(layout.id, event)}
+            onDragEnd={onDragEnd}
+            aria-label={`Переместить ${layout.label}`}
+            title="Переместить"
+            className="inline-flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+          <h2 className="truncate text-sm font-semibold uppercase tracking-wider text-foreground">{layout.label}</h2>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onMove(layout.id, -1)}
+            disabled={!canMoveUp}
+            aria-label={`Поднять ${layout.label}`}
+            title="Поднять"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+          >
+            <ArrowUp className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onMove(layout.id, 1)}
+            disabled={!canMoveDown}
+            aria-label={`Опустить ${layout.label}`}
+            title="Опустить"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+          >
+            <ArrowDown className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onResize(layout.id, -1)}
+            disabled={!canShrink}
+            aria-label={`Уменьшить ${layout.label}`}
+            title="Уменьшить"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+          >
+            <Minimize2 className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onResize(layout.id, 1)}
+            disabled={!canGrow}
+            aria-label={`Увеличить ${layout.label}`}
+            title="Увеличить"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onHide(layout.id)}
+            aria-label={`Скрыть ${layout.label}`}
+            title="Скрыть"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <EyeOff className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+      <div className="min-w-0">{children}</div>
+    </section>
+  )
+}
+
 export function Dashboard() {
   const globalRange = useGlobalDateRange()
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
@@ -329,6 +504,8 @@ export function Dashboard() {
   const [showPicker, setShowPicker] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [integrations, setIntegrations] = useState<Integration[]>([])
+  const [widgetLayout, setWidgetLayout] = useState(loadWidgetLayout)
+  const [draggingWidget, setDraggingWidget] = useState<WidgetId | null>(null)
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true)
@@ -388,6 +565,10 @@ export function Dashboard() {
     }
   }, [loadDashboardData, loadIntegrations])
 
+  useEffect(() => {
+    persistWidgetLayout(widgetLayout)
+  }, [widgetLayout])
+
   const enabledDashboardSources = integrations.filter(i =>
     (i.name === 'zenmoney' || i.name === 'strava' || i.name === 'hevy') && i.enabled
   )
@@ -408,6 +589,95 @@ export function Dashboard() {
     } finally {
       setSyncing(false)
     }
+  }
+
+  function handleResetWidgetLayout() {
+    setWidgetLayout(defaultWidgetLayout())
+  }
+
+  function handleResizeWidget(id: WidgetId, direction: -1 | 1) {
+    setWidgetLayout(current => {
+      const next = { ...current }
+      const sizeIndex = WIDGET_SIZES.indexOf(next[id].size)
+      const nextSize = WIDGET_SIZES[Math.max(0, Math.min(WIDGET_SIZES.length - 1, sizeIndex + direction))]
+      next[id] = { ...next[id], size: nextSize }
+      return next
+    })
+  }
+
+  function handleHideWidget(id: WidgetId) {
+    setWidgetLayout(current => ({
+      ...current,
+      [id]: { ...current[id], hidden: true },
+    }))
+  }
+
+  function handleShowWidget(id: WidgetId) {
+    setWidgetLayout(current => ({
+      ...current,
+      [id]: { ...current[id], hidden: false },
+    }))
+  }
+
+  function handleMoveWidget(id: WidgetId, direction: -1 | 1) {
+    setWidgetLayout(current => {
+      const visibleIds = WIDGET_IDS
+        .filter(widgetId => !current[widgetId].hidden)
+        .sort((a, b) => current[a].order - current[b].order)
+      const index = visibleIds.indexOf(id)
+      const nextIndex = index + direction
+      if (index < 0 || nextIndex < 0 || nextIndex >= visibleIds.length) return current
+
+      const reordered = [...visibleIds]
+      const [moved] = reordered.splice(index, 1)
+      reordered.splice(nextIndex, 0, moved)
+
+      const next = { ...current }
+      reordered.forEach((widgetId, order) => {
+        next[widgetId] = { ...next[widgetId], order }
+      })
+      return next
+    })
+  }
+
+  function handleDragWidgetStart(id: WidgetId, event: DragEvent<HTMLButtonElement>) {
+    setDraggingWidget(id)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', id)
+  }
+
+  function handleDropWidget(targetId: WidgetId, event: DragEvent<HTMLElement>) {
+    event.preventDefault()
+    const draggedId = (event.dataTransfer.getData('text/plain') || draggingWidget) as WidgetId | null
+    setDraggingWidget(null)
+
+    if (!draggedId || draggedId === targetId || !WIDGET_IDS.includes(draggedId)) return
+
+    setWidgetLayout(current => {
+      const visibleIds = WIDGET_IDS
+        .filter(id => !current[id].hidden)
+        .sort((a, b) => current[a].order - current[b].order)
+      const fromIndex = visibleIds.indexOf(draggedId)
+      const toIndex = visibleIds.indexOf(targetId)
+      if (fromIndex < 0 || toIndex < 0) return current
+
+      const reordered = [...visibleIds]
+      reordered.splice(fromIndex, 1)
+      reordered.splice(toIndex, 0, draggedId)
+
+      const next = { ...current }
+      reordered.forEach((id, order) => {
+        next[id] = { ...next[id], order }
+      })
+      WIDGET_IDS
+        .filter(id => current[id].hidden)
+        .sort((a, b) => current[a].order - current[b].order)
+        .forEach((id, index) => {
+          next[id] = { ...next[id], order: reordered.length + index }
+        })
+
+      return next
+    })
   }
 
   const sectionCards = summary ? [
@@ -493,8 +763,122 @@ export function Dashboard() {
     },
   ] : []
 
+  const visibleWidgets = WIDGET_IDS
+    .map(id => widgetLayout[id])
+    .filter(widget => !widget.hidden)
+    .sort((a, b) => a.order - b.order)
+  const hiddenWidgets = WIDGET_IDS
+    .map(id => widgetLayout[id])
+    .filter(widget => widget.hidden)
+    .sort((a, b) => a.order - b.order)
+
+  const widgetContent: Record<WidgetId, ReactNode> = {
+    weather: (
+      <WeatherCard weather={weather} loading={weatherLoading} onPickLocation={() => setShowPicker(true)} />
+    ),
+    stats: (
+      <div className="grid min-w-0 grid-cols-1 content-start gap-4 sm:grid-cols-2 2xl:grid-cols-3">
+        <StatCard
+          title="Баланс"
+          value={summary ? fmt(summary.finance.total_balance, 'RUB') : '—'}
+          sub="по счетам в балансе"
+          icon={Wallet}
+          color="bg-blue-500"
+          loading={loading}
+        />
+        <StatCard
+          title={globalRange.isActive ? 'Расходы за период' : 'Расходы за месяц'}
+          value={summary ? fmt(summary.finance.monthly_spending, 'RUB') : '—'}
+          sub={summary ? `доходы: ${fmt(summary.finance.monthly_income, 'RUB')}` : 'нет данных'}
+          icon={TrendingDown}
+          color="bg-rose-500"
+          loading={loading}
+        />
+        <StatCard
+          title="Активности"
+          value={summary ? String(summary.fitness.activities_this_week) : '—'}
+          sub={summary && summary.fitness.total_distance_km > 0
+            ? `${summary.fitness.total_distance_km.toFixed(1)} км ${periodText}`
+            : periodText}
+          icon={Route}
+          trend={summary && summary.fitness.activities_this_week > 0 ? 'up' : undefined}
+          color="bg-orange-500"
+          loading={loading}
+        />
+        <StatCard
+          title="Тренировки"
+          value={summary ? String(summary.fitness.workouts_this_week) : '—'}
+          sub={periodText}
+          icon={Dumbbell}
+          trend={summary && summary.fitness.workouts_this_week > 0 ? 'up' : undefined}
+          color="bg-violet-500"
+          loading={loading}
+        />
+        <StatCard
+          title={globalRange.isActive ? 'Питание за период' : 'Питание сегодня'}
+          value={summary ? `${Math.round(summary.nutrition.today_kcal)} ккал` : '—'}
+          sub={summary?.nutrition.target_calories
+            ? `цель: ${Math.round(summary.nutrition.target_calories)} ккал · гидратация ${Math.round(summary?.nutrition.today_hydration_ml ?? 0)} мл`
+            : `гидратация: ${Math.round(summary?.nutrition.today_hydration_ml ?? 0)} мл`}
+          icon={UtensilsCrossed}
+          color="bg-emerald-500"
+          loading={loading}
+        />
+        <StatCard
+          title="Overdue"
+          value={summary ? String(summary.productivity.overdue_total) : '—'}
+          sub={summary ? `${globalRange.isActive ? 'в периоде' : 'сегодня'}: ${summary.productivity.due_today_total}` : 'нет данных'}
+          icon={ListTodo}
+          color="bg-amber-500"
+          loading={loading}
+        />
+      </div>
+    ),
+    overview: (
+      <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
+        {sectionCards.map(card => (
+          <OverviewSectionCard key={card.title} {...card} loading={loading} />
+        ))}
+      </div>
+    ),
+    transactions: (
+      <div className="rounded-2xl border bg-card/90 overflow-hidden shadow-sm">
+        {loading ? (
+          <div className="divide-y">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="px-5 py-3 flex items-center gap-3">
+                <div className="h-4 w-20 bg-muted rounded animate-pulse" />
+                <div className="flex-1 h-4 bg-muted rounded animate-pulse" />
+                <div className="h-4 w-16 bg-muted rounded animate-pulse" />
+              </div>
+            ))}
+          </div>
+        ) : txs.length === 0 ? (
+          <div className="px-5 py-4 text-sm text-muted-foreground text-center">Нет транзакций</div>
+        ) : (
+          <div className="divide-y">
+            {txs.map(tx => (
+              <div key={tx.id} className="px-5 py-3 flex items-center gap-4">
+                <span className="text-xs text-muted-foreground w-16 shrink-0">{fmtDate(tx.occurred_at)}</span>
+                <span className="flex-1 text-sm text-foreground truncate">
+                  {tx.payee || tx.comment || '—'}
+                </span>
+                <span className={cn(
+                  'text-sm font-medium tabular-nums',
+                  tx.amount > 0 ? 'text-emerald-500' : 'text-rose-500'
+                )}>
+                  {tx.amount > 0 ? '+' : ''}{fmt(tx.amount, tx.currency)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    ),
+  }
+
   return (
-      <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       {showPicker && <LocationPicker onSelect={handleLocationSelect} onClose={() => setShowPicker(false)} />}
       <PageHeader
         eyebrow="Overview"
@@ -515,122 +899,61 @@ export function Dashboard() {
         )}
       />
 
-      {/* Weather + Stats */}
-      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="min-w-0 lg:col-span-1">
-          <WeatherCard weather={weather} loading={weatherLoading} onPickLocation={() => setShowPicker(true)} />
-        </div>
-        <div className="grid min-w-0 grid-cols-1 content-start gap-4 sm:grid-cols-2 xl:grid-cols-3 lg:col-span-2">
-          <StatCard
-            title="Баланс"
-            value={summary ? fmt(summary.finance.total_balance, 'RUB') : '—'}
-            sub="по счетам в балансе"
-            icon={Wallet}
-            color="bg-blue-500"
-            loading={loading}
-          />
-          <StatCard
-            title={globalRange.isActive ? 'Расходы за период' : 'Расходы за месяц'}
-            value={summary ? fmt(summary.finance.monthly_spending, 'RUB') : '—'}
-            sub={summary ? `доходы: ${fmt(summary.finance.monthly_income, 'RUB')}` : 'нет данных'}
-            icon={TrendingDown}
-            color="bg-rose-500"
-            loading={loading}
-          />
-          <StatCard
-            title="Активности"
-            value={summary ? String(summary.fitness.activities_this_week) : '—'}
-            sub={summary && summary.fitness.total_distance_km > 0
-              ? `${summary.fitness.total_distance_km.toFixed(1)} км ${periodText}`
-              : periodText}
-            icon={Route}
-            trend={summary && summary.fitness.activities_this_week > 0 ? 'up' : undefined}
-            color="bg-orange-500"
-            loading={loading}
-          />
-          <StatCard
-            title="Тренировки"
-            value={summary ? String(summary.fitness.workouts_this_week) : '—'}
-            sub={periodText}
-            icon={Dumbbell}
-            trend={summary && summary.fitness.workouts_this_week > 0 ? 'up' : undefined}
-            color="bg-violet-500"
-            loading={loading}
-          />
-          <StatCard
-            title={globalRange.isActive ? 'Питание за период' : 'Питание сегодня'}
-            value={summary ? `${Math.round(summary.nutrition.today_kcal)} ккал` : '—'}
-            sub={summary?.nutrition.target_calories
-              ? `цель: ${Math.round(summary.nutrition.target_calories)} ккал · гидратация ${Math.round(summary?.nutrition.today_hydration_ml ?? 0)} мл`
-              : `гидратация: ${Math.round(summary?.nutrition.today_hydration_ml ?? 0)} мл`}
-            icon={UtensilsCrossed}
-            color="bg-emerald-500"
-            loading={loading}
-          />
-          <StatCard
-            title="Overdue"
-            value={summary ? String(summary.productivity.overdue_total) : '—'}
-            sub={summary ? `${globalRange.isActive ? 'в периоде' : 'сегодня'}: ${summary.productivity.due_today_total}` : 'нет данных'}
-            icon={ListTodo}
-            color="bg-amber-500"
-            loading={loading}
-          />
-        </div>
-      </div>
-
-      {/* Section overview */}
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
-              Срез по разделам
-              <InfoTooltip text="Самое важное по финансам, фитнесу, питанию, задачам и AI без перехода по вкладкам." />
-            </h2>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-          {sectionCards.map(card => (
-            <OverviewSectionCard key={card.title} {...card} loading={loading} />
-          ))}
-        </div>
-      </div>
-
-      {/* Recent transactions */}
-      <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Последние транзакции</h2>
-        <div className="rounded-2xl border bg-card/90 overflow-hidden shadow-sm">
-          {loading ? (
-            <div className="divide-y">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="px-5 py-3 flex items-center gap-3">
-                  <div className="h-4 w-20 bg-muted rounded animate-pulse" />
-                  <div className="flex-1 h-4 bg-muted rounded animate-pulse" />
-                  <div className="h-4 w-16 bg-muted rounded animate-pulse" />
-                </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed bg-card/60 px-3 py-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {hiddenWidgets.length > 0 ? (
+            <>
+              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Скрытые</span>
+              {hiddenWidgets.map(widget => (
+                <button
+                  key={widget.id}
+                  type="button"
+                  onClick={() => handleShowWidget(widget.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                >
+                  {widget.label}
+                </button>
               ))}
-            </div>
-          ) : txs.length === 0 ? (
-            <div className="px-5 py-4 text-sm text-muted-foreground text-center">Нет транзакций</div>
+            </>
           ) : (
-            <div className="divide-y">
-              {txs.map(tx => (
-                <div key={tx.id} className="px-5 py-3 flex items-center gap-4">
-                  <span className="text-xs text-muted-foreground w-16 shrink-0">{fmtDate(tx.occurred_at)}</span>
-                  <span className="flex-1 text-sm text-foreground truncate">
-                    {tx.payee || tx.comment || '—'}
-                  </span>
-                  <span className={cn(
-                    'text-sm font-medium tabular-nums',
-                    tx.amount > 0 ? 'text-emerald-500' : 'text-rose-500'
-                  )}>
-                    {tx.amount > 0 ? '+' : ''}{fmt(tx.amount, tx.currency)}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Виджеты</span>
           )}
         </div>
+        <button
+          type="button"
+          onClick={handleResetWidgetLayout}
+          className="inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Сбросить
+        </button>
       </div>
+
+      {visibleWidgets.length > 0 ? (
+        <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-12">
+          {visibleWidgets.map((widget, index) => (
+            <DashboardWidget
+              key={widget.id}
+              layout={widget}
+              dragging={draggingWidget === widget.id}
+              canMoveUp={index > 0}
+              canMoveDown={index < visibleWidgets.length - 1}
+              onDragStart={handleDragWidgetStart}
+              onDragEnd={() => setDraggingWidget(null)}
+              onDrop={handleDropWidget}
+              onMove={handleMoveWidget}
+              onResize={handleResizeWidget}
+              onHide={handleHideWidget}
+            >
+              {widgetContent[widget.id]}
+            </DashboardWidget>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-dashed bg-card/60 px-5 py-8 text-center text-sm text-muted-foreground">
+          Все виджеты скрыты
+        </div>
+      )}
     </div>
   )
 }
