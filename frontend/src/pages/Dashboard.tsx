@@ -10,8 +10,10 @@ import { api, type DashboardSummary, type Transaction, type WeatherData, type In
 
 const LOC_KEY = 'weather_location'
 const WIDGET_LAYOUT_KEY = 'dashboard_widget_layout_v1'
+const METRIC_WIDGET_LAYOUT_KEY = 'dashboard_metric_widget_layout_v1'
 
 type WidgetId = 'weather' | 'stats' | 'overview' | 'transactions'
+type MetricWidgetId = 'balance' | 'spending' | 'activities' | 'workouts' | 'nutrition' | 'overdue'
 type WidgetSize = 'compact' | 'standard' | 'wide' | 'full'
 type ResizeCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 
@@ -23,7 +25,17 @@ interface WidgetLayout {
   hidden: boolean
 }
 
+interface MetricWidgetLayout {
+  id: MetricWidgetId
+  label: string
+  order: number
+  size: WidgetSize
+  height: number
+  hidden: boolean
+}
+
 const WIDGET_IDS: WidgetId[] = ['weather', 'stats', 'overview', 'transactions']
+const METRIC_WIDGET_IDS: MetricWidgetId[] = ['balance', 'spending', 'activities', 'workouts', 'nutrition', 'overdue']
 const WIDGET_SIZES: WidgetSize[] = ['compact', 'standard', 'wide', 'full']
 
 const DEFAULT_WIDGET_LAYOUT: Record<WidgetId, WidgetLayout> = {
@@ -38,6 +50,22 @@ const WIDGET_SIZE_CLASS: Record<WidgetSize, string> = {
   standard: 'xl:col-span-6',
   wide: 'xl:col-span-8',
   full: 'xl:col-span-12',
+}
+
+const DEFAULT_METRIC_WIDGET_LAYOUT: Record<MetricWidgetId, MetricWidgetLayout> = {
+  balance: { id: 'balance', label: 'Баланс', order: 0, size: 'compact', height: 132, hidden: false },
+  spending: { id: 'spending', label: 'Расходы за месяц', order: 1, size: 'compact', height: 132, hidden: false },
+  activities: { id: 'activities', label: 'Активности', order: 2, size: 'compact', height: 132, hidden: false },
+  workouts: { id: 'workouts', label: 'Тренировки', order: 3, size: 'compact', height: 132, hidden: false },
+  nutrition: { id: 'nutrition', label: 'Питание', order: 4, size: 'compact', height: 132, hidden: false },
+  overdue: { id: 'overdue', label: 'Overdue', order: 5, size: 'compact', height: 132, hidden: false },
+}
+
+const METRIC_WIDGET_SIZE_CLASS: Record<WidgetSize, string> = {
+  compact: 'md:col-span-2',
+  standard: 'md:col-span-3',
+  wide: 'md:col-span-4',
+  full: 'md:col-span-6',
 }
 
 function defaultWidgetLayout() {
@@ -75,6 +103,42 @@ function persistWidgetLayout(layout: Record<WidgetId, WidgetLayout>) {
   localStorage.setItem(WIDGET_LAYOUT_KEY, JSON.stringify(layout))
 }
 
+function defaultMetricWidgetLayout() {
+  return Object.fromEntries(
+    METRIC_WIDGET_IDS.map(id => [id, { ...DEFAULT_METRIC_WIDGET_LAYOUT[id] }])
+  ) as Record<MetricWidgetId, MetricWidgetLayout>
+}
+
+function loadMetricWidgetLayout() {
+  if (typeof localStorage === 'undefined') return defaultMetricWidgetLayout()
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(METRIC_WIDGET_LAYOUT_KEY) || 'null') as Partial<Record<MetricWidgetId, Partial<MetricWidgetLayout>>> | null
+    if (!saved) return defaultMetricWidgetLayout()
+
+    const layout = defaultMetricWidgetLayout()
+    for (const id of METRIC_WIDGET_IDS) {
+      const item = saved[id]
+      if (!item) continue
+
+      layout[id] = {
+        ...layout[id],
+        order: typeof item.order === 'number' ? item.order : layout[id].order,
+        size: item.size && WIDGET_SIZES.includes(item.size) ? item.size : layout[id].size,
+        height: typeof item.height === 'number' ? Math.max(120, Math.min(420, item.height)) : layout[id].height,
+        hidden: typeof item.hidden === 'boolean' ? item.hidden : layout[id].hidden,
+      }
+    }
+    return layout
+  } catch {
+    return defaultMetricWidgetLayout()
+  }
+}
+
+function persistMetricWidgetLayout(layout: Record<MetricWidgetId, MetricWidgetLayout>) {
+  localStorage.setItem(METRIC_WIDGET_LAYOUT_KEY, JSON.stringify(layout))
+}
+
 interface SavedLocation { lat: number; lon: number; city: string }
 
 function loadLocation(): SavedLocation | null {
@@ -102,7 +166,7 @@ function StatCard({
   loading?: boolean
 }) {
   return (
-    <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-3">
+    <div className="flex h-full flex-col gap-3 rounded-2xl border bg-card/90 p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <span className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground">
           {title}
@@ -389,6 +453,7 @@ function DashboardWidget({
   dragging,
   children,
   editing,
+  editable = true,
   onDragStart,
   onDragEnd,
   onDrop,
@@ -399,6 +464,7 @@ function DashboardWidget({
   dragging: boolean
   children: ReactNode
   editing: boolean
+  editable?: boolean
   onDragStart: (id: WidgetId, event: DragEvent<HTMLButtonElement>) => void
   onDragEnd: () => void
   onDrop: (id: WidgetId, event: DragEvent<HTMLElement>) => void
@@ -416,7 +482,7 @@ function DashboardWidget({
       onDragOver={event => editing && event.preventDefault()}
       onDrop={event => editing && onDrop(layout.id, event)}
     >
-      {editing ? (
+      {editing && editable ? (
         <div className="mb-2 flex min-w-0 items-center justify-between gap-3 px-1">
           <div className="flex min-w-0 items-center gap-2">
             <button
@@ -443,9 +509,9 @@ function DashboardWidget({
           </button>
         </div>
       ) : null}
-      <div className={cn('relative min-w-0', editing && 'rounded-2xl outline outline-1 outline-dashed outline-primary/35')}>
+      <div className={cn('relative min-w-0', editing && editable && 'rounded-2xl outline outline-1 outline-dashed outline-primary/35')}>
         {children}
-        {editing ? (
+        {editing && editable ? (
           <>
             {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as ResizeCorner[]).map(corner => (
               <span
@@ -469,6 +535,91 @@ function DashboardWidget({
   )
 }
 
+function MetricDashboardWidget({
+  layout,
+  dragging,
+  children,
+  editing,
+  onDragStart,
+  onDragEnd,
+  onDrop,
+  onResizeStart,
+  onHide,
+}: {
+  layout: MetricWidgetLayout
+  dragging: boolean
+  children: ReactNode
+  editing: boolean
+  onDragStart: (id: MetricWidgetId, event: DragEvent<HTMLButtonElement>) => void
+  onDragEnd: () => void
+  onDrop: (id: MetricWidgetId, event: DragEvent<HTMLElement>) => void
+  onResizeStart: (id: MetricWidgetId, corner: ResizeCorner, event: PointerEvent<HTMLSpanElement>) => void
+  onHide: (id: MetricWidgetId) => void
+}) {
+  return (
+    <article
+      data-metric-widget-id={layout.id}
+      className={cn(
+        'min-w-0 self-start transition-opacity',
+        METRIC_WIDGET_SIZE_CLASS[layout.size],
+        dragging && 'opacity-50'
+      )}
+      onDragOver={event => editing && event.preventDefault()}
+      onDrop={event => editing && onDrop(layout.id, event)}
+    >
+      {editing ? (
+        <div className="mb-2 flex items-center justify-between gap-2 px-1">
+          <button
+            type="button"
+            draggable
+            onDragStart={event => onDragStart(layout.id, event)}
+            onDragEnd={onDragEnd}
+            aria-label={`Переместить ${layout.label}`}
+            title="Переместить"
+            className="inline-flex h-7 w-7 cursor-grab items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onHide(layout.id)}
+            aria-label={`Скрыть ${layout.label}`}
+            title="Скрыть"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <EyeOff className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
+      <div
+        className={cn('relative min-w-0', editing && 'rounded-2xl outline outline-1 outline-dashed outline-primary/35')}
+        style={{ height: layout.height }}
+      >
+        {children}
+        {editing ? (
+          <>
+            {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as ResizeCorner[]).map(corner => (
+              <span
+                key={corner}
+                data-metric-resize-corner={corner}
+                role="presentation"
+                onPointerDown={event => onResizeStart(layout.id, corner, event)}
+                className={cn(
+                  'absolute z-10 h-5 w-5 rounded-full border border-primary/45 bg-background/95 shadow-sm',
+                  corner === 'top-left' && '-left-2 -top-2 cursor-nwse-resize',
+                  corner === 'top-right' && '-right-2 -top-2 cursor-nesw-resize',
+                  corner === 'bottom-left' && '-bottom-2 -left-2 cursor-nesw-resize',
+                  corner === 'bottom-right' && '-bottom-2 -right-2 cursor-nwse-resize'
+                )}
+              />
+            ))}
+          </>
+        ) : null}
+      </div>
+    </article>
+  )
+}
+
 export function Dashboard() {
   const globalRange = useGlobalDateRange()
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
@@ -479,8 +630,14 @@ export function Dashboard() {
   const [showPicker, setShowPicker] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [integrations, setIntegrations] = useState<Integration[]>([])
-  const [widgetLayout, setWidgetLayout] = useState(loadWidgetLayout)
+  const [widgetLayout, setWidgetLayout] = useState(() => {
+    const layout = loadWidgetLayout()
+    layout.stats = { ...layout.stats, size: 'wide', hidden: false }
+    return layout
+  })
+  const [metricWidgetLayout, setMetricWidgetLayout] = useState(loadMetricWidgetLayout)
   const [draggingWidget, setDraggingWidget] = useState<WidgetId | null>(null)
+  const [draggingMetricWidget, setDraggingMetricWidget] = useState<MetricWidgetId | null>(null)
   const [editingWidgets, setEditingWidgets] = useState(false)
 
   const loadDashboardData = useCallback(async () => {
@@ -545,6 +702,10 @@ export function Dashboard() {
     persistWidgetLayout(widgetLayout)
   }, [widgetLayout])
 
+  useEffect(() => {
+    persistMetricWidgetLayout(metricWidgetLayout)
+  }, [metricWidgetLayout])
+
   const enabledDashboardSources = integrations.filter(i =>
     (i.name === 'zenmoney' || i.name === 'strava' || i.name === 'hevy') && i.enabled
   )
@@ -569,6 +730,7 @@ export function Dashboard() {
 
   function handleResetWidgetLayout() {
     setWidgetLayout(defaultWidgetLayout())
+    setMetricWidgetLayout(defaultMetricWidgetLayout())
   }
 
   function handleHideWidget(id: WidgetId) {
@@ -580,6 +742,20 @@ export function Dashboard() {
 
   function handleShowWidget(id: WidgetId) {
     setWidgetLayout(current => ({
+      ...current,
+      [id]: { ...current[id], hidden: false },
+    }))
+  }
+
+  function handleHideMetricWidget(id: MetricWidgetId) {
+    setMetricWidgetLayout(current => ({
+      ...current,
+      [id]: { ...current[id], hidden: true },
+    }))
+  }
+
+  function handleShowMetricWidget(id: MetricWidgetId) {
+    setMetricWidgetLayout(current => ({
       ...current,
       [id]: { ...current[id], hidden: false },
     }))
@@ -626,6 +802,47 @@ export function Dashboard() {
     })
   }
 
+  function handleDragMetricWidgetStart(id: MetricWidgetId, event: DragEvent<HTMLButtonElement>) {
+    if (!editingWidgets) return
+    setDraggingMetricWidget(id)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', id)
+  }
+
+  function handleDropMetricWidget(targetId: MetricWidgetId, event: DragEvent<HTMLElement>) {
+    event.preventDefault()
+    const draggedId = (event.dataTransfer.getData('text/plain') || draggingMetricWidget) as MetricWidgetId | null
+    setDraggingMetricWidget(null)
+
+    if (!draggedId || draggedId === targetId || !METRIC_WIDGET_IDS.includes(draggedId)) return
+
+    setMetricWidgetLayout(current => {
+      const visibleIds = METRIC_WIDGET_IDS
+        .filter(id => !current[id].hidden)
+        .sort((a, b) => current[a].order - current[b].order)
+      const fromIndex = visibleIds.indexOf(draggedId)
+      const toIndex = visibleIds.indexOf(targetId)
+      if (fromIndex < 0 || toIndex < 0) return current
+
+      const reordered = [...visibleIds]
+      reordered.splice(fromIndex, 1)
+      reordered.splice(toIndex, 0, draggedId)
+
+      const next = { ...current }
+      reordered.forEach((id, order) => {
+        next[id] = { ...next[id], order }
+      })
+      METRIC_WIDGET_IDS
+        .filter(id => current[id].hidden)
+        .sort((a, b) => current[a].order - current[b].order)
+        .forEach((id, index) => {
+          next[id] = { ...next[id], order: reordered.length + index }
+        })
+
+      return next
+    })
+  }
+
   function handleResizeWidgetStart(id: WidgetId, corner: ResizeCorner, event: PointerEvent<HTMLSpanElement>) {
     event.preventDefault()
     event.stopPropagation()
@@ -657,6 +874,46 @@ export function Dashboard() {
     function onPointerUp() {
       resizeWindow.removeEventListener('pointermove', onPointerMove)
       resizeWindow.removeEventListener('pointerup', onPointerUp)
+    }
+
+    resizeWindow.addEventListener('pointermove', onPointerMove)
+    resizeWindow.addEventListener('pointerup', onPointerUp)
+  }
+
+  function handleResizeMetricWidgetStart(id: MetricWidgetId, corner: ResizeCorner, event: PointerEvent<HTMLSpanElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const resizeWindow = event.currentTarget.ownerDocument.defaultView
+    if (!resizeWindow) return
+
+    const initialX = event.clientX
+    const initialY = event.clientY
+    const initialSizeIndex = WIDGET_SIZES.indexOf(metricWidgetLayout[id].size)
+    const initialHeight = metricWidgetLayout[id].height
+    const horizontalSign = corner.endsWith('left') ? -1 : 1
+    const verticalSign = corner.startsWith('top') ? -1 : 1
+    const stepPx = 120
+
+    function onPointerMove(moveEvent: globalThis.PointerEvent) {
+      const signedDelta = (moveEvent.clientX - initialX) * horizontalSign
+      const steps = Math.trunc(signedDelta / stepPx)
+      const nextSizeIndex = Math.max(0, Math.min(WIDGET_SIZES.length - 1, initialSizeIndex + steps))
+      const nextHeight = Math.max(120, Math.min(420, initialHeight + ((moveEvent.clientY - initialY) * verticalSign)))
+
+      setMetricWidgetLayout(current => {
+        const nextSize = WIDGET_SIZES[nextSizeIndex]
+        if (current[id].size === nextSize && current[id].height === nextHeight) return current
+        return {
+          ...current,
+          [id]: { ...current[id], size: nextSize, height: nextHeight },
+        }
+      })
+    }
+
+    function onPointerUp() {
+      resizeWindow?.removeEventListener('pointermove', onPointerMove)
+      resizeWindow?.removeEventListener('pointerup', onPointerUp)
     }
 
     resizeWindow.addEventListener('pointermove', onPointerMove)
@@ -752,70 +1009,114 @@ export function Dashboard() {
     .sort((a, b) => a.order - b.order)
   const hiddenWidgets = WIDGET_IDS
     .map(id => widgetLayout[id])
+    .filter(widget => widget.id !== 'stats' && widget.hidden)
+    .sort((a, b) => a.order - b.order)
+  const visibleMetricWidgets = METRIC_WIDGET_IDS
+    .map(id => metricWidgetLayout[id])
+    .filter(widget => !widget.hidden)
+    .sort((a, b) => a.order - b.order)
+  const hiddenMetricWidgets = METRIC_WIDGET_IDS
+    .map(id => metricWidgetLayout[id])
     .filter(widget => widget.hidden)
     .sort((a, b) => a.order - b.order)
+
+  const metricWidgetContent: Record<MetricWidgetId, ReactNode> = {
+    balance: (
+      <StatCard
+        title="Баланс"
+        value={summary ? fmt(summary.finance.total_balance, 'RUB') : '—'}
+        sub="по счетам в балансе"
+        icon={Wallet}
+        color="bg-blue-500"
+        loading={loading}
+      />
+    ),
+    spending: (
+      <StatCard
+        title={globalRange.isActive ? 'Расходы за период' : 'Расходы за месяц'}
+        value={summary ? fmt(summary.finance.monthly_spending, 'RUB') : '—'}
+        sub={summary ? `доходы: ${fmt(summary.finance.monthly_income, 'RUB')}` : 'нет данных'}
+        icon={TrendingDown}
+        color="bg-rose-500"
+        loading={loading}
+      />
+    ),
+    activities: (
+      <StatCard
+        title="Активности"
+        value={summary ? String(summary.fitness.activities_this_week) : '—'}
+        sub={summary && summary.fitness.total_distance_km > 0
+          ? `${summary.fitness.total_distance_km.toFixed(1)} км ${periodText}`
+          : periodText}
+        icon={Route}
+        trend={summary && summary.fitness.activities_this_week > 0 ? 'up' : undefined}
+        color="bg-orange-500"
+        loading={loading}
+      />
+    ),
+    workouts: (
+      <StatCard
+        title="Тренировки"
+        value={summary ? String(summary.fitness.workouts_this_week) : '—'}
+        sub={periodText}
+        icon={Dumbbell}
+        trend={summary && summary.fitness.workouts_this_week > 0 ? 'up' : undefined}
+        color="bg-violet-500"
+        loading={loading}
+      />
+    ),
+    nutrition: (
+      <StatCard
+        title={globalRange.isActive ? 'Питание за период' : 'Питание сегодня'}
+        value={summary ? `${Math.round(summary.nutrition.today_kcal)} ккал` : '—'}
+        sub={summary?.nutrition.target_calories
+          ? `цель: ${Math.round(summary.nutrition.target_calories)} ккал · гидратация ${Math.round(summary?.nutrition.today_hydration_ml ?? 0)} мл`
+          : `гидратация: ${Math.round(summary?.nutrition.today_hydration_ml ?? 0)} мл`}
+        icon={UtensilsCrossed}
+        color="bg-emerald-500"
+        loading={loading}
+      />
+    ),
+    overdue: (
+      <StatCard
+        title="Overdue"
+        value={summary ? String(summary.productivity.overdue_total) : '—'}
+        sub={summary ? `${globalRange.isActive ? 'в периоде' : 'сегодня'}: ${summary.productivity.due_today_total}` : 'нет данных'}
+        icon={ListTodo}
+        color="bg-amber-500"
+        loading={loading}
+      />
+    ),
+  }
 
   const widgetContent: Record<WidgetId, ReactNode> = {
     weather: (
       <WeatherCard weather={weather} loading={weatherLoading} onPickLocation={() => setShowPicker(true)} />
     ),
     stats: (
-      <div className="grid min-w-0 grid-cols-1 content-start gap-4 sm:grid-cols-2 2xl:grid-cols-3">
-        <StatCard
-          title="Баланс"
-          value={summary ? fmt(summary.finance.total_balance, 'RUB') : '—'}
-          sub="по счетам в балансе"
-          icon={Wallet}
-          color="bg-blue-500"
-          loading={loading}
-        />
-        <StatCard
-          title={globalRange.isActive ? 'Расходы за период' : 'Расходы за месяц'}
-          value={summary ? fmt(summary.finance.monthly_spending, 'RUB') : '—'}
-          sub={summary ? `доходы: ${fmt(summary.finance.monthly_income, 'RUB')}` : 'нет данных'}
-          icon={TrendingDown}
-          color="bg-rose-500"
-          loading={loading}
-        />
-        <StatCard
-          title="Активности"
-          value={summary ? String(summary.fitness.activities_this_week) : '—'}
-          sub={summary && summary.fitness.total_distance_km > 0
-            ? `${summary.fitness.total_distance_km.toFixed(1)} км ${periodText}`
-            : periodText}
-          icon={Route}
-          trend={summary && summary.fitness.activities_this_week > 0 ? 'up' : undefined}
-          color="bg-orange-500"
-          loading={loading}
-        />
-        <StatCard
-          title="Тренировки"
-          value={summary ? String(summary.fitness.workouts_this_week) : '—'}
-          sub={periodText}
-          icon={Dumbbell}
-          trend={summary && summary.fitness.workouts_this_week > 0 ? 'up' : undefined}
-          color="bg-violet-500"
-          loading={loading}
-        />
-        <StatCard
-          title={globalRange.isActive ? 'Питание за период' : 'Питание сегодня'}
-          value={summary ? `${Math.round(summary.nutrition.today_kcal)} ккал` : '—'}
-          sub={summary?.nutrition.target_calories
-            ? `цель: ${Math.round(summary.nutrition.target_calories)} ккал · гидратация ${Math.round(summary?.nutrition.today_hydration_ml ?? 0)} мл`
-            : `гидратация: ${Math.round(summary?.nutrition.today_hydration_ml ?? 0)} мл`}
-          icon={UtensilsCrossed}
-          color="bg-emerald-500"
-          loading={loading}
-        />
-        <StatCard
-          title="Overdue"
-          value={summary ? String(summary.productivity.overdue_total) : '—'}
-          sub={summary ? `${globalRange.isActive ? 'в периоде' : 'сегодня'}: ${summary.productivity.due_today_total}` : 'нет данных'}
-          icon={ListTodo}
-          color="bg-amber-500"
-          loading={loading}
-        />
-      </div>
+      visibleMetricWidgets.length > 0 ? (
+        <div className="grid min-w-0 grid-cols-1 content-start gap-4 md:grid-cols-6">
+          {visibleMetricWidgets.map(widget => (
+            <MetricDashboardWidget
+              key={widget.id}
+              layout={widget}
+              dragging={draggingMetricWidget === widget.id}
+              editing={editingWidgets}
+              onDragStart={handleDragMetricWidgetStart}
+              onDragEnd={() => setDraggingMetricWidget(null)}
+              onDrop={handleDropMetricWidget}
+              onResizeStart={handleResizeMetricWidgetStart}
+              onHide={handleHideMetricWidget}
+            >
+              {metricWidgetContent[widget.id]}
+            </MetricDashboardWidget>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-dashed bg-card/60 px-5 py-8 text-center text-sm text-muted-foreground">
+          Все метрики скрыты
+        </div>
+      )
     ),
     overview: (
       <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
@@ -884,7 +1185,7 @@ export function Dashboard() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed bg-card/60 px-3 py-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {editingWidgets && hiddenWidgets.length > 0 ? (
+          {editingWidgets && (hiddenWidgets.length > 0 || hiddenMetricWidgets.length > 0) ? (
             <>
               <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Скрытые</span>
               {hiddenWidgets.map(widget => (
@@ -892,6 +1193,16 @@ export function Dashboard() {
                   key={widget.id}
                   type="button"
                   onClick={() => handleShowWidget(widget.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                >
+                  {widget.label}
+                </button>
+              ))}
+              {hiddenMetricWidgets.map(widget => (
+                <button
+                  key={widget.id}
+                  type="button"
+                  onClick={() => handleShowMetricWidget(widget.id)}
                   className="inline-flex items-center gap-1.5 rounded-lg border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
                 >
                   {widget.label}
@@ -940,6 +1251,7 @@ export function Dashboard() {
               layout={widget}
               dragging={draggingWidget === widget.id}
               editing={editingWidgets}
+              editable={widget.id !== 'stats'}
               onDragStart={handleDragWidgetStart}
               onDragEnd={() => setDraggingWidget(null)}
               onDrop={handleDropWidget}
