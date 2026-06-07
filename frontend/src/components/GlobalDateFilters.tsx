@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { CalendarRange, ChevronLeft, ChevronRight, RotateCcw, X } from 'lucide-react'
+import { CalendarRange, ChevronLeft, ChevronRight, Pencil, RotateCcw, X } from 'lucide-react'
 import { StyledSelect } from '@/components/StyledSelect'
+import { useWidgetEdit } from '@/lib/widget-edit'
 import { cn } from '@/lib/utils'
 
 const MONTHS = [
@@ -66,6 +67,7 @@ function readMode(value: string | null): RangeMode {
 
 export function GlobalDateFilters() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const { editingWidgets, toggleWidgetEditing } = useWidgetEdit()
   const [customOpen, setCustomOpen] = useState(false)
   const [draftFrom, setDraftFrom] = useState('')
   const [draftTo, setDraftTo] = useState('')
@@ -276,7 +278,23 @@ export function GlobalDateFilters() {
             ) : null}
           </div>
 
-          <div id="global-header-actions" className="flex min-w-0 shrink-0 justify-start empty:hidden xl:justify-end" />
+          <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-start gap-2 xl:justify-end">
+            <div id="global-header-actions" className="contents" />
+            <button
+              type="button"
+              onClick={toggleWidgetEditing}
+              aria-pressed={editingWidgets}
+              className={cn(
+                'inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors',
+                editingWidgets
+                  ? 'border-primary/40 bg-primary text-primary-foreground hover:bg-primary/90'
+                  : 'bg-background text-muted-foreground hover:bg-accent hover:text-foreground'
+              )}
+            >
+              <Pencil className="h-4 w-4" />
+              {editingWidgets ? 'Готово' : 'Edit'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

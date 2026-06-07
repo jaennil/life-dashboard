@@ -15,6 +15,7 @@ import { Login } from '@/pages/Login'
 import { Register } from '@/pages/Register'
 import { AuthProvider, useAuth } from '@/lib/auth'
 import { sentryEnabled } from '@/lib/sentry'
+import { WidgetEditProvider } from '@/lib/widget-edit'
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -61,18 +62,20 @@ function AppRoutes() {
       <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
       <Route path="/*" element={
         <ProtectedRoute>
-          <Layout>
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/finance" element={<Finance />} />
-              <Route path="/fitness" element={<Fitness />} />
-              <Route path="/productivity" element={<Productivity />} />
-              <Route path="/nutrition" element={<Nutrition />} />
-              <Route path="/ai" element={<AiChat />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/raw-data" element={<RawData />} />
-            </Routes>
-          </Layout>
+          <WidgetEditProvider>
+            <Layout>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/finance" element={<Finance />} />
+                <Route path="/fitness" element={<Fitness />} />
+                <Route path="/productivity" element={<Productivity />} />
+                <Route path="/nutrition" element={<Nutrition />} />
+                <Route path="/ai" element={<AiChat />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/raw-data" element={<RawData />} />
+              </Routes>
+            </Layout>
+          </WidgetEditProvider>
         </ProtectedRoute>
       } />
     </Routes>

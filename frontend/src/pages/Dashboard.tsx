@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Responsive as ResponsiveGridLayout, useContainerWidth } from 'react-grid-layout'
-import { Wallet, Dumbbell, TrendingUp, TrendingDown, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight, EyeOff, RotateCcw, Pencil } from 'lucide-react'
+import { Wallet, Dumbbell, TrendingUp, TrendingDown, Route, Droplets, Wind, MapPin, LocateFixed, Search, X, ListTodo, Bot, UtensilsCrossed, ChevronRight, EyeOff, RotateCcw } from 'lucide-react'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import { InfoTooltip } from '@/components/InfoTooltip'
@@ -10,6 +10,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { api, type DashboardSummary, type Transaction, type WeatherData, type Integration } from '@/lib/api'
+import { useWidgetEdit } from '@/lib/widget-edit'
 import {
   applyGridLayout,
   DASHBOARD_GRID_COLS,
@@ -400,7 +401,7 @@ export function Dashboard() {
   const [syncing, setSyncing] = useState(false)
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [dashboardLayout, setDashboardLayout] = useState(loadDashboardLayout)
-  const [editingWidgets, setEditingWidgets] = useState(false)
+  const { editingWidgets } = useWidgetEdit()
   const { width: gridWidth, containerRef: gridContainerRef, mounted: gridMounted } = useContainerWidth({ initialWidth: 1200 })
 
   const loadDashboardData = useCallback(async () => {
@@ -716,65 +717,53 @@ export function Dashboard() {
           ...(weather?.city ? [{ label: weather.city, tone: 'muted' as const }] : []),
         ]}
         actions={(
-          <PageSyncButton
-            label="Синхронизировать всё"
-            syncCaption={dashboardSyncCaption}
-            syncing={syncing}
-            disabled={enabledDashboardSources.length === 0}
-            onClick={handleSyncDashboard}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <PageSyncButton
+              label="Синхронизировать всё"
+              syncCaption={dashboardSyncCaption}
+              syncing={syncing}
+              disabled={enabledDashboardSources.length === 0}
+              onClick={handleSyncDashboard}
+            />
+            {editingWidgets ? (
+              <button
+                type="button"
+                onClick={handleResetWidgetLayout}
+                className="inline-flex h-10 items-center gap-2 rounded-lg border bg-background px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Сбросить
+              </button>
+            ) : null}
+          </div>
         )}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed bg-card/60 px-3 py-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {editingWidgets && hiddenWidgets.length > 0 ? (
-            <>
-              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Скрытые</span>
-              {hiddenWidgets.map(id => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => handleShowWidget(id)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-                >
-                  {DASHBOARD_WIDGET_LABELS[id]}
-                </button>
-              ))}
-            </>
-          ) : (
-            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              {editingWidgets ? 'Редактирование виджетов' : 'Виджеты'}
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {editingWidgets ? (
-            <button
-              type="button"
-              onClick={handleResetWidgetLayout}
-              className="inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Сбросить
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => setEditingWidgets(value => !value)}
-            aria-pressed={editingWidgets}
-            className={cn(
-              'inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors',
-              editingWidgets
-                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+      {editingWidgets ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed bg-card/60 px-3 py-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {hiddenWidgets.length > 0 ? (
+              <>
+                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Скрытые</span>
+                {hiddenWidgets.map(id => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => handleShowWidget(id)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                  >
+                    {DASHBOARD_WIDGET_LABELS[id]}
+                  </button>
+                ))}
+              </>
+            ) : (
+              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Редактирование виджетов
+              </span>
             )}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            {editingWidgets ? 'Готово' : 'Edit'}
-          </button>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {visibleWidgets.length > 0 ? (
         <div ref={gridContainerRef} className="min-w-0">
