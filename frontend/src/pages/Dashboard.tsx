@@ -372,20 +372,15 @@ function DashboardGridItem({
       )}
     >
       {editing ? (
-        <>
-          <span className="pointer-events-none absolute left-2 top-2 z-20 max-w-[calc(100%-4rem)] truncate rounded-md border bg-background/95 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground shadow-sm">
-            {DASHBOARD_WIDGET_LABELS[id]}
-          </span>
-          <button
-            type="button"
-            onClick={() => onHide(id)}
-            aria-label={`Скрыть ${DASHBOARD_WIDGET_LABELS[id]}`}
-            title="Скрыть"
-            className="dashboard-widget-action absolute right-2 top-2 z-30 inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-background/95 text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <EyeOff className="h-4 w-4" />
-          </button>
-        </>
+        <button
+          type="button"
+          onClick={() => onHide(id)}
+          aria-label={`Скрыть ${DASHBOARD_WIDGET_LABELS[id]}`}
+          title="Скрыть"
+          className="dashboard-widget-action absolute right-2 top-2 z-30 inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-background/95 text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <EyeOff className="h-4 w-4" />
+        </button>
       ) : null}
       <div className="dashboard-widget-content h-full min-w-0 overflow-hidden">
         {children}
