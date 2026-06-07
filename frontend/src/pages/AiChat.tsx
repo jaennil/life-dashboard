@@ -761,14 +761,8 @@ export function AiChat() {
             placeholder="Напиши вопрос..."
             rows={1}
             disabled={loading || historyLoading}
-            className="flex-1 resize-none rounded-[20px] border bg-card/90 px-4 py-3 text-sm text-foreground caret-primary placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
-            style={{
-              minHeight: '48px',
-              maxHeight: '120px',
-              color: 'hsl(var(--foreground))',
-              caretColor: 'hsl(var(--primary))',
-              WebkitTextFillColor: 'hsl(var(--foreground))',
-            }}
+            className="flex-1 resize-none rounded-[20px] border bg-card/90 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+            style={{ minHeight: '48px', maxHeight: '120px' }}
           />
           <button
             onClick={() => send(input)}
