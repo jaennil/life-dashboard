@@ -820,21 +820,17 @@ export function Finance() {
       <EditableWidgetGrid
         storageKey="finance_widget_layout_v1"
         widgets={[
-          { id: 'metrics', label: 'Ключевые метрики', layout: { x: 0, y: 0, w: 12, h: 10 }, bounds: { minW: 5, minH: 5, maxH: 24 } },
-          { id: 'obligations', label: 'Обязательные платежи', layout: { x: 0, y: 10, w: 12, h: 14 }, bounds: { minW: 5, minH: 7, maxH: 32 } },
-          { id: 'trends', label: 'Динамика', layout: { x: 0, y: 24, w: 12, h: 16 }, bounds: { minW: 5, minH: 8, maxH: 36 } },
-          { id: 'accounts', label: 'Счета и операции', layout: { x: 0, y: 40, w: 12, h: 16 }, bounds: { minW: 5, minH: 8, maxH: 36 } },
+          { id: 'liquid-balance', label: 'Ликвидный баланс', layout: { x: 0, y: 0, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
+          { id: 'net-cashflow', label: 'Net cashflow', layout: { x: 4, y: 0, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
+          { id: 'savings-rate', label: 'Savings rate', layout: { x: 8, y: 0, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
+          { id: 'burn-rate', label: 'Burn rate', layout: { x: 0, y: 4, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
+          { id: 'runway', label: 'Runway', layout: { x: 4, y: 4, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
+          { id: 'spending-concentration', label: 'Концентрация расходов', layout: { x: 8, y: 4, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
+          { id: 'obligations', label: 'Обязательные платежи', layout: { x: 0, y: 8, w: 12, h: 14 }, bounds: { minW: 5, minH: 7, maxH: 32 } },
+          { id: 'trends', label: 'Динамика', layout: { x: 0, y: 22, w: 12, h: 16 }, bounds: { minW: 5, minH: 8, maxH: 36 } },
+          { id: 'accounts', label: 'Счета и операции', layout: { x: 0, y: 38, w: 12, h: 16 }, bounds: { minW: 5, minH: 8, maxH: 36 } },
         ]}
       >
-      <ExpandablePanel
-        title="Ключевые метрики"
-        description={`Состояние периода: ${activePeriodLabel}, ${rangeLabel}, ${rangeDays} дн. Считает cashflow, burn rate и runway.`}
-        open={openSections.metrics}
-        onToggle={() => toggleSection('metrics')}
-      >
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <FinanceSummaryCard
           title="Ликвидный баланс"
           icon={Wallet}
@@ -899,9 +895,6 @@ export function Finance() {
           caption={topThreeCategories.length > 0 ? concentrationLeaders : undefined}
           hint={topThreeCategories.length > 0 ? 'Концентрация расходов — доля топ-3 категорий в выбранном периоде.' : 'Появится, когда в диапазоне будут категории расходов.'}
         />
-      </div>
-
-      </ExpandablePanel>
 
       <ExpandablePanel
         title="Обязательные платежи"
@@ -1612,7 +1605,7 @@ function FinanceSummaryCard({
   panelClassName?: string
 }) {
   return (
-    <div className={cn('group/card rounded-2xl border bg-card/90 p-5 shadow-sm', panelClassName)}>
+    <div className={cn('group/card flex h-full flex-col rounded-2xl border bg-card/90 p-5 shadow-sm', panelClassName)}>
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
