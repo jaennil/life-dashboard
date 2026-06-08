@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import type { EChartsCoreOption } from 'echarts/core'
 import { EChart } from '@/components/EChart'
+import { EditableWidgetGrid } from '@/components/EditableWidgetGrid'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
@@ -816,6 +817,15 @@ export function Finance() {
         headerActionsTarget
       ) : null}
 
+      <EditableWidgetGrid
+        storageKey="finance_widget_layout_v1"
+        widgets={[
+          { id: 'metrics', label: 'Ключевые метрики', layout: { x: 0, y: 0, w: 12, h: 10 }, bounds: { minW: 5, minH: 5, maxH: 24 } },
+          { id: 'obligations', label: 'Обязательные платежи', layout: { x: 0, y: 10, w: 12, h: 14 }, bounds: { minW: 5, minH: 7, maxH: 32 } },
+          { id: 'trends', label: 'Динамика', layout: { x: 0, y: 24, w: 12, h: 16 }, bounds: { minW: 5, minH: 8, maxH: 36 } },
+          { id: 'accounts', label: 'Счета и операции', layout: { x: 0, y: 40, w: 12, h: 16 }, bounds: { minW: 5, minH: 8, maxH: 36 } },
+        ]}
+      >
       <ExpandablePanel
         title="Ключевые метрики"
         description={`Состояние периода: ${activePeriodLabel}, ${rangeLabel}, ${rangeDays} дн. Считает cashflow, burn rate и runway.`}
@@ -1538,6 +1548,7 @@ export function Finance() {
         </div>
       </div>
       </ExpandablePanel>
+      </EditableWidgetGrid>
     </div>
   )
 }

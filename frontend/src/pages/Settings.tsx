@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
+import { EditableWidgetGrid } from '@/components/EditableWidgetGrid'
 import { PageHeader } from '@/components/PageHeader'
 import { cn, formatLastSyncAt } from '@/lib/utils'
 import { api, type HealthAPIKeyInfo, type Integration } from '@/lib/api'
@@ -737,6 +738,14 @@ export function Settings() {
         </div>
       ) : null}
 
+      <EditableWidgetGrid
+        storageKey="settings_widget_layout_v1"
+        widgets={[
+          { id: 'account', label: 'Аккаунт', layout: { x: 0, y: 0, w: 6, h: 8 }, bounds: { minW: 4, minH: 5, maxH: 18 } },
+          { id: 'apple-health', label: 'Apple Health', layout: { x: 6, y: 0, w: 6, h: 8 }, bounds: { minW: 4, minH: 5, maxH: 18 } },
+          { id: 'integrations', label: 'Интеграции', layout: { x: 0, y: 8, w: 12, h: 18 }, bounds: { minW: 6, minH: 8, maxH: 36 } },
+        ]}
+      >
       <div>
         <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Аккаунт</h2>
         <TOTPSection />
@@ -766,6 +775,7 @@ export function Settings() {
           </div>
         )}
       </div>
+      </EditableWidgetGrid>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { EChartsCoreOption } from 'echarts/core'
 import { Dumbbell, Flame, Heart, ChevronDown, ChevronUp, Timer, TrendingUp, Scale, Activity as ActivityIcon, Clock3, Layers3 } from 'lucide-react'
+import { EditableWidgetGrid } from '@/components/EditableWidgetGrid'
 import { EChart } from '@/components/EChart'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
@@ -714,6 +715,13 @@ export function Fitness() {
         </div>
       </div>
 
+      <EditableWidgetGrid
+        storageKey={`fitness_${sourceTab}_widget_layout_v1`}
+        widgets={[
+          { id: 'golden', label: 'Ключевые метрики', layout: { x: 0, y: 0, w: 12, h: 5 }, bounds: { minW: 4, minH: 4, maxH: 10 } },
+          { id: 'source-details', label: sourceTab === 'strava' ? 'Strava widgets' : 'Hevy widgets', layout: { x: 0, y: 5, w: 12, h: 18 }, bounds: { minW: 6, minH: 8, maxH: 40 } },
+        ]}
+      >
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         {(loading && cards.length === 0
           ? Array.from({ length: 5 }).map((_, index) => ({ key: `skeleton-${index}`, title: '—', value: '—', detail: '—', tone: 'muted' as const }))
@@ -985,6 +993,7 @@ export function Fitness() {
           </div>
         </>
       )}
+      </EditableWidgetGrid>
     </div>
   )
 }

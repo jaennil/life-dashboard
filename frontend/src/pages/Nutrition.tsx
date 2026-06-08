@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { EChartsCoreOption } from 'echarts/core'
 import { Activity, Droplets, Flame, GlassWater, RotateCcw, Target, UtensilsCrossed } from 'lucide-react'
+import { EditableWidgetGrid } from '@/components/EditableWidgetGrid'
 import { EChart } from '@/components/EChart'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { InfoTooltip } from '@/components/InfoTooltip'
@@ -1120,6 +1121,17 @@ export function Nutrition() {
         )}
       />
 
+      <EditableWidgetGrid
+        storageKey="nutrition_widget_layout_v1"
+        widgets={[
+          { id: 'golden', label: 'Ключевые метрики', layout: { x: 0, y: 0, w: 12, h: 5 }, bounds: { minW: 4, minH: 4, maxH: 10 } },
+          { id: 'hydration', label: 'Гидратация', layout: { x: 0, y: 5, w: 12, h: 14 }, bounds: { minW: 6, minH: 8, maxH: 30 } },
+          { id: 'trends', label: 'Калории и БЖУ', layout: { x: 0, y: 19, w: 6, h: 8 }, bounds: { minW: 4, minH: 6, maxH: 18 } },
+          { id: 'analysis', label: 'Распределение и приёмы пищи', layout: { x: 6, y: 19, w: 6, h: 10 }, bounds: { minW: 4, minH: 6, maxH: 24 } },
+          { id: 'targets', label: 'Цели питания', layout: { x: 0, y: 29, w: 12, h: 10 }, bounds: { minW: 5, minH: 5, maxH: 24 } },
+          { id: 'daily-log', label: 'Дневник питания и воды', layout: { x: 0, y: 39, w: 12, h: 12 }, bounds: { minW: 5, minH: 6, maxH: 30 } },
+        ]}
+      >
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         {(loading && goldenCards.length === 0
           ? Array.from({ length: 5 }).map((_, index) => ({ key: `skeleton-${index}`, title: '—', value: '—', detail: '—', tone: 'muted' as const }))
@@ -1733,6 +1745,7 @@ export function Nutrition() {
           </div>
         )}
       </div>
+      </EditableWidgetGrid>
     </div>
   )
 }

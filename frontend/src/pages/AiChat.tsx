@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, type ComponentProps } from 'react'
 import { Send, Bot, User, Loader2, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { EditableWidgetGrid } from '@/components/EditableWidgetGrid'
 import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { api, type AIHistoryMessage, type AILatestCheckup } from '@/lib/api'
@@ -620,6 +621,14 @@ export function AiChat() {
         </div>
       ) : null}
 
+      <EditableWidgetGrid
+        storageKey="ai_widget_layout_v1"
+        widgets={[
+          { id: 'checkup', label: 'Checkup', layout: { x: 0, y: 0, w: 12, h: 5 }, bounds: { minW: 4, minH: 4, maxH: 12 } },
+          { id: 'messages', label: 'Сообщения', layout: { x: 0, y: 5, w: 12, h: 14 }, bounds: { minW: 5, minH: 8, maxH: 28 } },
+          { id: 'input', label: 'Поле ввода', layout: { x: 0, y: 19, w: 12, h: 4 }, bounds: { minW: 4, minH: 3, maxH: 8 } },
+        ]}
+      >
       <div className="sticky top-3 z-20 -mx-1 rounded-[24px] border border-white/5 bg-background/88 px-1 py-1 backdrop-blur sm:top-4 sm:mx-0 sm:rounded-2xl sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
         <div className="rounded-2xl border bg-card/88 p-4 shadow-sm">
           <div className="mb-3 flex flex-col gap-1.5 sm:mb-2">
@@ -776,6 +785,7 @@ export function AiChat() {
           Enter — отправить, Shift+Enter — перенос
         </p>
       </div>
+      </EditableWidgetGrid>
     </div>
   )
 }
