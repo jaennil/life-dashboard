@@ -8,8 +8,10 @@ import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
+import { useIntegrations } from '@/hooks/useIntegrations'
+import { usePageSync } from '@/hooks/usePageSync'
 import { cn, syncCaptionForSources } from '@/lib/utils'
-import { api, type DashboardSummary, type Transaction, type WeatherData, type Integration } from '@/lib/api'
+import { api, type DashboardSummary, type Transaction, type WeatherData } from '@/lib/api'
 import { useWidgetEdit } from '@/lib/widget-edit'
 import {
   applyGridLayout,
@@ -398,10 +400,9 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [weatherLoading, setWeatherLoading] = useState(true)
   const [showPicker, setShowPicker] = useState(false)
-  const [syncing, setSyncing] = useState(false)
-  const [integrations, setIntegrations] = useState<Integration[]>([])
   const [dashboardLayout, setDashboardLayout] = useState(loadDashboardLayout)
   const { editingWidgets } = useWidgetEdit()
+  const { integrations, reload: reloadIntegrations } = useIntegrations()
   const { width: gridWidth, containerRef: gridContainerRef, mounted: gridMounted } = useContainerWidth({ initialWidth: 1200 })
 
   const loadDashboardData = useCallback(async () => {
@@ -420,13 +421,11 @@ export function Dashboard() {
     }
   }, [globalRange.params])
 
-  const loadIntegrations = useCallback(async () => {
-    try {
-      setIntegrations(await api.getIntegrations())
-    } catch (error) {
-      console.error(error)
-    }
-  }, [])
+  const reloadDashboard = useCallback(async () => {
+    await Promise.all([loadDashboardData(), reloadIntegrations()])
+  }, [loadDashboardData, reloadIntegrations])
+
+  const { syncing, syncSources } = usePageSync(reloadDashboard)
 
   function fetchWeather(loc?: SavedLocation) {
     setWeatherLoading(true)
@@ -444,7 +443,6 @@ export function Dashboard() {
 
   useEffect(() => {
     void loadDashboardData()
-    void loadIntegrations()
 
     const saved = loadLocation()
     fetchWeather(saved ?? undefined)
@@ -460,7 +458,7 @@ export function Dashboard() {
         { timeout: 5000 }
       )
     }
-  }, [loadDashboardData, loadIntegrations])
+  }, [loadDashboardData])
 
   useEffect(() => {
     persistDashboardLayout(dashboardLayout)
@@ -474,18 +472,7 @@ export function Dashboard() {
 
   async function handleSyncDashboard() {
     if (enabledDashboardSources.length === 0) return
-    setSyncing(true)
-    try {
-      for (const integration of enabledDashboardSources) {
-        await api.syncIntegration(integration.name)
-      }
-      await Promise.all([loadDashboardData(), loadIntegrations()])
-    } catch (error) {
-      console.error(error)
-      throw error
-    } finally {
-      setSyncing(false)
-    }
+    await syncSources(enabledDashboardSources.map(integration => integration.name))
   }
 
   function handleResetWidgetLayout() {

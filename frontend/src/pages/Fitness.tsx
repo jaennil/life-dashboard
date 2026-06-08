@@ -8,9 +8,11 @@ import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
+import { useIntegrations } from '@/hooks/useIntegrations'
+import { usePageSync } from '@/hooks/usePageSync'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
-import { api, type FitnessSummary, type FitnessGoldenMetrics, type FitnessGoldenCard, type Activity, type Workout, type Integration } from '@/lib/api'
+import { api, type FitnessSummary, type FitnessGoldenMetrics, type FitnessGoldenCard, type Activity, type Workout } from '@/lib/api'
 import { rawDataHref } from '@/lib/raw-data'
 
 const ACTIVITY_ICONS: Record<string, string> = {
@@ -563,8 +565,7 @@ export function Fitness() {
   const [loading, setLoading] = useState(true)
   const [typeFilter, setTypeFilter] = useState('')
   const [sourceTab, setSourceTab] = useState<FitnessSource>('strava')
-  const [syncing, setSyncing] = useState(false)
-  const [integrations, setIntegrations] = useState<Integration[]>([])
+  const { integrations, reload: reloadIntegrations } = useIntegrations()
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -586,21 +587,15 @@ export function Fitness() {
     }
   }, [globalRange.params])
 
-  const loadIntegrations = useCallback(async () => {
-    try {
-      setIntegrations(await api.getIntegrations())
-    } catch (error) {
-      console.error(error)
-    }
-  }, [])
+  const reloadFitness = useCallback(async () => {
+    await Promise.all([loadData(), reloadIntegrations()])
+  }, [loadData, reloadIntegrations])
+
+  const { syncing, syncSources } = usePageSync(reloadFitness)
 
   useEffect(() => {
     void loadData()
   }, [loadData])
-
-  useEffect(() => {
-    void loadIntegrations()
-  }, [loadIntegrations])
 
   useEffect(() => {
     if (!summary) return
@@ -658,16 +653,7 @@ export function Fitness() {
 
   async function handleSyncFitness() {
     if (!activeIntegration?.enabled) return
-    setSyncing(true)
-    try {
-      await api.syncIntegration(sourceTab)
-      await Promise.all([loadData(), loadIntegrations()])
-    } catch (error) {
-      console.error(error)
-      throw error
-    } finally {
-      setSyncing(false)
-    }
+    await syncSources(sourceTab)
   }
 
   return (

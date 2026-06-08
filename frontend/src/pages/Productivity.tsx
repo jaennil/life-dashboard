@@ -21,9 +21,10 @@ import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { StyledSelect } from '@/components/StyledSelect'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
+import { useIntegrations } from '@/hooks/useIntegrations'
+import { usePageSync } from '@/hooks/usePageSync'
 import {
   api,
-  type Integration,
   type ProductivityHabit,
   type ProductivityHabitInput,
   type ProductivityHabitsResponse,
@@ -240,11 +241,10 @@ export function Productivity() {
   const [summary, setSummary] = useState<ProductivitySummary | null>(null)
   const [tasks, setTasks] = useState<ProductivityTask[]>([])
   const [habitsData, setHabitsData] = useState<ProductivityHabitsResponse | null>(null)
-  const [integrations, setIntegrations] = useState<Integration[]>([])
+  const { integrations, reload: reloadIntegrations } = useIntegrations()
   const [loading, setLoading] = useState(true)
   const [taskLoading, setTaskLoading] = useState(true)
   const [habitsLoading, setHabitsLoading] = useState(true)
-  const [syncing, setSyncing] = useState(false)
   const [habitSavingID, setHabitSavingID] = useState<string | null>(null)
   const [habitDeletingID, setHabitDeletingID] = useState<string | null>(null)
   const [habitFormSaving, setHabitFormSaving] = useState(false)
@@ -257,14 +257,6 @@ export function Productivity() {
     routine: 'morning',
     area_name: '',
   })
-
-  const loadIntegrations = useCallback(async () => {
-    try {
-      setIntegrations(await api.getIntegrations())
-    } catch (error) {
-      console.error(error)
-    }
-  }, [])
 
   const loadSummary = useCallback(async () => {
     try {
@@ -296,27 +288,27 @@ export function Productivity() {
     }
   }, [globalRange.targetDate])
 
+  const loadProductivity = useCallback(async () => {
+    await Promise.all([loadSummary(), loadTasks(filter), loadHabits()])
+  }, [filter, loadHabits, loadSummary, loadTasks])
+
+  const reloadProductivity = useCallback(async () => {
+    await Promise.all([loadProductivity(), reloadIntegrations()])
+  }, [loadProductivity, reloadIntegrations])
+
+  const { syncing, syncSources } = usePageSync(reloadProductivity)
+
   useEffect(() => {
     setLoading(true)
-    Promise.all([loadSummary(), loadIntegrations(), loadTasks(filter), loadHabits()])
-      .finally(() => setLoading(false))
-  }, [filter, loadHabits, loadIntegrations, loadSummary, loadTasks])
+    loadProductivity().finally(() => setLoading(false))
+  }, [loadProductivity])
 
   const todoistIntegration = integrations.find(integration => integration.name === 'todoist')
   const syncCaption = todoistIntegration ? syncCaptionForSources([todoistIntegration]) : undefined
 
   async function handleSync() {
     if (!todoistIntegration?.enabled) return
-    setSyncing(true)
-    try {
-      await api.syncIntegration('todoist')
-      await Promise.all([loadSummary(), loadIntegrations(), loadTasks(filter), loadHabits()])
-    } catch (error) {
-      console.error(error)
-      throw error
-    } finally {
-      setSyncing(false)
-    }
+    await syncSources('todoist')
   }
 
   async function handleSaveHabit() {

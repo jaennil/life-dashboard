@@ -1,23 +1,41 @@
 import * as Sentry from '@sentry/react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { InstallPrompt } from '@/components/InstallPrompt'
 import { GlobalDateFilters } from '@/components/GlobalDateFilters'
 import { Sidebar } from '@/components/Sidebar'
-import { Dashboard } from '@/pages/Dashboard'
-import { Finance } from '@/pages/Finance'
-import { Fitness } from '@/pages/Fitness'
-import { Nutrition } from '@/pages/Nutrition'
-import { Productivity } from '@/pages/Productivity'
-import { AiChat } from '@/pages/AiChat'
-import { Settings } from '@/pages/Settings'
-import { RawData } from '@/pages/RawData'
-import { Login } from '@/pages/Login'
-import { Register } from '@/pages/Register'
 import { AuthProvider, useAuth } from '@/lib/auth'
 import { sentryEnabled } from '@/lib/sentry'
 import { WidgetEditProvider } from '@/lib/widget-edit'
 
-function Layout({ children }: { children: React.ReactNode }) {
+const Dashboard = lazy(() => import('@/pages/Dashboard').then(module => ({ default: module.Dashboard })))
+const Finance = lazy(() => import('@/pages/Finance').then(module => ({ default: module.Finance })))
+const Fitness = lazy(() => import('@/pages/Fitness').then(module => ({ default: module.Fitness })))
+const Nutrition = lazy(() => import('@/pages/Nutrition').then(module => ({ default: module.Nutrition })))
+const Productivity = lazy(() => import('@/pages/Productivity').then(module => ({ default: module.Productivity })))
+const AiChat = lazy(() => import('@/pages/AiChat').then(module => ({ default: module.AiChat })))
+const Settings = lazy(() => import('@/pages/Settings').then(module => ({ default: module.Settings })))
+const RawData = lazy(() => import('@/pages/RawData').then(module => ({ default: module.RawData })))
+const Login = lazy(() => import('@/pages/Login').then(module => ({ default: module.Login })))
+const Register = lazy(() => import('@/pages/Register').then(module => ({ default: module.Register })))
+
+function PageFallback() {
+  return (
+    <div className="flex min-h-48 items-center justify-center">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+    </div>
+  )
+}
+
+function PageSuspense({ children }: { children: ReactNode }) {
+  return (
+    <Suspense fallback={<PageFallback />}>
+      {children}
+    </Suspense>
+  )
+}
+
+function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
@@ -32,7 +50,7 @@ function Layout({ children }: { children: React.ReactNode }) {
   )
 }
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
   if (loading) {
     return (
@@ -58,22 +76,24 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
-      <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
+      <Route path="/login" element={user ? <Navigate to="/" replace /> : <PageSuspense><Login /></PageSuspense>} />
+      <Route path="/register" element={user ? <Navigate to="/" replace /> : <PageSuspense><Register /></PageSuspense>} />
       <Route path="/*" element={
         <ProtectedRoute>
           <WidgetEditProvider>
             <Layout>
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/finance" element={<Finance />} />
-                <Route path="/fitness" element={<Fitness />} />
-                <Route path="/productivity" element={<Productivity />} />
-                <Route path="/nutrition" element={<Nutrition />} />
-                <Route path="/ai" element={<AiChat />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/raw-data" element={<RawData />} />
-              </Routes>
+              <PageSuspense>
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/finance" element={<Finance />} />
+                  <Route path="/fitness" element={<Fitness />} />
+                  <Route path="/productivity" element={<Productivity />} />
+                  <Route path="/nutrition" element={<Nutrition />} />
+                  <Route path="/ai" element={<AiChat />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/raw-data" element={<RawData />} />
+                </Routes>
+              </PageSuspense>
             </Layout>
           </WidgetEditProvider>
         </ProtectedRoute>

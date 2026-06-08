@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BadgeRussianRuble,
@@ -26,14 +25,17 @@ import { EChart } from '@/components/EChart'
 import { EditableWidgetGrid } from '@/components/EditableWidgetGrid'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { InfoTooltip } from '@/components/InfoTooltip'
+import { PageHeader } from '@/components/PageHeader'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { StyledSelect } from '@/components/StyledSelect'
+import { useIntegrations } from '@/hooks/useIntegrations'
+import { usePageSync } from '@/hooks/usePageSync'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import {
   api,
   type MonthStat, type Account, type FinanceTransaction,
-  type CategoryStat, type DailyTotal, type TopExpense, type Integration, type FinanceObligationsSummary, type FinanceObligationRule,
+  type CategoryStat, type DailyTotal, type TopExpense, type FinanceObligationsSummary, type FinanceObligationRule,
 } from '@/lib/api'
 import { rawDataHref } from '@/lib/raw-data'
 
@@ -610,13 +612,9 @@ export function Finance() {
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
   const [txLoading, setTxLoading] = useState(false)
-  const [syncing, setSyncing] = useState(false)
   const [ruleSavingKey, setRuleSavingKey] = useState<string | null>(null)
   const [ruleError, setRuleError] = useState('')
-  const [integrations, setIntegrations] = useState<Integration[]>([])
-  const [headerActionsTarget, setHeaderActionsTarget] = useState<HTMLElement | null>(() =>
-    typeof document === 'undefined' ? null : document.getElementById('global-header-actions')
-  )
+  const { integrations, reload: reloadIntegrations } = useIntegrations()
   const [openSections, setOpenSections] = useState<Record<FinanceSection, boolean>>({
     metrics: true,
     obligations: true,
@@ -658,31 +656,15 @@ export function Finance() {
     }
   }, [from, to])
 
-  const loadIntegrations = useCallback(async () => {
-    try {
-      setIntegrations(await api.getIntegrations())
-    } catch (error) {
-      console.error(error)
-    }
-  }, [])
+  const reloadFinance = useCallback(async () => {
+    await Promise.all([loadPageData(), reloadIntegrations()])
+  }, [loadPageData, reloadIntegrations])
+
+  const { syncing, syncSources } = usePageSync(reloadFinance)
 
   useEffect(() => {
     void loadPageData()
   }, [loadPageData])
-
-  useEffect(() => {
-    void loadIntegrations()
-  }, [loadIntegrations])
-
-  useEffect(() => {
-    if (headerActionsTarget || typeof document === 'undefined') return
-
-    const frame = window.requestAnimationFrame(() => {
-      setHeaderActionsTarget(document.getElementById('global-header-actions'))
-    })
-
-    return () => window.cancelAnimationFrame(frame)
-  }, [headerActionsTarget])
 
   const loadTxs = useCallback(async (p: number, replace: boolean) => {
     setTxLoading(true)
@@ -764,16 +746,7 @@ export function Finance() {
 
   async function handleSyncFinance() {
     if (!zenmoneyIntegration?.enabled) return
-    setSyncing(true)
-    try {
-      await api.syncIntegration('zenmoney')
-      await Promise.all([loadPageData(), loadIntegrations()])
-    } catch (error) {
-      console.error(error)
-      throw error
-    } finally {
-      setSyncing(false)
-    }
+    await syncSources('zenmoney')
   }
 
   async function handleSaveObligationRule(input: { key: string; label: string; action: 'ignore' | 'force' }) {
@@ -804,8 +777,15 @@ export function Finance() {
 
   return (
     <div className="flex flex-col gap-6">
-      {headerActionsTarget ? createPortal(
-        (
+      <PageHeader
+        eyebrow="Finance"
+        title="Финансы"
+        description="Баланс, cashflow, категории, обязательные платежи и операции в одном представлении."
+        badges={[
+          { label: zenmoneyIntegration?.enabled ? 'ZenMoney подключён' : 'ZenMoney не подключён', tone: zenmoneyIntegration?.enabled ? 'success' : 'warning' },
+          { label: activePeriodLabel, tone: 'muted' },
+        ]}
+        actions={(
           <PageSyncButton
             label="Синхронизировать ZenMoney"
             syncCaption={financeSyncCaption}
@@ -813,9 +793,8 @@ export function Finance() {
             disabled={!zenmoneyIntegration?.enabled}
             onClick={handleSyncFinance}
           />
-        ),
-        headerActionsTarget
-      ) : null}
+        )}
+      />
 
       <EditableWidgetGrid
         storageKey="finance_widget_layout_v1"

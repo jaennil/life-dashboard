@@ -10,9 +10,11 @@ import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
 import { StyledSelect } from '@/components/StyledSelect'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
+import { useIntegrations } from '@/hooks/useIntegrations'
+import { usePageSync } from '@/hooks/usePageSync'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
-import { api, type HydrationBeverageType, type HydrationMode, type Integration, type NutritionDay, type NutritionGoldenCard, type NutritionGoldenMetrics, type NutritionSummary, type NutritionTargetsInput } from '@/lib/api'
+import { api, type HydrationBeverageType, type HydrationMode, type NutritionDay, type NutritionGoldenCard, type NutritionGoldenMetrics, type NutritionSummary, type NutritionTargetsInput } from '@/lib/api'
 import { rawDataHref } from '@/lib/raw-data'
 
 const MEAL_LABELS: Record<string, string> = {
@@ -766,8 +768,7 @@ export function Nutrition() {
   const [loading, setLoading] = useState(true)
   const period = 30
   const [mealFilter, setMealFilter] = useState('')
-  const [syncing, setSyncing] = useState(false)
-  const [integrations, setIntegrations] = useState<Integration[]>([])
+  const { integrations, reload: reloadIntegrations } = useIntegrations()
   const [savingTargets, setSavingTargets] = useState(false)
   const [targetsError, setTargetsError] = useState('')
   const [targetsNotice, setTargetsNotice] = useState('')
@@ -807,21 +808,15 @@ export function Nutrition() {
     }
   }, [period, globalRange.params])
 
-  const loadIntegrations = useCallback(async () => {
-    try {
-      setIntegrations(await api.getIntegrations())
-    } catch (error) {
-      console.error(error)
-    }
-  }, [])
+  const reloadNutrition = useCallback(async () => {
+    await Promise.all([loadData(), reloadIntegrations()])
+  }, [loadData, reloadIntegrations])
+
+  const { syncing, syncSources } = usePageSync(reloadNutrition)
 
   useEffect(() => {
     void loadData()
   }, [loadData])
-
-  useEffect(() => {
-    void loadIntegrations()
-  }, [loadIntegrations])
 
   useEffect(() => {
     const manual = summary?.targets?.manual
@@ -933,18 +928,7 @@ export function Nutrition() {
 
   async function handleSyncNutrition() {
     if (enabledNutritionIntegrations.length === 0) return
-    setSyncing(true)
-    try {
-      for (const integration of enabledNutritionIntegrations) {
-        await api.syncIntegration(integration.name)
-      }
-      await Promise.all([loadData(), loadIntegrations()])
-    } catch (error) {
-      console.error(error)
-      throw error
-    } finally {
-      setSyncing(false)
-    }
+    await syncSources(enabledNutritionIntegrations.map(integration => integration.name))
   }
 
   function setTargetsField(field: keyof typeof targetsForm, value: string) {
