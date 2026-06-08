@@ -7,12 +7,13 @@ import { EChart } from '@/components/EChart'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
+import { useFitnessData } from '@/hooks/useFitnessData'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { useIntegrations } from '@/hooks/useIntegrations'
 import { usePageSync } from '@/hooks/usePageSync'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
-import { api, type FitnessSummary, type FitnessGoldenMetrics, type FitnessGoldenCard, type Activity, type Workout } from '@/lib/api'
+import { type FitnessGoldenCard, type FitnessGoldenMetrics, type Workout } from '@/lib/api'
 import { rawDataHref } from '@/lib/raw-data'
 
 const ACTIVITY_ICONS: Record<string, string> = {
@@ -558,50 +559,24 @@ function WorkoutRow({ workout }: { workout: Workout }) {
 export function Fitness() {
   const globalRange = useGlobalDateRange()
   const navigate = useNavigate()
-  const [summary, setSummary] = useState<FitnessSummary | null>(null)
-  const [golden, setGolden] = useState<FitnessGoldenMetrics | null>(null)
-  const [activities, setActivities] = useState<Activity[]>([])
-  const [workouts, setWorkouts] = useState<Workout[]>([])
-  const [loading, setLoading] = useState(true)
+  const { summary, golden, activities, workouts, loading, reload: reloadFitnessData } = useFitnessData(globalRange.params)
   const [typeFilter, setTypeFilter] = useState('')
   const [sourceTab, setSourceTab] = useState<FitnessSource>('strava')
   const { integrations, reload: reloadIntegrations } = useIntegrations()
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [nextSummary, nextGolden, nextActivities, nextWorkouts] = await Promise.all([
-        api.getFitnessSummary(globalRange.params),
-        api.getFitnessGolden(globalRange.params),
-        api.getActivities(globalRange.params),
-        api.getWorkouts(globalRange.params),
-      ])
-      setSummary(nextSummary)
-      setGolden(nextGolden)
-      setActivities(nextActivities)
-      setWorkouts(nextWorkouts)
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setLoading(false)
-    }
-  }, [globalRange.params])
-
   const reloadFitness = useCallback(async () => {
-    await Promise.all([loadData(), reloadIntegrations()])
-  }, [loadData, reloadIntegrations])
+    await Promise.all([reloadFitnessData(), reloadIntegrations()])
+  }, [reloadFitnessData, reloadIntegrations])
 
   const { syncing, syncSources } = usePageSync(reloadFitness)
 
   useEffect(() => {
-    void loadData()
-  }, [loadData])
-
-  useEffect(() => {
     if (!summary) return
     if (summary.activities_total === 0 && summary.workouts_total > 0) {
-      setSourceTab('hevy')
+      const timer = window.setTimeout(() => setSourceTab('hevy'), 0)
+      return () => window.clearTimeout(timer)
     }
+    return undefined
   }, [summary])
 
   const stravaTotal = summary?.activities_total ?? activities.length

@@ -11,10 +11,11 @@ import { PageHeader } from '@/components/PageHeader'
 import { StyledSelect } from '@/components/StyledSelect'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { useIntegrations } from '@/hooks/useIntegrations'
+import { useNutritionData } from '@/hooks/useNutritionData'
 import { usePageSync } from '@/hooks/usePageSync'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
-import { api, type HydrationBeverageType, type HydrationMode, type NutritionDay, type NutritionGoldenCard, type NutritionGoldenMetrics, type NutritionSummary, type NutritionTargetsInput } from '@/lib/api'
+import { api, type HydrationBeverageType, type HydrationMode, type NutritionDay, type NutritionGoldenCard, type NutritionTargetsInput } from '@/lib/api'
 import { rawDataHref } from '@/lib/raw-data'
 
 const MEAL_LABELS: Record<string, string> = {
@@ -762,11 +763,8 @@ function NutritionDayDetails({ day }: { day: NutritionDay }) {
 export function Nutrition() {
   const globalRange = useGlobalDateRange()
   const navigate = useNavigate()
-  const [summary, setSummary] = useState<NutritionSummary | null>(null)
-  const [golden, setGolden] = useState<NutritionGoldenMetrics | null>(null)
-  const [daily, setDaily] = useState<NutritionDay[]>([])
-  const [loading, setLoading] = useState(true)
   const period = 30
+  const { summary, golden, daily, loading, reload: reloadNutritionData } = useNutritionData(globalRange.params, period)
   const [mealFilter, setMealFilter] = useState('')
   const { integrations, reload: reloadIntegrations } = useIntegrations()
   const [savingTargets, setSavingTargets] = useState(false)
@@ -790,33 +788,11 @@ export function Nutrition() {
     targetWaterMl: '',
   })
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [s, g, d] = await Promise.all([
-        api.getNutritionSummary(globalRange.params),
-        api.getNutritionGolden(period, globalRange.params),
-        api.getNutritionDaily(period, globalRange.params),
-      ])
-      setSummary(s)
-      setGolden(g)
-      setDaily(d)
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setLoading(false)
-    }
-  }, [period, globalRange.params])
-
   const reloadNutrition = useCallback(async () => {
-    await Promise.all([loadData(), reloadIntegrations()])
-  }, [loadData, reloadIntegrations])
+    await Promise.all([reloadNutritionData(), reloadIntegrations()])
+  }, [reloadNutritionData, reloadIntegrations])
 
   const { syncing, syncSources } = usePageSync(reloadNutrition)
-
-  useEffect(() => {
-    void loadData()
-  }, [loadData])
 
   useEffect(() => {
     const manual = summary?.targets?.manual
@@ -983,7 +959,7 @@ export function Nutrition() {
         })
         setHydrationMode('strict')
       }
-      await loadData()
+      await reloadNutritionData()
       setTargetsNotice(clear ? 'Ручные цели очищены' : 'Ручные цели сохранены')
     } catch (error) {
       setTargetsError(error instanceof Error ? error.message : 'Не удалось сохранить ручные цели')
@@ -998,7 +974,7 @@ export function Nutrition() {
     setWaterNotice('')
     try {
       const next = await api.saveNutritionWater({ delta_ml: deltaMl })
-      await loadData()
+      await reloadNutritionData()
       setWaterNotice(`Добавлено ${Math.round(deltaMl)} мл воды · в цель сегодня ${Math.round(next.hydration_ml)} мл`)
     } catch (error) {
       setWaterError(error instanceof Error ? error.message : 'Не удалось сохранить воду')
@@ -1013,7 +989,7 @@ export function Nutrition() {
     setWaterNotice('')
     try {
       const next = await api.saveNutritionWater({ water_ml: nextWaterMl })
-      await loadData()
+      await reloadNutritionData()
       setWaterNotice(nextWaterMl === 0 ? 'Сегодняшняя вода сброшена' : `Вода обновлена до ${Math.round(next.water_ml)} мл · в цель идёт ${Math.round(next.hydration_ml)} мл`)
       if (nextWaterMl > 0) setCustomWaterInput('')
     } catch (error) {
@@ -1042,7 +1018,7 @@ export function Nutrition() {
     setWaterNotice('')
     try {
       const next = await api.saveNutritionHydration({ beverage_type: beverageType, delta_ml: deltaMl })
-      await loadData()
+      await reloadNutritionData()
       setWaterNotice(`${hydrationBeverageLabel(beverageType)} +${Math.round(deltaMl)} мл · в цель сегодня ${Math.round(next.hydration_ml)} мл`)
     } catch (error) {
       setWaterError(error instanceof Error ? error.message : 'Не удалось сохранить напиток')
@@ -1075,7 +1051,7 @@ export function Nutrition() {
     setWaterNotice('')
     try {
       await api.saveNutritionTargets(buildSavedTargetsPayload(nextMode))
-      await loadData()
+      await reloadNutritionData()
       setTargetsNotice(`Режим гидратации: ${hydrationModeLabel(nextMode).toLowerCase()}`)
     } catch (error) {
       setHydrationMode(previousMode)

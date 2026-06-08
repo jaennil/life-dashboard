@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, type ReactNode } from 'react'
+import { useState, useCallback, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BadgeRussianRuble,
@@ -28,14 +28,20 @@ import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageHeader } from '@/components/PageHeader'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { StyledSelect } from '@/components/StyledSelect'
+import { useFinanceOverview } from '@/hooks/useFinanceOverview'
+import { useFinanceTransactions } from '@/hooks/useFinanceTransactions'
 import { useIntegrations } from '@/hooks/useIntegrations'
 import { usePageSync } from '@/hooks/usePageSync'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import {
   api,
-  type MonthStat, type Account, type FinanceTransaction,
-  type CategoryStat, type DailyTotal, type TopExpense, type FinanceObligationsSummary, type FinanceObligationRule,
+  type Account,
+  type CategoryStat,
+  type DailyTotal,
+  type FinanceObligationRule,
+  type MonthStat,
+  type TopExpense,
 } from '@/lib/api'
 import { rawDataHref } from '@/lib/raw-data'
 
@@ -594,24 +600,11 @@ type SortType = '' | 'amount' | 'amount_asc' | 'date_asc' | 'category'
 export function Finance() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const [monthly, setMonthly] = useState<MonthStat[]>([])
-  const [accounts, setAccounts] = useState<Account[]>([])
-  const [categories, setCategories] = useState<CategoryStat[]>([])
-  const [incomeCategories, setIncomeCategories] = useState<CategoryStat[]>([])
-  const [daily, setDaily] = useState<DailyTotal[]>([])
-  const [topExpenses, setTopExpenses] = useState<TopExpense[]>([])
-  const [obligations, setObligations] = useState<FinanceObligationsSummary | null>(null)
-  const [categoryList, setCategoryList] = useState<string[]>([])
-  const [txs, setTxs] = useState<FinanceTransaction[]>([])
   const [filter, setFilter] = useState<FilterType>('')
   const [sort, setSort] = useState<SortType>('')
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('')
   const period = 30
-  const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(true)
-  const [loading, setLoading] = useState(true)
-  const [txLoading, setTxLoading] = useState(false)
   const [ruleSavingKey, setRuleSavingKey] = useState<string | null>(null)
   const [ruleError, setRuleError] = useState('')
   const { integrations, reload: reloadIntegrations } = useIntegrations()
@@ -628,68 +621,41 @@ export function Finance() {
   const hasGlobalRange = Boolean(globalFrom || globalTo)
   const from = globalFrom || dateOffset(period)
   const to = globalTo || undefined
+  const {
+    monthly,
+    accounts,
+    categories,
+    incomeCategories,
+    daily,
+    topExpenses,
+    obligations,
+    categoryList,
+    loading,
+    reload: reloadFinanceOverview,
+  } = useFinanceOverview(from, to)
+  const {
+    txs,
+    loading: txLoading,
+    hasMore,
+    loadMore,
+  } = useFinanceTransactions({
+    filter,
+    sort,
+    search,
+    category: catFilter,
+    from,
+    to,
+  })
 
   function openFinanceRaw(filters: Record<string, string | undefined> = {}) {
     navigate(rawDataHref('finance.transactions', { from, to, ...filters }))
   }
 
-  const loadPageData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [m, a, c, ic, d, t, o, cl] = await Promise.all([
-        api.getMonthlyStats(),
-        api.getAccounts(),
-        api.getSpendingByCategory(from, to),
-        api.getIncomeByCategory(from, to),
-        api.getDailyTotals(from, to),
-        api.getTopExpenses(from, to),
-        api.getFinanceObligations(30),
-        api.getCategoryList(),
-      ])
-
-      setMonthly(m); setAccounts(a); setCategories(c)
-      setIncomeCategories(ic); setDaily(d); setTopExpenses(t); setObligations(o); setCategoryList(cl)
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setLoading(false)
-    }
-  }, [from, to])
-
   const reloadFinance = useCallback(async () => {
-    await Promise.all([loadPageData(), reloadIntegrations()])
-  }, [loadPageData, reloadIntegrations])
+    await Promise.all([reloadFinanceOverview(), reloadIntegrations()])
+  }, [reloadFinanceOverview, reloadIntegrations])
 
   const { syncing, syncSources } = usePageSync(reloadFinance)
-
-  useEffect(() => {
-    void loadPageData()
-  }, [loadPageData])
-
-  const loadTxs = useCallback(async (p: number, replace: boolean) => {
-    setTxLoading(true)
-    try {
-      const data = await api.getTransactions({
-        page: p, type: filter, sort, search, category: catFilter, from, to,
-      })
-      setTxs(prev => replace ? data : [...prev, ...data])
-      setHasMore(data.length === 30)
-    } catch { /* ignore */ } finally {
-      setTxLoading(false)
-    }
-  }, [filter, sort, search, catFilter, from, to])
-
-  useEffect(() => {
-    setPage(1)
-    const t = setTimeout(() => loadTxs(1, true), search ? 300 : 0)
-    return () => clearTimeout(t)
-  }, [filter, sort, search, catFilter, loadTxs])
-
-  function loadMore() {
-    const next = page + 1
-    setPage(next)
-    loadTxs(next, false)
-  }
 
   function toggleSection(section: FinanceSection) {
     setOpenSections(current => ({ ...current, [section]: !current[section] }))
@@ -754,7 +720,7 @@ export function Finance() {
     setRuleError('')
     try {
       await api.saveFinanceObligationRule(input)
-      await loadPageData()
+      await reloadFinanceOverview()
     } catch (error) {
       setRuleError(error instanceof Error ? error.message : 'Не удалось сохранить правило')
     } finally {
@@ -767,7 +733,7 @@ export function Finance() {
     setRuleError('')
     try {
       await api.deleteFinanceObligationRule(rule.key)
-      await loadPageData()
+      await reloadFinanceOverview()
     } catch (error) {
       setRuleError(error instanceof Error ? error.message : 'Не удалось удалить правило')
     } finally {

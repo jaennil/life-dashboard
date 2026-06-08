@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ElementType } from 'react'
+import { useCallback, useState, type ElementType } from 'react'
 import {
   AlertTriangle,
   CalendarClock,
@@ -23,12 +23,11 @@ import { StyledSelect } from '@/components/StyledSelect'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { useIntegrations } from '@/hooks/useIntegrations'
 import { usePageSync } from '@/hooks/usePageSync'
+import { useProductivityData } from '@/hooks/useProductivityData'
 import {
   api,
   type ProductivityHabit,
   type ProductivityHabitInput,
-  type ProductivityHabitsResponse,
-  type ProductivitySummary,
   type ProductivityTask,
 } from '@/lib/api'
 import { cn, syncCaptionForSources } from '@/lib/utils'
@@ -238,13 +237,7 @@ function HabitColumn({
 
 export function Productivity() {
   const globalRange = useGlobalDateRange()
-  const [summary, setSummary] = useState<ProductivitySummary | null>(null)
-  const [tasks, setTasks] = useState<ProductivityTask[]>([])
-  const [habitsData, setHabitsData] = useState<ProductivityHabitsResponse | null>(null)
   const { integrations, reload: reloadIntegrations } = useIntegrations()
-  const [loading, setLoading] = useState(true)
-  const [taskLoading, setTaskLoading] = useState(true)
-  const [habitsLoading, setHabitsLoading] = useState(true)
   const [habitSavingID, setHabitSavingID] = useState<string | null>(null)
   const [habitDeletingID, setHabitDeletingID] = useState<string | null>(null)
   const [habitFormSaving, setHabitFormSaving] = useState(false)
@@ -257,51 +250,22 @@ export function Productivity() {
     routine: 'morning',
     area_name: '',
   })
-
-  const loadSummary = useCallback(async () => {
-    try {
-      setSummary(await api.getProductivitySummary(globalRange.params))
-    } catch (error) {
-      console.error(error)
-    }
-  }, [globalRange.params])
-
-  const loadTasks = useCallback(async (currentFilter: TaskFilter) => {
-    setTaskLoading(true)
-    try {
-      setTasks(await api.getProductivityTasks(currentFilter, globalRange.params))
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setTaskLoading(false)
-    }
-  }, [globalRange.params])
-
-  const loadHabits = useCallback(async () => {
-    setHabitsLoading(true)
-    try {
-      setHabitsData(await api.getProductivityHabits(globalRange.targetDate))
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setHabitsLoading(false)
-    }
-  }, [globalRange.targetDate])
-
-  const loadProductivity = useCallback(async () => {
-    await Promise.all([loadSummary(), loadTasks(filter), loadHabits()])
-  }, [filter, loadHabits, loadSummary, loadTasks])
+  const {
+    summary,
+    tasks,
+    habitsData,
+    loading,
+    taskLoading,
+    habitsLoading,
+    reload: reloadProductivityData,
+    reloadHabits,
+  } = useProductivityData(globalRange.params, globalRange.targetDate, filter)
 
   const reloadProductivity = useCallback(async () => {
-    await Promise.all([loadProductivity(), reloadIntegrations()])
-  }, [loadProductivity, reloadIntegrations])
+    await Promise.all([reloadProductivityData(), reloadIntegrations()])
+  }, [reloadProductivityData, reloadIntegrations])
 
   const { syncing, syncSources } = usePageSync(reloadProductivity)
-
-  useEffect(() => {
-    setLoading(true)
-    loadProductivity().finally(() => setLoading(false))
-  }, [loadProductivity])
 
   const todoistIntegration = integrations.find(integration => integration.name === 'todoist')
   const syncCaption = todoistIntegration ? syncCaptionForSources([todoistIntegration]) : undefined
@@ -323,7 +287,7 @@ export function Productivity() {
       setEditingHabitID(null)
       setShowHabitComposer(false)
       setHabitForm({ name: '', routine: 'morning', area_name: '' })
-      await loadHabits()
+      await reloadHabits()
     } catch (error) {
       setHabitFormError(error instanceof Error ? error.message : 'Не удалось сохранить привычку')
     } finally {
@@ -335,7 +299,7 @@ export function Productivity() {
     setHabitSavingID(habit.id)
     try {
       await api.setProductivityHabitStatus(habit.id, habit.status === 'completed' ? 'none' : 'completed', globalRange.targetDate)
-      await loadHabits()
+      await reloadHabits()
     } catch (error) {
       console.error(error)
     } finally {
@@ -352,7 +316,7 @@ export function Productivity() {
         setHabitForm({ name: '', routine: 'morning', area_name: '' })
       }
       await api.deleteProductivityHabit(habit.id)
-      await loadHabits()
+      await reloadHabits()
     } catch (error) {
       console.error(error)
     } finally {

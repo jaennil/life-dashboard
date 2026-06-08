@@ -7,11 +7,12 @@ import 'react-resizable/css/styles.css'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageSyncButton } from '@/components/PageSyncButton'
 import { PageHeader } from '@/components/PageHeader'
+import { useDashboardData } from '@/hooks/useDashboardData'
 import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { useIntegrations } from '@/hooks/useIntegrations'
 import { usePageSync } from '@/hooks/usePageSync'
 import { cn, syncCaptionForSources } from '@/lib/utils'
-import { api, type DashboardSummary, type Transaction, type WeatherData } from '@/lib/api'
+import { api, type WeatherData } from '@/lib/api'
 import { useWidgetEdit } from '@/lib/widget-edit'
 import {
   applyGridLayout,
@@ -394,46 +395,28 @@ function DashboardGridItem({
 
 export function Dashboard() {
   const globalRange = useGlobalDateRange()
-  const [summary, setSummary] = useState<DashboardSummary | null>(null)
-  const [txs, setTxs] = useState<Transaction[]>([])
   const [weather, setWeather] = useState<WeatherData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [weatherLoading, setWeatherLoading] = useState(true)
   const [showPicker, setShowPicker] = useState(false)
   const [dashboardLayout, setDashboardLayout] = useState(loadDashboardLayout)
   const { editingWidgets } = useWidgetEdit()
+  const { summary, txs, loading, reload: reloadDashboardData } = useDashboardData(globalRange.params)
   const { integrations, reload: reloadIntegrations } = useIntegrations()
   const { width: gridWidth, containerRef: gridContainerRef, mounted: gridMounted } = useContainerWidth({ initialWidth: 1200 })
 
-  const loadDashboardData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [s, t] = await Promise.all([
-        api.getDashboardSummary(globalRange.params),
-        api.getRecentTransactions(globalRange.params),
-      ])
-      setSummary(s)
-      setTxs(t)
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setLoading(false)
-    }
-  }, [globalRange.params])
-
   const reloadDashboard = useCallback(async () => {
-    await Promise.all([loadDashboardData(), reloadIntegrations()])
-  }, [loadDashboardData, reloadIntegrations])
+    await Promise.all([reloadDashboardData(), reloadIntegrations()])
+  }, [reloadDashboardData, reloadIntegrations])
 
   const { syncing, syncSources } = usePageSync(reloadDashboard)
 
-  function fetchWeather(loc?: SavedLocation) {
+  const fetchWeather = useCallback((loc?: SavedLocation) => {
     setWeatherLoading(true)
     api.getWeather(loc?.lat, loc?.lon, loc?.city)
       .then(setWeather)
       .catch(console.error)
       .finally(() => setWeatherLoading(false))
-  }
+  }, [])
 
   function handleLocationSelect(loc: SavedLocation) {
     saveLocation(loc)
@@ -442,10 +425,10 @@ export function Dashboard() {
   }
 
   useEffect(() => {
-    void loadDashboardData()
-
     const saved = loadLocation()
-    fetchWeather(saved ?? undefined)
+    const weatherTimer = window.setTimeout(() => {
+      fetchWeather(saved ?? undefined)
+    }, 0)
 
     if (!saved && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -458,7 +441,9 @@ export function Dashboard() {
         { timeout: 5000 }
       )
     }
-  }, [loadDashboardData])
+
+    return () => window.clearTimeout(weatherTimer)
+  }, [fetchWeather])
 
   useEffect(() => {
     persistDashboardLayout(dashboardLayout)
