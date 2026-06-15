@@ -58,6 +58,15 @@ export const DASHBOARD_WIDGET_BOUNDS: Record<DashboardWidgetId, WidgetBounds> = 
   transactions: { minW: 3, maxW: 8, minH: 3, maxH: 12 },
 }
 
+const COMPACT_STAT_WIDGETS = new Set<DashboardWidgetId>([
+  'balance',
+  'spending',
+  'activities',
+  'workouts',
+  'nutrition',
+  'overdue',
+])
+
 export const DASHBOARD_WIDGET_LABELS: Record<DashboardWidgetId, string> = {
   weather: 'Погода',
   balance: 'Баланс',
@@ -150,7 +159,10 @@ export function visibleWidgetIds(layout: DashboardLayoutState): DashboardWidgetI
 
 function toGridItem(widget: DashboardLayoutWidget, cols: number): DashboardGridLayoutItem {
   const bounds = DASHBOARD_WIDGET_BOUNDS[widget.id]
-  const w = clamp(widget.w, Math.min(bounds.minW, cols), Math.min(bounds.maxW, cols))
+  const preferredWidth = cols < DASHBOARD_GRID_COLS.lg && COMPACT_STAT_WIDGETS.has(widget.id)
+    ? bounds.minW
+    : widget.w
+  const w = clamp(preferredWidth, Math.min(bounds.minW, cols), Math.min(bounds.maxW, cols))
   const x = clamp(widget.x, 0, Math.max(0, cols - w))
 
   return {
@@ -166,12 +178,41 @@ function toGridItem(widget: DashboardLayoutWidget, cols: number): DashboardGridL
   }
 }
 
+function overlaps(a: DashboardGridLayoutItem, b: DashboardGridLayoutItem) {
+  return a.x < b.x + b.w
+    && a.x + a.w > b.x
+    && a.y < b.y + b.h
+    && a.y + a.h > b.y
+}
+
+function packGridItems(widgets: DashboardLayoutWidget[], cols: number): DashboardGridLayout {
+  const placed: DashboardGridLayoutItem[] = []
+
+  widgets.forEach(widget => {
+    const item = toGridItem(widget, cols)
+    let y = 0
+
+    while (true) {
+      for (let x = 0; x <= cols - item.w; x += 1) {
+        const candidate = { ...item, x, y }
+        if (!placed.some(placedItem => overlaps(candidate, placedItem))) {
+          placed.push(candidate)
+          return
+        }
+      }
+      y += 1
+    }
+  })
+
+  return placed
+}
+
 export function toResponsiveLayouts(layout: DashboardLayoutState): DashboardGridLayouts {
   const visible = visibleWidgetIds(layout).map(id => layout.widgets[id])
 
   return {
     lg: visible.map(widget => toGridItem(widget, DASHBOARD_GRID_COLS.lg)),
-    md: visible.map(widget => toGridItem(widget, DASHBOARD_GRID_COLS.md)),
+    md: packGridItems(visible, DASHBOARD_GRID_COLS.md),
     sm: visible.map((widget, index) => ({
       ...toGridItem(widget, DASHBOARD_GRID_COLS.sm),
       x: 0,

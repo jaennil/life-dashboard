@@ -129,6 +129,39 @@ function toGridItem<TId extends string>(
   }
 }
 
+function overlaps(a: EditableGridLayoutItem, b: EditableGridLayoutItem) {
+  return a.x < b.x + b.w
+    && a.x + a.w > b.x
+    && a.y < b.y + b.h
+    && a.y + a.h > b.y
+}
+
+function packGridItems<TId extends string>(
+  widgets: Array<EditableWidgetLayoutItem<TId>>,
+  bounds: EditableWidgetBoundsMap<TId>,
+  cols: number,
+): EditableGridLayout {
+  const placed: EditableGridLayoutItem[] = []
+
+  widgets.forEach(widget => {
+    const item = toGridItem(widget, bounds, cols)
+    let y = 0
+
+    while (true) {
+      for (let x = 0; x <= cols - item.w; x += 1) {
+        const candidate = { ...item, x, y }
+        if (!placed.some(placedItem => overlaps(candidate, placedItem))) {
+          placed.push(candidate)
+          return
+        }
+      }
+      y += 1
+    }
+  })
+
+  return placed
+}
+
 export function toEditableResponsiveLayouts<TId extends string>({
   ids,
   layout,
@@ -142,7 +175,7 @@ export function toEditableResponsiveLayouts<TId extends string>({
 
   return {
     lg: visible.map(widget => toGridItem(widget, bounds, EDITABLE_WIDGET_GRID_COLS.lg)),
-    md: visible.map(widget => toGridItem(widget, bounds, EDITABLE_WIDGET_GRID_COLS.md)),
+    md: packGridItems(visible, bounds, EDITABLE_WIDGET_GRID_COLS.md),
     sm: visible.map((widget, index) => ({
       ...toGridItem(widget, bounds, EDITABLE_WIDGET_GRID_COLS.sm),
       x: 0,

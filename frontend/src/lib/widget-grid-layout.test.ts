@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyEditableGridLayout,
+  EDITABLE_WIDGET_GRID_COLS,
   normalizeEditableWidgetLayout,
   setEditableWidgetHidden,
   toEditableResponsiveLayouts,
@@ -8,6 +9,24 @@ import {
   type EditableWidgetBoundsMap,
   type EditableWidgetDefaults,
 } from './widget-grid-layout'
+
+function layoutsOverlap(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+) {
+  return a.x < b.x + b.w
+    && a.x + a.w > b.x
+    && a.y < b.y + b.h
+    && a.y + a.h > b.y
+}
+
+function expectNoOverlaps(items: ReadonlyArray<{ x: number; y: number; w: number; h: number }>) {
+  items.forEach((item, index) => {
+    items.slice(index + 1).forEach(other => {
+      expect(layoutsOverlap(item, other)).toBe(false)
+    })
+  })
+}
 
 const ids = ['alpha', 'beta', 'gamma'] as const
 type WidgetId = (typeof ids)[number]
@@ -67,7 +86,9 @@ describe('editable widget layout model', () => {
 
     expect(responsive.lg.map(item => item.i)).toEqual(['beta', 'gamma'])
     expect(responsive.lg.find(item => item.i === 'beta')).toMatchObject({ x: 6, y: 0, w: 4, h: 5 })
-    expect(responsive.md.find(item => item.i === 'beta')).toMatchObject({ x: 4, w: 4 })
+    expect(responsive.md.find(item => item.i === 'beta')).toMatchObject({ x: 0, y: 0, w: 4, h: 5 })
+    expect(responsive.md.every(item => item.x + item.w <= EDITABLE_WIDGET_GRID_COLS.md)).toBe(true)
+    expectNoOverlaps(responsive.md)
     expect(responsive.sm.every(item => item.x === 0 && item.w === 1)).toBe(true)
   })
 

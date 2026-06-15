@@ -1,12 +1,31 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_DASHBOARD_LAYOUT,
+  DASHBOARD_GRID_COLS,
   DASHBOARD_WIDGETS,
   normalizeDashboardLayout,
   toResponsiveLayouts,
   visibleWidgetIds,
   type DashboardLayoutState,
 } from './dashboard-layout'
+
+function layoutsOverlap(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+) {
+  return a.x < b.x + b.w
+    && a.x + a.w > b.x
+    && a.y < b.y + b.h
+    && a.y + a.h > b.y
+}
+
+function expectNoOverlaps(items: ReadonlyArray<{ x: number; y: number; w: number; h: number }>) {
+  items.forEach((item, index) => {
+    items.slice(index + 1).forEach(other => {
+      expect(layoutsOverlap(item, other)).toBe(false)
+    })
+  })
+}
 
 describe('dashboard layout model', () => {
   it('normalizes legacy saved layouts into the full widget set', () => {
@@ -52,8 +71,24 @@ describe('dashboard layout model', () => {
 
     expect(layouts.lg.map(item => item.i)).not.toContain('balance')
     expect(layouts.lg.find(item => item.i === 'spending')).toMatchObject({ x: 4, y: 1, w: 3, h: 3 })
-    expect(layouts.md.find(item => item.i === 'spending')).toMatchObject({ x: 4, w: 3 })
+    expect(layouts.md.find(item => item.i === 'spending')).toMatchObject({ w: 2, h: 3 })
+    expect(layouts.md.every(item => item.x + item.w <= DASHBOARD_GRID_COLS.md)).toBe(true)
+    expectNoOverlaps(layouts.md)
     expect(layouts.sm.every(item => item.x === 0 && item.w === 1)).toBe(true)
+  })
+
+  it('packs the default medium dashboard without staggered gaps', () => {
+    const layouts = toResponsiveLayouts(DEFAULT_DASHBOARD_LAYOUT)
+
+    expect(layouts.md.find(item => item.i === 'weather')).toMatchObject({ x: 0, y: 0, w: 4, h: 8 })
+    expect(layouts.md.find(item => item.i === 'balance')).toMatchObject({ x: 4, y: 0, w: 2, h: 3 })
+    expect(layouts.md.find(item => item.i === 'spending')).toMatchObject({ x: 6, y: 0, w: 2, h: 3 })
+    expect(layouts.md.find(item => item.i === 'activities')).toMatchObject({ x: 4, y: 3, w: 2, h: 3 })
+    expect(layouts.md.find(item => item.i === 'workouts')).toMatchObject({ x: 6, y: 3, w: 2, h: 3 })
+    expect(layouts.md.find(item => item.i === 'nutrition')).toMatchObject({ x: 4, y: 6, w: 2, h: 3 })
+    expect(layouts.md.find(item => item.i === 'overdue')).toMatchObject({ x: 6, y: 6, w: 2, h: 3 })
+    expect(layouts.md.find(item => item.i === 'overview')).toMatchObject({ x: 0, y: 9, w: 8 })
+    expectNoOverlaps(layouts.md)
   })
 
   it('orders visible widget ids by grid position', () => {

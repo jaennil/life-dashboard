@@ -31,7 +31,7 @@ import {
 } from '@/lib/dashboard-layout'
 
 const LOC_KEY = 'weather_location'
-const DASHBOARD_LAYOUT_KEY = 'dashboard_grid_layout_v2'
+const DASHBOARD_LAYOUT_KEY = 'dashboard_grid_layout_v3'
 
 function loadDashboardLayout(): DashboardLayoutState {
   if (typeof localStorage === 'undefined') return normalizeDashboardLayout(DEFAULT_DASHBOARD_LAYOUT)
