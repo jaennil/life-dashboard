@@ -363,12 +363,12 @@ export function Productivity() {
       />
 
       <EditableWidgetGrid
-        storageKey="productivity_widget_layout_v1"
+        storageKey="productivity_widget_layout_v2"
         widgets={[
           { id: 'routines', label: 'Рутины и уход', layout: { x: 0, y: 0, w: 12, h: 12 }, bounds: { minW: 4, minH: 6, maxH: 24 } },
-          { id: 'habit-editor', label: 'Редактор привычек', layout: { x: 0, y: 12, w: 12, h: 5 }, bounds: { minW: 4, minH: 4, maxH: 14 } },
-          { id: 'task-summary', label: 'Сводка задач', layout: { x: 0, y: 17, w: 5, h: 5 }, bounds: { minW: 3, minH: 4, maxH: 10 } },
-          { id: 'task-workload', label: 'Нагрузка и задачи', layout: { x: 5, y: 17, w: 7, h: 10 }, bounds: { minW: 4, minH: 6, maxH: 22 } },
+          { id: 'habit-editor', label: 'Редактор привычек', layout: { x: 0, y: 12, w: 12, h: 3 }, bounds: { minW: 4, minH: 3, maxH: 14 } },
+          { id: 'task-summary', label: 'Сводка задач', layout: { x: 0, y: 15, w: 5, h: 5 }, bounds: { minW: 3, minH: 4, maxH: 10 } },
+          { id: 'task-workload', label: 'Нагрузка и задачи', layout: { x: 5, y: 15, w: 7, h: 10 }, bounds: { minW: 4, minH: 6, maxH: 22 } },
         ]}
       >
       <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">

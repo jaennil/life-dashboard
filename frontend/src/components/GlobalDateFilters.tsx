@@ -169,7 +169,7 @@ export function GlobalDateFilters() {
   }
 
   return (
-    <div className="sticky top-[calc(4.75rem+env(safe-area-inset-top))] z-30 mx-auto mb-4 w-full max-w-[1560px] lg:top-0 lg:mb-5">
+    <div className="sticky top-[calc(4.75rem+env(safe-area-inset-top))] z-30 mx-auto mb-4 w-full max-w-[1760px] lg:top-0 lg:mb-5">
       <div className="relative flex flex-wrap items-center justify-center gap-2 rounded-lg border bg-card/95 p-2 shadow-sm backdrop-blur">
         <div className="flex min-w-0 flex-wrap items-center justify-center gap-2">
           <div className="flex flex-wrap gap-1 rounded-lg border bg-background/70 p-1">

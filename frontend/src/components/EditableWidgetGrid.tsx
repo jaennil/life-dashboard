@@ -161,14 +161,14 @@ export function EditableWidgetGrid<TId extends string>({
         <div ref={gridContainerRef} className="min-w-0">
           {gridMounted ? (
             <ResponsiveGridLayout
-              className={cn('dashboard-grid -mx-2', editingWidgets && 'is-editing')}
+              className={cn('dashboard-grid', editingWidgets && 'is-editing')}
               width={gridWidth}
               layouts={responsiveLayouts}
               breakpoints={{ lg: 1200, md: 768, sm: 0 }}
               cols={EDITABLE_WIDGET_GRID_COLS}
               rowHeight={EDITABLE_WIDGET_GRID_ROW_HEIGHT}
               margin={[16, 16]}
-              containerPadding={[8, 0]}
+              containerPadding={[0, 0]}
               dragConfig={{
                 enabled: editingWidgets,
                 bounded: true,
@@ -201,7 +201,7 @@ export function EditableWidgetGrid<TId extends string>({
                         <EyeOff className="h-4 w-4" />
                       </button>
                     ) : null}
-                    <div className="dashboard-widget-content h-full min-w-0 overflow-hidden">
+                    <div className="dashboard-widget-content h-full min-w-0 overflow-x-hidden overflow-y-auto">
                       {widgetContent.get(id)}
                     </div>
                   </section>

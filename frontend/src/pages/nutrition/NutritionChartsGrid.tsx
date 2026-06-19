@@ -78,7 +78,7 @@ export function NutritionAnalysisPanel({
   const macroTotal = macroPie.reduce((sum, item) => sum + item.value, 0)
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
       <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4">Распределение БЖУ (ккал)</h2>
         {loading || macroPie.length === 0 ? <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div> : (

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
-import { EditableWidgetGrid } from '@/components/EditableWidgetGrid'
 import { PageHeader } from '@/components/PageHeader'
 import { cn, formatLastSyncAt } from '@/lib/utils'
 import { api, type HealthAPIKeyInfo, type Integration } from '@/lib/api'
@@ -738,31 +737,25 @@ export function Settings() {
         </div>
       ) : null}
 
-      <EditableWidgetGrid
-        storageKey="settings_widget_layout_v1"
-        widgets={[
-          { id: 'account', label: 'Аккаунт', layout: { x: 0, y: 0, w: 6, h: 8 }, bounds: { minW: 4, minH: 5, maxH: 18 } },
-          { id: 'apple-health', label: 'Apple Health', layout: { x: 6, y: 0, w: 6, h: 8 }, bounds: { minW: 4, minH: 5, maxH: 18 } },
-          { id: 'integrations', label: 'Интеграции', layout: { x: 0, y: 8, w: 12, h: 18 }, bounds: { minW: 6, minH: 8, maxH: 36 } },
-        ]}
-      >
-      <div>
-        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Аккаунт</h2>
-        <TOTPSection />
+      <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
+        <div>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-foreground">Аккаунт</h2>
+          <TOTPSection />
+        </div>
+
+        <AppleHealthSection onChanged={load} reloadKey={healthReloadKey} />
       </div>
 
-      <AppleHealthSection onChanged={load} reloadKey={healthReloadKey} />
-
-      <div>
-        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Интеграции</h2>
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-foreground">Интеграции</h2>
         {loading ? (
           <div className="flex flex-col gap-3">
             {[1, 2, 3].map(i => (
-              <div key={i} className="rounded-2xl border bg-card/90 p-5 h-28 animate-pulse bg-muted/30 shadow-sm" />
+              <div key={i} className="h-28 rounded-2xl border bg-muted/30 p-5 shadow-sm animate-pulse" />
             ))}
           </div>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div className="grid gap-3 xl:grid-cols-2">
             {integrations.map(integration => (
               <IntegrationCard
                 key={integration.name}
@@ -774,8 +767,7 @@ export function Settings() {
             ))}
           </div>
         )}
-      </div>
-      </EditableWidgetGrid>
+      </section>
     </div>
   )
 }

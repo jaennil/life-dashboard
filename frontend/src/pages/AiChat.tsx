@@ -220,11 +220,11 @@ export function AiChat() {
       ) : null}
 
       <EditableWidgetGrid
-        storageKey="ai_widget_layout_v1"
+        storageKey="ai_widget_layout_v2"
         widgets={[
           { id: 'checkup', label: 'Checkup', layout: { x: 0, y: 0, w: 12, h: 5 }, bounds: { minW: 4, minH: 4, maxH: 12 } },
-          { id: 'messages', label: 'Сообщения', layout: { x: 0, y: 5, w: 12, h: 14 }, bounds: { minW: 5, minH: 8, maxH: 28 } },
-          { id: 'input', label: 'Поле ввода', layout: { x: 0, y: 19, w: 12, h: 4 }, bounds: { minW: 4, minH: 3, maxH: 8 } },
+          { id: 'messages', label: 'Сообщения', layout: { x: 0, y: 5, w: 12, h: 20 }, bounds: { minW: 5, minH: 12, maxH: 36 } },
+          { id: 'input', label: 'Поле ввода', layout: { x: 0, y: 25, w: 12, h: 4 }, bounds: { minW: 4, minH: 3, maxH: 8 } },
         ]}
       >
       <div className="sticky top-3 z-20 -mx-1 rounded-[24px] border border-white/5 bg-background/88 px-1 py-1 backdrop-blur sm:top-4 sm:mx-0 sm:rounded-2xl sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
@@ -257,7 +257,7 @@ export function AiChat() {
       </div>
 
       {/* Messages */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 rounded-[24px] border bg-card/90 p-3 shadow-sm sm:p-4">
+      <div className="flex h-full min-h-0 flex-col gap-3 rounded-[24px] border bg-card/90 p-3 shadow-sm sm:p-4">
         {historyLoading ? (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />

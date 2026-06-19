@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Database, RotateCcw, Search } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
-import { EditableWidgetGrid } from '@/components/EditableWidgetGrid'
 import { PageHeader } from '@/components/PageHeader'
 import { StyledSelect } from '@/components/StyledSelect'
 import { api, type CollectionParams } from '@/lib/api'
@@ -363,12 +362,6 @@ export function RawData() {
     <div className="flex flex-col gap-6">
       <PageHeader eyebrow="Inspect" title="Raw Data" description="Исходные записи из доменных API. Фильтры графиков открываются здесь как воспроизводимый drill-down." badges={[{ label: `${rows.length} записей`, tone: 'primary' }]} />
 
-      <EditableWidgetGrid
-        storageKey="raw_data_widget_layout_v1"
-        widgets={[
-          { id: 'records', label: 'Raw data records', layout: { x: 0, y: 0, w: 12, h: 18 }, bounds: { minW: 6, minH: 8, maxH: 36 } },
-        ]}
-      >
       <section className="rounded-2xl border bg-card/90 shadow-sm">
         <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center">
           <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border bg-background px-3 py-2">
@@ -396,9 +389,9 @@ export function RawData() {
           </div>
         ) : null}
 
-        <div className="overflow-x-auto">
+        <div className="max-h-[calc(100vh-18rem)] min-h-[36rem] overflow-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-background/55 text-xs uppercase text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-background text-xs uppercase text-muted-foreground shadow-[0_1px_0_hsl(var(--border))]">
               <tr>
                 {columns.map(column => (
                   <th key={column.key} aria-sort={sort === column.key ? order === 'asc' ? 'ascending' : 'descending' : 'none'} className="whitespace-nowrap px-4 py-3 font-medium">
@@ -453,7 +446,6 @@ export function RawData() {
           </table>
         </div>
       </section>
-      </EditableWidgetGrid>
     </div>
   )
 }

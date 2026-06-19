@@ -763,7 +763,7 @@ export function Finance() {
       />
 
       <EditableWidgetGrid
-        storageKey="finance_widget_layout_v2"
+        storageKey="finance_widget_layout_v3"
         widgets={[
           { id: 'liquid-balance', label: 'Ликвидный баланс', layout: { x: 0, y: 0, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
           { id: 'net-cashflow', label: 'Net cashflow', layout: { x: 4, y: 0, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
@@ -771,10 +771,10 @@ export function Finance() {
           { id: 'burn-rate', label: 'Burn rate', layout: { x: 0, y: 4, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
           { id: 'runway', label: 'Runway', layout: { x: 4, y: 4, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
           { id: 'spending-concentration', label: 'Концентрация расходов', layout: { x: 8, y: 4, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
-          { id: 'obligations', label: 'Обязательные платежи', layout: { x: 0, y: 8, w: 12, h: 14 }, bounds: { minW: 5, minH: 7, maxH: 32 } },
-          { id: 'trends', label: 'Динамика', layout: { x: 0, y: 22, w: 12, h: 10 }, bounds: { minW: 5, minH: 8, maxH: 24 } },
-          { id: 'categories', label: 'Категории и топ расходов', layout: { x: 0, y: 32, w: 12, h: 22 }, bounds: { minW: 5, minH: 16, maxH: 44 } },
-          { id: 'accounts', label: 'Счета и операции', layout: { x: 0, y: 54, w: 12, h: 18 }, bounds: { minW: 5, minH: 12, maxH: 44 } },
+          { id: 'obligations', label: 'Обязательные платежи', layout: { x: 0, y: 8, w: 12, h: 20 }, bounds: { minW: 5, minH: 12, maxH: 40 } },
+          { id: 'trends', label: 'Динамика', layout: { x: 0, y: 28, w: 12, h: 10 }, bounds: { minW: 5, minH: 8, maxH: 24 } },
+          { id: 'categories', label: 'Категории и топ расходов', layout: { x: 0, y: 38, w: 12, h: 22 }, bounds: { minW: 5, minH: 16, maxH: 44 } },
+          { id: 'accounts', label: 'Счета и операции', layout: { x: 0, y: 60, w: 12, h: 18 }, bounds: { minW: 5, minH: 12, maxH: 44 } },
         ]}
       >
         <FinanceSummaryCard

@@ -47,15 +47,15 @@ export const DASHBOARD_GRID_COLS = {
 export const DASHBOARD_GRID_ROW_HEIGHT = 32
 
 export const DASHBOARD_WIDGET_BOUNDS: Record<DashboardWidgetId, WidgetBounds> = {
-  weather: { minW: 3, maxW: 8, minH: 4, maxH: 12 },
+  weather: { minW: 3, maxW: 8, minH: 4, maxH: 16 },
   balance: { minW: 2, maxW: 6, minH: 2, maxH: 8 },
   spending: { minW: 2, maxW: 6, minH: 2, maxH: 8 },
   activities: { minW: 2, maxW: 6, minH: 2, maxH: 8 },
   workouts: { minW: 2, maxW: 6, minH: 2, maxH: 8 },
   nutrition: { minW: 2, maxW: 6, minH: 2, maxH: 8 },
   overdue: { minW: 2, maxW: 6, minH: 2, maxH: 8 },
-  overview: { minW: 4, maxW: 12, minH: 6, maxH: 18 },
-  transactions: { minW: 3, maxW: 8, minH: 3, maxH: 12 },
+  overview: { minW: 4, maxW: 12, minH: 6, maxH: 24 },
+  transactions: { minW: 3, maxW: 8, minH: 3, maxH: 18 },
 }
 
 const COMPACT_STAT_WIDGETS = new Set<DashboardWidgetId>([
@@ -81,15 +81,15 @@ export const DASHBOARD_WIDGET_LABELS: Record<DashboardWidgetId, string> = {
 
 export const DEFAULT_DASHBOARD_LAYOUT: DashboardLayoutState = {
   widgets: {
-    weather: { id: 'weather', x: 0, y: 0, w: 4, h: 8, hidden: false },
-    balance: { id: 'balance', x: 4, y: 0, w: 2, h: 3, hidden: false },
-    spending: { id: 'spending', x: 6, y: 0, w: 3, h: 3, hidden: false },
-    activities: { id: 'activities', x: 9, y: 0, w: 3, h: 3, hidden: false },
-    workouts: { id: 'workouts', x: 4, y: 3, w: 2, h: 3, hidden: false },
-    nutrition: { id: 'nutrition', x: 6, y: 3, w: 3, h: 3, hidden: false },
-    overdue: { id: 'overdue', x: 9, y: 3, w: 3, h: 3, hidden: false },
-    overview: { id: 'overview', x: 0, y: 8, w: 8, h: 14, hidden: false },
-    transactions: { id: 'transactions', x: 8, y: 8, w: 4, h: 5, hidden: false },
+    weather: { id: 'weather', x: 0, y: 0, w: 6, h: 10, hidden: false },
+    balance: { id: 'balance', x: 6, y: 0, w: 3, h: 4, hidden: false },
+    spending: { id: 'spending', x: 9, y: 0, w: 3, h: 4, hidden: false },
+    activities: { id: 'activities', x: 6, y: 4, w: 3, h: 3, hidden: false },
+    workouts: { id: 'workouts', x: 9, y: 4, w: 3, h: 3, hidden: false },
+    nutrition: { id: 'nutrition', x: 6, y: 7, w: 3, h: 3, hidden: false },
+    overdue: { id: 'overdue', x: 9, y: 7, w: 3, h: 3, hidden: false },
+    overview: { id: 'overview', x: 0, y: 10, w: 8, h: 15, hidden: false },
+    transactions: { id: 'transactions', x: 8, y: 10, w: 4, h: 10, hidden: false },
   },
 }
 

@@ -26,11 +26,11 @@ import { useNutritionTargets } from '@/pages/nutrition/useNutritionTargets'
 
 const NUTRITION_WIDGETS = [
   { id: 'golden', label: 'Ключевые метрики', layout: { x: 0, y: 0, w: 12, h: 5 }, bounds: { minW: 4, minH: 4, maxH: 10 } },
-  { id: 'hydration', label: 'Гидратация', layout: { x: 0, y: 5, w: 12, h: 14 }, bounds: { minW: 6, minH: 8, maxH: 30 } },
-  { id: 'trends', label: 'Калории и БЖУ', layout: { x: 0, y: 19, w: 6, h: 8 }, bounds: { minW: 4, minH: 6, maxH: 18 } },
-  { id: 'analysis', label: 'Распределение и приёмы пищи', layout: { x: 6, y: 19, w: 6, h: 10 }, bounds: { minW: 4, minH: 6, maxH: 24 } },
-  { id: 'targets', label: 'Цели питания', layout: { x: 0, y: 29, w: 12, h: 10 }, bounds: { minW: 5, minH: 5, maxH: 24 } },
-  { id: 'daily-log', label: 'Дневник питания и воды', layout: { x: 0, y: 39, w: 12, h: 12 }, bounds: { minW: 5, minH: 6, maxH: 30 } },
+  { id: 'hydration', label: 'Гидратация', layout: { x: 0, y: 5, w: 12, h: 24 }, bounds: { minW: 6, minH: 12, maxH: 42 } },
+  { id: 'trends', label: 'Калории и БЖУ', layout: { x: 0, y: 29, w: 12, h: 10 }, bounds: { minW: 6, minH: 8, maxH: 22 } },
+  { id: 'analysis', label: 'Распределение и приёмы пищи', layout: { x: 0, y: 39, w: 12, h: 14 }, bounds: { minW: 6, minH: 10, maxH: 32 } },
+  { id: 'targets', label: 'Цели питания', layout: { x: 0, y: 53, w: 12, h: 10 }, bounds: { minW: 5, minH: 5, maxH: 24 } },
+  { id: 'daily-log', label: 'Дневник питания и воды', layout: { x: 0, y: 63, w: 12, h: 32 }, bounds: { minW: 5, minH: 14, maxH: 54 } },
 ]
 
 export function Nutrition() {
@@ -161,7 +161,7 @@ export function Nutrition() {
       />
 
       <EditableWidgetGrid
-        storageKey="nutrition_widget_layout_v1"
+        storageKey="nutrition_widget_layout_v2"
         widgets={NUTRITION_WIDGETS}
       >
         <GoldenMetricsGrid

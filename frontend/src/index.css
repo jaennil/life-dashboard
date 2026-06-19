@@ -86,7 +86,7 @@ body {
   position: relative;
   z-index: 1;
   margin: 0 auto;
-  width: min(100%, 1560px);
+  width: min(100%, 1760px);
   max-width: 100%;
   min-width: 0;
   display: flex;
@@ -146,6 +146,10 @@ body {
 
 .dashboard-grid-widget {
   position: relative;
+}
+
+.dashboard-widget-content {
+  scrollbar-gutter: stable;
 }
 
 .dashboard-grid-widget.is-editing {

@@ -31,7 +31,7 @@ import {
 } from '@/lib/dashboard-layout'
 
 const LOC_KEY = 'weather_location'
-const DASHBOARD_LAYOUT_KEY = 'dashboard_grid_layout_v3'
+const DASHBOARD_LAYOUT_KEY = 'dashboard_grid_layout_v4'
 
 function loadDashboardLayout(): DashboardLayoutState {
   if (typeof localStorage === 'undefined') return normalizeDashboardLayout(DEFAULT_DASHBOARD_LAYOUT)
@@ -386,7 +386,7 @@ function DashboardGridItem({
           <EyeOff className="h-4 w-4" />
         </button>
       ) : null}
-      <div className="dashboard-widget-content h-full min-w-0 overflow-hidden">
+      <div className="dashboard-widget-content h-full min-w-0 overflow-x-hidden overflow-y-auto">
         {children}
       </div>
     </section>
@@ -741,14 +741,14 @@ export function Dashboard() {
         <div ref={gridContainerRef} className="min-w-0">
           {gridMounted ? (
             <ResponsiveGridLayout
-              className={cn('dashboard-grid -mx-2', editingWidgets && 'is-editing')}
+              className={cn('dashboard-grid', editingWidgets && 'is-editing')}
               width={gridWidth}
               layouts={responsiveLayouts}
               breakpoints={{ lg: 1200, md: 768, sm: 0 }}
               cols={DASHBOARD_GRID_COLS}
               rowHeight={DASHBOARD_GRID_ROW_HEIGHT}
               margin={[16, 16]}
-              containerPadding={[8, 0]}
+              containerPadding={[0, 0]}
               dragConfig={{
                 enabled: editingWidgets,
                 bounded: true,
