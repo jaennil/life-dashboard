@@ -619,6 +619,8 @@ export function Fitness() {
 
   const stravaGoldenWeekly = golden?.strava.weekly ?? []
   const hevyGoldenWeekly = golden?.hevy.weekly ?? []
+  const sourceDetailsHeight = sourceTab === 'strava' ? 24 : 34
+  const sourceDetailsMinHeight = sourceTab === 'strava' ? 18 : 30
 
   const cards = sourceTab === 'strava' ? golden?.strava.cards ?? [] : golden?.hevy.cards ?? []
 
@@ -677,10 +679,15 @@ export function Fitness() {
       </div>
 
       <EditableWidgetGrid
-        storageKey={`fitness_${sourceTab}_widget_layout_v1`}
+        storageKey={`fitness_${sourceTab}_widget_layout_v2`}
         widgets={[
           { id: 'golden', label: 'Ключевые метрики', layout: { x: 0, y: 0, w: 12, h: 5 }, bounds: { minW: 4, minH: 4, maxH: 10 } },
-          { id: 'source-details', label: sourceTab === 'strava' ? 'Strava widgets' : 'Hevy widgets', layout: { x: 0, y: 5, w: 12, h: 18 }, bounds: { minW: 6, minH: 8, maxH: 40 } },
+          {
+            id: 'source-details',
+            label: sourceTab === 'strava' ? 'Strava widgets' : 'Hevy widgets',
+            layout: { x: 0, y: 5, w: 12, h: sourceDetailsHeight },
+            bounds: { minW: 6, minH: sourceDetailsMinHeight, maxH: 64 },
+          },
         ]}
       >
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
