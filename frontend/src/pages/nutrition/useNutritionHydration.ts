@@ -4,8 +4,12 @@ import { hydrationBeverageLabel, parseRequiredDecimalOrNull } from '@/pages/nutr
 
 export function useNutritionHydration({
   reloadNutritionData,
+  targetDate,
+  targetDateLabel,
 }: {
   reloadNutritionData: () => Promise<void>
+  targetDate?: string
+  targetDateLabel: string
 }) {
   const [savingWater, setSavingWater] = useState(false)
   const [waterError, setWaterError] = useState('')
@@ -23,34 +27,36 @@ export function useNutritionHydration({
     setSavingWater(true)
     clearHydrationMessages()
     try {
-      const next = await api.saveNutritionWater({ delta_ml: deltaMl })
+      const next = await api.saveNutritionWater({ date: targetDate, delta_ml: deltaMl })
       await reloadNutritionData()
-      setWaterNotice(`Добавлено ${Math.round(deltaMl)} мл воды · в цель сегодня ${Math.round(next.hydration_ml)} мл`)
+      setWaterNotice(`Добавлено ${Math.round(deltaMl)} мл воды · в цель ${targetDateLabel} ${Math.round(next.hydration_ml)} мл`)
     } catch (error) {
       setWaterError(error instanceof Error ? error.message : 'Не удалось сохранить воду')
     } finally {
       setSavingWater(false)
     }
-  }, [clearHydrationMessages, reloadNutritionData])
+  }, [clearHydrationMessages, reloadNutritionData, targetDate, targetDateLabel])
 
   const handleSetWaterAbsolute = useCallback(async (nextWaterMl: number) => {
     setSavingWater(true)
     clearHydrationMessages()
     try {
-      const next = await api.saveNutritionWater({ water_ml: nextWaterMl })
+      const next = await api.saveNutritionWater({ date: targetDate, water_ml: nextWaterMl })
       await reloadNutritionData()
-      setWaterNotice(nextWaterMl === 0 ? 'Сегодняшняя вода сброшена' : `Вода обновлена до ${Math.round(next.water_ml)} мл · в цель идёт ${Math.round(next.hydration_ml)} мл`)
+      setWaterNotice(nextWaterMl === 0
+        ? `Вода ${targetDateLabel} сброшена`
+        : `Вода ${targetDateLabel}: ${Math.round(next.water_ml)} мл · в цель ${Math.round(next.hydration_ml)} мл`)
       if (nextWaterMl > 0) setCustomWaterInput('')
     } catch (error) {
       setWaterError(error instanceof Error ? error.message : 'Не удалось обновить воду')
     } finally {
       setSavingWater(false)
     }
-  }, [clearHydrationMessages, reloadNutritionData])
+  }, [clearHydrationMessages, reloadNutritionData, targetDate, targetDateLabel])
 
   const handleSubmitCustomWater = useCallback(async () => {
     try {
-      const parsed = parseRequiredDecimalOrNull('Вода', customWaterInput)
+      const parsed = parseRequiredDecimalOrNull('Вода', customWaterInput, { min: 1, max: 15000 })
       if (parsed == null) {
         setWaterError('Введи количество воды в мл')
         return
@@ -65,19 +71,19 @@ export function useNutritionHydration({
     setSavingWater(true)
     clearHydrationMessages()
     try {
-      const next = await api.saveNutritionHydration({ beverage_type: beverageType, delta_ml: deltaMl })
+      const next = await api.saveNutritionHydration({ date: targetDate, beverage_type: beverageType, delta_ml: deltaMl })
       await reloadNutritionData()
-      setWaterNotice(`${hydrationBeverageLabel(beverageType)} +${Math.round(deltaMl)} мл · в цель сегодня ${Math.round(next.hydration_ml)} мл`)
+      setWaterNotice(`${hydrationBeverageLabel(beverageType)} +${Math.round(deltaMl)} мл · в цель ${targetDateLabel} ${Math.round(next.hydration_ml)} мл`)
     } catch (error) {
       setWaterError(error instanceof Error ? error.message : 'Не удалось сохранить напиток')
     } finally {
       setSavingWater(false)
     }
-  }, [clearHydrationMessages, reloadNutritionData])
+  }, [clearHydrationMessages, reloadNutritionData, targetDate, targetDateLabel])
 
   const handleSubmitCustomHydration = useCallback(async () => {
     try {
-      const parsed = parseRequiredDecimalOrNull('Напиток', customHydrationInput)
+      const parsed = parseRequiredDecimalOrNull('Напиток', customHydrationInput, { min: 1, max: 15000 })
       if (parsed == null) {
         setWaterError('Введи количество напитка в мл')
         return

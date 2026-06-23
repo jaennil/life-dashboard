@@ -36,6 +36,7 @@ type NutritionSummary struct {
 	AvgWaterML         float64           `json:"avg_water_ml"`
 	AvgHydrationML     float64           `json:"avg_hydration_ml"`
 	DaysTracked        int               `json:"days_tracked"`
+	FocusDate          string            `json:"focus_date"`
 	TodayKcal          float64           `json:"today_kcal"`
 	TodayWater         float64           `json:"today_water_ml"`
 	TodayHydrationML   float64           `json:"today_hydration_ml"`
@@ -121,8 +122,9 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
 	sevenDaysAgo := today.AddDate(0, 0, -6)
 	dateRange := parseQueryDateRange(r, sevenDaysAgo, today)
+	focusDate := dateRange.End
 
-	var s NutritionSummary
+	s := NutritionSummary{FocusDate: focusDate.Format("2006-01-02")}
 	h.db.QueryRow(ctx, `
 		SELECT
 			COALESCE(AVG(calories_total), 0),
@@ -138,7 +140,7 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	h.db.QueryRow(ctx, `
 		SELECT COALESCE(calories_total, 0), COALESCE(water_ml, 0)
 		FROM nutrition_daily WHERE date = $1 AND user_id = $2
-	`, today, userID).Scan(&s.TodayKcal, &s.TodayWater)
+	`, focusDate, userID).Scan(&s.TodayKcal, &s.TodayWater)
 
 	targets, err := loadNutritionTargets(ctx, h.db, userID)
 	if err != nil {
@@ -157,13 +159,13 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	} else {
 		hydrationDays := 0
 		hydrationTotal := 0.0
-		todayKey := today.Format("2006-01-02")
+		focusDateKey := focusDate.Format("2006-01-02")
 		for day, aggregate := range hydrationRange {
 			if aggregate.HydrationML > 0 {
 				hydrationDays++
 				hydrationTotal += aggregate.HydrationML
 			}
-			if day == todayKey {
+			if day == focusDateKey {
 				s.TodayHydrationML = aggregate.HydrationML
 				s.TodayCountedDrinks = aggregate.CountedDrinksML
 				s.TodayOtherDrinksML = aggregate.OtherDrinksML

@@ -13,60 +13,35 @@ import {
 import { fmtWaterMl, hydrationModeLabel } from '@/pages/nutrition/format'
 import type { OpenNutritionRaw } from '@/pages/nutrition/types'
 
-export function HydrationPanel({
-  chartData,
-  loading,
-  hydrationMode,
-  waterTarget,
-  todayHydration,
-  todayWater,
-  todayCountedDrinks,
-  todayOtherDrinks,
-  waterProgress,
-  waterTargetLeft,
-  waterGoalDays,
-  hydrationTrackedDays,
-  avgHydration,
-  hasHydrationData,
-  savingTargets,
-  savingWater,
-  waterError,
-  waterNotice,
-  customWaterInput,
-  customHydrationType,
-  customHydrationInput,
-  onHydrationModeChange,
-  onAddWater,
-  onSetWaterAbsolute,
-  onSubmitCustomWater,
-  onAddHydration,
-  onSubmitCustomHydration,
-  onCustomWaterInputChange,
-  onCustomHydrationTypeChange,
-  onCustomHydrationInputChange,
-  onOpenRaw,
-}: {
-  chartData: NutritionDay[]
-  loading: boolean
+type HydrationPanelMetrics = {
   hydrationMode: HydrationMode
   waterTarget?: number
-  todayHydration: number
-  todayWater: number
-  todayCountedDrinks: number
-  todayOtherDrinks: number
+  focusHydration: number
+  focusWater: number
+  focusCountedDrinks: number
+  focusOtherDrinks: number
   waterProgress: number | null
   waterTargetLeft: number | null
   waterGoalDays: number
   hydrationTrackedDays: number
   avgHydration: number
   hasHydrationData: boolean
-  savingTargets: boolean
-  savingWater: boolean
-  waterError: string
-  waterNotice: string
+}
+
+type HydrationPanelForm = {
   customWaterInput: string
   customHydrationType: HydrationBeverageType
   customHydrationInput: string
+}
+
+type HydrationPanelStatus = {
+  savingTargets: boolean
+  savingWater: boolean
+  error: string
+  notice: string
+}
+
+type HydrationPanelActions = {
   onHydrationModeChange: (mode: HydrationMode) => void | Promise<void>
   onAddWater: (deltaMl: number) => void | Promise<void>
   onSetWaterAbsolute: (nextWaterMl: number) => void | Promise<void>
@@ -76,8 +51,55 @@ export function HydrationPanel({
   onCustomWaterInputChange: (value: string) => void
   onCustomHydrationTypeChange: (type: HydrationBeverageType) => void
   onCustomHydrationInputChange: (value: string) => void
+}
+
+export function HydrationPanel({
+  chartData,
+  loading,
+  focusDateLabel,
+  metrics,
+  form,
+  status,
+  actions,
+  onOpenRaw,
+}: {
+  chartData: NutritionDay[]
+  loading: boolean
+  focusDateLabel: string
+  metrics: HydrationPanelMetrics
+  form: HydrationPanelForm
+  status: HydrationPanelStatus
+  actions: HydrationPanelActions
   onOpenRaw: OpenNutritionRaw
 }) {
+  const {
+    hydrationMode,
+    waterTarget,
+    focusHydration,
+    focusWater,
+    focusCountedDrinks,
+    focusOtherDrinks,
+    waterProgress,
+    waterTargetLeft,
+    waterGoalDays,
+    hydrationTrackedDays,
+    avgHydration,
+    hasHydrationData,
+  } = metrics
+  const { customWaterInput, customHydrationType, customHydrationInput } = form
+  const { savingTargets, savingWater, error, notice } = status
+  const {
+    onHydrationModeChange,
+    onAddWater,
+    onSetWaterAbsolute,
+    onSubmitCustomWater,
+    onAddHydration,
+    onSubmitCustomHydration,
+    onCustomWaterInputChange,
+    onCustomHydrationTypeChange,
+    onCustomHydrationInputChange,
+  } = actions
+
   return (
     <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -113,8 +135,8 @@ export function HydrationPanel({
         <div className="rounded-2xl border border-cyan-500/10 bg-cyan-500/5 p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-[11px] uppercase tracking-wide text-cyan-200/80">Сегодня в цель</p>
-              <p className="mt-2 text-3xl font-bold text-foreground">{Math.round(todayHydration)} <span className="text-base font-medium text-muted-foreground">мл</span></p>
+              <p className="text-[11px] uppercase tracking-wide text-cyan-200/80">В цель · {focusDateLabel}</p>
+              <p className="mt-2 text-3xl font-bold text-foreground">{Math.round(focusHydration)} <span className="text-base font-medium text-muted-foreground">мл</span></p>
               <p className="mt-2 text-xs font-medium text-cyan-100">
                 {typeof waterTarget === 'number'
                   ? waterTargetLeft === 0
@@ -123,10 +145,10 @@ export function HydrationPanel({
                   : 'Цель не задана'}
               </p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-cyan-200">💧 Вода {Math.round(todayWater)} мл</span>
-                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-emerald-200">🍵/☕ В цель {Math.round(todayCountedDrinks)} мл</span>
-                {todayOtherDrinks > 0 ? (
-                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-amber-200">🧃 Отдельно {Math.round(todayOtherDrinks)} мл</span>
+                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-cyan-200">💧 Вода {Math.round(focusWater)} мл</span>
+                <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-emerald-200">🍵/☕ В цель {Math.round(focusCountedDrinks)} мл</span>
+                {focusOtherDrinks > 0 ? (
+                  <span className="rounded-full border border-border/80 bg-background/70 px-2.5 py-1 text-amber-200">🧃 Отдельно {Math.round(focusOtherDrinks)} мл</span>
                 ) : null}
               </div>
             </div>
@@ -158,7 +180,7 @@ export function HydrationPanel({
         </div>
 
         <div className="rounded-2xl border bg-background/45 p-4">
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Быстрый лог</p>
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Быстрый лог · {focusDateLabel}</p>
           <p className="mt-2 text-[11px] text-muted-foreground">Вода</p>
           <div className="mt-3 grid grid-cols-2 gap-2">
             {[250, 500, 750, 1000].map(amount => (
@@ -238,9 +260,9 @@ export function HydrationPanel({
               Сбросить воду
             </button>
           </div>
-          {(waterError || waterNotice) ? (
-            <p className={cn('mt-3 text-xs', waterError ? 'text-rose-400' : 'text-cyan-200')}>
-              {waterError || waterNotice}
+          {(error || notice) ? (
+            <p className={cn('mt-3 text-xs', error ? 'text-rose-400' : 'text-cyan-200')}>
+              {error || notice}
             </p>
           ) : null}
         </div>

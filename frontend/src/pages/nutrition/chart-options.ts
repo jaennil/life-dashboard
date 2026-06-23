@@ -393,44 +393,6 @@ export function buildMealsTimelineOption(
   }
 }
 
-export function filterNutritionDayByMeal(day: NutritionDay, mealType: string): NutritionDay | null {
-  if (!mealType) return day
-
-  const meals = day.meals.filter(meal => meal.meal_type === mealType)
-  if (meals.length === 0) return null
-
-  let calories = 0
-  let protein = 0
-  let carbs = 0
-  let fat = 0
-  let fiber = 0
-
-  meals.forEach(meal => {
-    meal.items.forEach(item => {
-      calories += item.calories
-      protein += item.macros?.protein ?? 0
-      carbs += item.macros?.carbs ?? 0
-      fat += item.macros?.fat ?? 0
-      fiber += item.macros?.fiber ?? 0
-    })
-  })
-
-  return {
-    ...day,
-    calories,
-    protein,
-    carbs,
-    fat,
-    fiber,
-    water_ml: day.water_ml,
-    hydration_ml: day.hydration_ml,
-    counted_drinks_ml: day.counted_drinks_ml,
-    other_drinks_ml: day.other_drinks_ml,
-    beverages: day.beverages ?? [],
-    meals,
-  }
-}
-
 export function buildDailyNutritionTimelineOption(
   data: NutritionDay[],
   calorieReference: number,

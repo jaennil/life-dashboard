@@ -2,11 +2,11 @@ import type { HydrationBeverageType, HydrationMode } from '@/lib/api'
 import { HYDRATION_BEVERAGES, HYDRATION_MODE_LABELS } from '@/pages/nutrition/constants'
 
 export function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 
 export function fmtShort(iso: string) {
-  const d = new Date(iso)
+  const d = new Date(`${iso}T00:00:00`)
   return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
@@ -50,12 +50,22 @@ export function numberInputValue(value?: number) {
   return typeof value === 'number' ? String(value) : ''
 }
 
-export function parseRequiredDecimalOrNull(label: string, value: string) {
+export function parseRequiredDecimalOrNull(
+  label: string,
+  value: string,
+  bounds: { min?: number; max?: number } = {},
+) {
   const trimmed = value.trim().replace(',', '.')
   if (!trimmed) return null
   const parsed = Number(trimmed)
   if (!Number.isFinite(parsed)) {
     throw new Error(`Некорректное значение для поля «${label}»`)
+  }
+  if (typeof bounds.min === 'number' && parsed < bounds.min) {
+    throw new Error(`Поле «${label}» должно быть не меньше ${bounds.min}`)
+  }
+  if (typeof bounds.max === 'number' && parsed > bounds.max) {
+    throw new Error(`Поле «${label}» должно быть не больше ${bounds.max}`)
   }
   return parsed
 }

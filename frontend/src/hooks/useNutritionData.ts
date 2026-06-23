@@ -12,9 +12,11 @@ export function useNutritionData(params: DateRangeParams, period: number) {
   const [golden, setGolden] = useState<NutritionGoldenMetrics | null>(null)
   const [daily, setDaily] = useState<NutritionDay[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
     setLoading(true)
+    setError('')
     try {
       const [nextSummary, nextGolden, nextDaily] = await Promise.all([
         api.getNutritionSummary(params),
@@ -25,7 +27,7 @@ export function useNutritionData(params: DateRangeParams, period: number) {
       setGolden(nextGolden)
       setDaily(nextDaily)
     } catch (error) {
-      console.error(error)
+      setError(error instanceof Error ? error.message : 'Не удалось загрузить данные питания')
     } finally {
       setLoading(false)
     }
@@ -35,5 +37,5 @@ export function useNutritionData(params: DateRangeParams, period: number) {
     void reload()
   }, [reload])
 
-  return { summary, golden, daily, loading, reload }
+  return { summary, golden, daily, loading, error, reload }
 }

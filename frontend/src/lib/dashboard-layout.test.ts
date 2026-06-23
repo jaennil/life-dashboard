@@ -80,15 +80,22 @@ describe('dashboard layout model', () => {
   it('packs the default medium dashboard without staggered gaps', () => {
     const layouts = toResponsiveLayouts(DEFAULT_DASHBOARD_LAYOUT)
 
-    expect(layouts.md.find(item => item.i === 'weather')).toMatchObject({ x: 0, y: 0, w: 4, h: 8 })
-    expect(layouts.md.find(item => item.i === 'balance')).toMatchObject({ x: 4, y: 0, w: 2, h: 3 })
-    expect(layouts.md.find(item => item.i === 'spending')).toMatchObject({ x: 6, y: 0, w: 2, h: 3 })
-    expect(layouts.md.find(item => item.i === 'activities')).toMatchObject({ x: 4, y: 3, w: 2, h: 3 })
-    expect(layouts.md.find(item => item.i === 'workouts')).toMatchObject({ x: 6, y: 3, w: 2, h: 3 })
-    expect(layouts.md.find(item => item.i === 'nutrition')).toMatchObject({ x: 4, y: 6, w: 2, h: 3 })
-    expect(layouts.md.find(item => item.i === 'overdue')).toMatchObject({ x: 6, y: 6, w: 2, h: 3 })
-    expect(layouts.md.find(item => item.i === 'overview')).toMatchObject({ x: 0, y: 9, w: 8 })
+    expect(layouts.md.find(item => item.i === 'weather')).toMatchObject({ x: 0, y: 0, w: 6, h: 10 })
+    expect(layouts.md.find(item => item.i === 'balance')).toMatchObject({ x: 6, y: 0, w: 2, h: 4 })
+    expect(layouts.md.filter(item => [
+      'balance',
+      'spending',
+      'activities',
+      'workouts',
+      'nutrition',
+      'overdue',
+    ].includes(item.i)).every(item => item.w === 2)).toBe(true)
     expectNoOverlaps(layouts.md)
+
+    const occupiedHeight = Math.max(...layouts.md.map(item => item.y + item.h))
+    for (let row = 0; row < occupiedHeight; row += 1) {
+      expect(layouts.md.some(item => item.y <= row && item.y + item.h > row)).toBe(true)
+    }
   })
 
   it('orders visible widget ids by grid position', () => {

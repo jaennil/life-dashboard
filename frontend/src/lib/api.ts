@@ -294,6 +294,7 @@ export interface NutritionSummary {
   avg_water_ml: number
   avg_hydration_ml: number
   days_tracked: number
+  focus_date: string
   today_kcal: number
   today_water_ml: number
   today_hydration_ml: number

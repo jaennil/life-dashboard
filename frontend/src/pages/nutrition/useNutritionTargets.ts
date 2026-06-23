@@ -3,8 +3,8 @@ import { api, type HydrationMode, type NutritionTargets, type NutritionTargetsIn
 import {
   hydrationModeLabel,
   numberInputValue,
-  parseRequiredDecimalOrNull,
 } from '@/pages/nutrition/format'
+import { buildNutritionTargetsPayload } from '@/pages/nutrition/selectors'
 import type { NutritionTargetsForm } from '@/pages/nutrition/types'
 
 const EMPTY_TARGETS_FORM: NutritionTargetsForm = {
@@ -48,19 +48,6 @@ export function useNutritionTargets({
     setTargetsForm(current => ({ ...current, [field]: value }))
   }, [])
 
-  const buildSavedTargetsPayload = useCallback((nextMode: HydrationMode): NutritionTargetsInput => {
-    const manual = targets?.manual
-    return {
-      target_weight_kg: manual?.target_weight_kg ?? null,
-      target_calories: manual?.target_calories ?? null,
-      target_protein_g: manual?.target_protein_g ?? null,
-      target_carbs_g: manual?.target_carbs_g ?? null,
-      target_fat_g: manual?.target_fat_g ?? null,
-      target_water_ml: manual?.target_water_ml ?? null,
-      hydration_mode: nextMode,
-    }
-  }, [targets])
-
   const handleSaveTargets = useCallback(async (clear = false) => {
     setSavingTargets(true)
     setTargetsError('')
@@ -75,15 +62,7 @@ export function useNutritionTargets({
         target_fat_g: null,
         target_water_ml: null,
         hydration_mode: null,
-      } : {
-        target_weight_kg: parseRequiredDecimalOrNull('Целевой вес', targetsForm.targetWeightKg),
-        target_calories: parseRequiredDecimalOrNull('Калории', targetsForm.targetCalories),
-        target_protein_g: parseRequiredDecimalOrNull('Белки', targetsForm.targetProteinG),
-        target_carbs_g: parseRequiredDecimalOrNull('Углеводы', targetsForm.targetCarbsG),
-        target_fat_g: parseRequiredDecimalOrNull('Жиры', targetsForm.targetFatG),
-        target_water_ml: parseRequiredDecimalOrNull('Вода', targetsForm.targetWaterMl),
-        hydration_mode: hydrationMode,
-      }
+      } : buildNutritionTargetsPayload(targetsForm, hydrationMode)
       await api.saveNutritionTargets(payload)
       if (clear) {
         setTargetsForm(EMPTY_TARGETS_FORM)
@@ -99,6 +78,8 @@ export function useNutritionTargets({
   }, [hydrationMode, reloadNutritionData, targetsForm])
 
   const handleHydrationModeChange = useCallback(async (nextMode: HydrationMode) => {
+    if (nextMode === hydrationMode) return
+
     const previousMode = hydrationMode
     setHydrationMode(nextMode)
     setSavingTargets(true)
@@ -106,7 +87,7 @@ export function useNutritionTargets({
     setTargetsNotice('')
     onHydrationModeChangeStart?.()
     try {
-      await api.saveNutritionTargets(buildSavedTargetsPayload(nextMode))
+      await api.saveNutritionTargets(buildNutritionTargetsPayload(targetsForm, nextMode))
       await reloadNutritionData()
       setTargetsNotice(`Режим гидратации: ${hydrationModeLabel(nextMode).toLowerCase()}`)
     } catch (error) {
@@ -115,7 +96,7 @@ export function useNutritionTargets({
     } finally {
       setSavingTargets(false)
     }
-  }, [buildSavedTargetsPayload, hydrationMode, onHydrationModeChangeStart, reloadNutritionData])
+  }, [hydrationMode, onHydrationModeChangeStart, reloadNutritionData, targetsForm])
 
   return {
     savingTargets,
