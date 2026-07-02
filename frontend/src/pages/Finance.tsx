@@ -23,8 +23,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { EChartsCoreOption } from 'echarts/core'
+import { AdaptiveWidgetGrid, type AdaptiveWidgetDefinition } from '@/components/AdaptiveWidgetGrid'
 import { EChart } from '@/components/EChart'
-import { EditableWidgetFlow, type EditableFlowWidgetDefinition } from '@/components/EditableWidgetFlow'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageHeader } from '@/components/PageHeader'
@@ -102,17 +102,52 @@ type FinanceWidgetId =
   | 'spending-concentration'
   | FinanceSection
 
-const FINANCE_WIDGETS: Array<EditableFlowWidgetDefinition<FinanceWidgetId>> = [
-  { id: 'liquid-balance', label: 'Ликвидный баланс', width: 1 },
-  { id: 'net-cashflow', label: 'Net cashflow', width: 1 },
-  { id: 'savings-rate', label: 'Savings rate', width: 1 },
-  { id: 'burn-rate', label: 'Burn rate', width: 1 },
-  { id: 'runway', label: 'Runway', width: 1 },
-  { id: 'spending-concentration', label: 'Концентрация расходов', width: 1 },
-  { id: 'obligations', label: 'Обязательные платежи', width: 3 },
-  { id: 'trends', label: 'Динамика', width: 3 },
-  { id: 'categories', label: 'Категории и топ расходов', width: 3 },
-  { id: 'accounts', label: 'Счета и операции', width: 3 },
+type FinanceGridRect = readonly [x: number, y: number, width: number, height: number]
+
+function defineFinanceWidget(
+  id: FinanceWidgetId,
+  label: string,
+  lg: FinanceGridRect,
+  md: FinanceGridRect,
+  sm: FinanceGridRect,
+  kind: 'metric' | 'section' = 'metric',
+): AdaptiveWidgetDefinition<FinanceWidgetId> {
+  const minHeight = kind === 'metric' ? 4 : 8
+  const maxHeight = kind === 'metric' ? 80 : 220
+  const item = (rect: FinanceGridRect, minWidth: number, maxWidth: number) => ({
+    i: id,
+    x: rect[0],
+    y: rect[1],
+    w: rect[2],
+    h: rect[3],
+    minW: minWidth,
+    maxW: maxWidth,
+    minH: minHeight,
+    maxH: maxHeight,
+  })
+
+  return {
+    id,
+    label,
+    layouts: {
+      lg: item(lg, kind === 'metric' ? 8 : 12, 48),
+      md: item(md, kind === 'metric' ? 6 : 8, 24),
+      sm: item(sm, 1, 1),
+    },
+  }
+}
+
+const FINANCE_WIDGETS: Array<AdaptiveWidgetDefinition<FinanceWidgetId>> = [
+  defineFinanceWidget('liquid-balance', 'Ликвидный баланс', [0, 0, 16, 6], [0, 0, 12, 6], [0, 0, 1, 6]),
+  defineFinanceWidget('net-cashflow', 'Net cashflow', [16, 0, 16, 6], [12, 0, 12, 6], [0, 6, 1, 6]),
+  defineFinanceWidget('savings-rate', 'Savings rate', [32, 0, 16, 6], [0, 6, 12, 6], [0, 12, 1, 6]),
+  defineFinanceWidget('burn-rate', 'Burn rate', [0, 6, 16, 6], [12, 6, 12, 6], [0, 18, 1, 6]),
+  defineFinanceWidget('runway', 'Runway', [16, 6, 16, 6], [0, 12, 12, 6], [0, 24, 1, 6]),
+  defineFinanceWidget('spending-concentration', 'Концентрация расходов', [32, 6, 16, 6], [12, 12, 12, 6], [0, 30, 1, 6]),
+  defineFinanceWidget('obligations', 'Обязательные платежи', [0, 12, 48, 31], [0, 18, 24, 50], [0, 36, 1, 75], 'section'),
+  defineFinanceWidget('trends', 'Динамика', [0, 43, 48, 18], [0, 68, 24, 30], [0, 111, 1, 35], 'section'),
+  defineFinanceWidget('categories', 'Категории и топ расходов', [0, 61, 48, 39], [0, 98, 24, 60], [0, 146, 1, 84], 'section'),
+  defineFinanceWidget('accounts', 'Счета и операции', [0, 100, 48, 31], [0, 158, 24, 45], [0, 230, 1, 54], 'section'),
 ]
 
 function fmt(amount: number, currency = 'RUB') {
@@ -803,8 +838,8 @@ export function Finance() {
         </div>
       ) : null}
 
-      <EditableWidgetFlow
-        storageKey="finance_widget_flow_v1"
+      <AdaptiveWidgetGrid
+        storageKey="finance_rgl_layout_v1"
         widgets={FINANCE_WIDGETS}
       >
         <FinanceSummaryCard
@@ -1517,7 +1552,7 @@ export function Finance() {
         </div>
       </div>
       </ExpandablePanel>
-      </EditableWidgetFlow>
+      </AdaptiveWidgetGrid>
     </div>
   )
 }
@@ -1581,7 +1616,7 @@ function FinanceSummaryCard({
   panelClassName?: string
 }) {
   return (
-    <div className={cn('group/card flex h-full flex-col rounded-2xl border bg-card/90 p-5 shadow-sm', panelClassName)}>
+    <div className={cn('group/card flex h-full min-h-[152px] flex-col rounded-2xl border bg-card/90 p-5 shadow-sm', panelClassName)}>
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <div className="flex items-center gap-2">

@@ -140,6 +140,11 @@ body {
   transition: none;
 }
 
+.dashboard-grid .react-grid-item.resizing {
+  z-index: 20;
+  transition: none;
+}
+
 .dashboard-grid .react-grid-item.react-draggable-dragging .dashboard-grid-widget {
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
 }
@@ -186,6 +191,96 @@ body {
 
 .dashboard-grid .react-resizable-handle::after {
   display: none;
+}
+
+.adaptive-widget-grid.is-editing {
+  background-size: 24px 24px;
+}
+
+.adaptive-widget-measure > * {
+  height: auto;
+}
+
+.adaptive-widget-grid .react-resizable-handle-w,
+.adaptive-widget-grid .react-resizable-handle-e {
+  top: 12px;
+  bottom: 12px;
+  width: 12px;
+  height: auto;
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.adaptive-widget-grid .react-resizable-handle-w {
+  left: -6px;
+}
+
+.adaptive-widget-grid .react-resizable-handle-e {
+  right: -6px;
+}
+
+.adaptive-widget-grid .react-resizable-handle-n,
+.adaptive-widget-grid .react-resizable-handle-s {
+  right: 12px;
+  left: 12px;
+  width: auto;
+  height: 12px;
+  margin-left: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.adaptive-widget-grid .react-resizable-handle-n {
+  top: -6px;
+}
+
+.adaptive-widget-grid .react-resizable-handle-s {
+  bottom: -6px;
+}
+
+.adaptive-widget-grid .react-resizable-handle-w::after,
+.adaptive-widget-grid .react-resizable-handle-e::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: block;
+  width: 1px;
+  content: '';
+  background: hsl(var(--primary) / 0.45);
+}
+
+.adaptive-widget-grid .react-resizable-handle-w::after {
+  left: 5px;
+}
+
+.adaptive-widget-grid .react-resizable-handle-e::after {
+  right: 5px;
+}
+
+.adaptive-widget-grid .react-resizable-handle-n::after,
+.adaptive-widget-grid .react-resizable-handle-s::after {
+  position: absolute;
+  right: 0;
+  left: 0;
+  display: block;
+  height: 1px;
+  content: '';
+  background: hsl(var(--primary) / 0.45);
+}
+
+.adaptive-widget-grid .react-resizable-handle-n::after {
+  top: 5px;
+}
+
+.adaptive-widget-grid .react-resizable-handle-s::after {
+  bottom: 5px;
 }
 
 ::selection {
