@@ -19,9 +19,11 @@ export function useFinanceOverview(from: string, to?: string) {
   const [obligations, setObligations] = useState<FinanceObligationsSummary | null>(null)
   const [categoryList, setCategoryList] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
     setLoading(true)
+    setError('')
     try {
       const [
         nextMonthly,
@@ -52,7 +54,7 @@ export function useFinanceOverview(from: string, to?: string) {
       setObligations(nextObligations)
       setCategoryList(nextCategoryList)
     } catch (error) {
-      console.error(error)
+      setError(error instanceof Error ? error.message : 'Не удалось загрузить финансовые данные')
     } finally {
       setLoading(false)
     }
@@ -72,6 +74,7 @@ export function useFinanceOverview(from: string, to?: string) {
     obligations,
     categoryList,
     loading,
+    error,
     reload,
   }
 }

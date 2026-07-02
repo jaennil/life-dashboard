@@ -1,6 +1,7 @@
 import { useState, useCallback, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
+  AlertTriangle,
   BadgeRussianRuble,
   Ban,
   CalendarClock,
@@ -10,6 +11,7 @@ import {
   Landmark,
   Pin,
   PiggyBank,
+  RefreshCw,
   RotateCcw,
   Search,
   ShieldAlert,
@@ -22,7 +24,6 @@ import {
 } from 'lucide-react'
 import type { EChartsCoreOption } from 'echarts/core'
 import { EChart } from '@/components/EChart'
-import { EditableWidgetGrid } from '@/components/EditableWidgetGrid'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageHeader } from '@/components/PageHeader'
@@ -90,7 +91,7 @@ type TopExpenseTooltipPoint = {
   value?: TooltipScalar
 }
 
-type FinanceSection = 'metrics' | 'obligations' | 'trends' | 'categories' | 'accounts'
+type FinanceSection = 'obligations' | 'trends' | 'categories' | 'accounts'
 
 function fmt(amount: number, currency = 'RUB') {
   return new Intl.NumberFormat('ru-RU', {
@@ -609,7 +610,6 @@ export function Finance() {
   const [ruleError, setRuleError] = useState('')
   const { integrations, reload: reloadIntegrations } = useIntegrations()
   const [openSections, setOpenSections] = useState<Record<FinanceSection, boolean>>({
-    metrics: true,
     obligations: true,
     trends: true,
     categories: true,
@@ -631,6 +631,7 @@ export function Finance() {
     obligations,
     categoryList,
     loading,
+    error: overviewError,
     reload: reloadFinanceOverview,
   } = useFinanceOverview(from, to)
   const {
@@ -742,7 +743,7 @@ export function Finance() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex min-w-0 flex-col gap-5 lg:gap-6">
       <PageHeader
         eyebrow="Finance"
         title="Финансы"
@@ -762,21 +763,25 @@ export function Finance() {
         )}
       />
 
-      <EditableWidgetGrid
-        storageKey="finance_widget_layout_v3"
-        widgets={[
-          { id: 'liquid-balance', label: 'Ликвидный баланс', layout: { x: 0, y: 0, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
-          { id: 'net-cashflow', label: 'Net cashflow', layout: { x: 4, y: 0, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
-          { id: 'savings-rate', label: 'Savings rate', layout: { x: 8, y: 0, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
-          { id: 'burn-rate', label: 'Burn rate', layout: { x: 0, y: 4, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
-          { id: 'runway', label: 'Runway', layout: { x: 4, y: 4, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
-          { id: 'spending-concentration', label: 'Концентрация расходов', layout: { x: 8, y: 4, w: 4, h: 4 }, bounds: { minW: 2, minH: 3, maxH: 10 } },
-          { id: 'obligations', label: 'Обязательные платежи', layout: { x: 0, y: 8, w: 12, h: 20 }, bounds: { minW: 5, minH: 12, maxH: 40 } },
-          { id: 'trends', label: 'Динамика', layout: { x: 0, y: 28, w: 12, h: 10 }, bounds: { minW: 5, minH: 8, maxH: 24 } },
-          { id: 'categories', label: 'Категории и топ расходов', layout: { x: 0, y: 38, w: 12, h: 22 }, bounds: { minW: 5, minH: 16, maxH: 44 } },
-          { id: 'accounts', label: 'Счета и операции', layout: { x: 0, y: 60, w: 12, h: 18 }, bounds: { minW: 5, minH: 12, maxH: 44 } },
-        ]}
-      >
+      {overviewError ? (
+        <div role="alert" className="flex flex-col gap-3 rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600 dark:text-rose-300" />
+            <p className="text-sm text-rose-700 dark:text-rose-100">{overviewError}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void reloadFinanceOverview()}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-400/25 px-3 py-2 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-400/10 disabled:opacity-50 dark:text-rose-100"
+          >
+            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+            Повторить
+          </button>
+        </div>
+      ) : null}
+
+      <section aria-label="Ключевые финансовые показатели" className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <FinanceSummaryCard
           title="Ликвидный баланс"
           icon={Wallet}
@@ -841,6 +846,7 @@ export function Finance() {
           caption={topThreeCategories.length > 0 ? concentrationLeaders : undefined}
           hint={topThreeCategories.length > 0 ? 'Концентрация расходов — доля топ-3 категорий в выбранном периоде.' : 'Появится, когда в диапазоне будут категории расходов.'}
         />
+      </section>
 
       <ExpandablePanel
         title="Обязательные платежи"
@@ -1269,7 +1275,7 @@ export function Finance() {
         </div>
 
         {/* Top expenses */}
-        <div className="rounded-2xl border bg-card p-5 shadow-sm">
+        <div className="rounded-2xl border bg-card p-5 shadow-sm lg:col-span-2">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
@@ -1487,7 +1493,6 @@ export function Finance() {
         </div>
       </div>
       </ExpandablePanel>
-      </EditableWidgetGrid>
     </div>
   )
 }
