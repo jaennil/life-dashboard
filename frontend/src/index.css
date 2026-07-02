@@ -163,6 +163,14 @@ body {
   outline-offset: 2px;
 }
 
+.adaptive-widget-grid.is-editing .react-grid-item {
+  cursor: grab;
+}
+
+.adaptive-widget-grid.is-editing .react-grid-item.react-draggable-dragging {
+  cursor: grabbing;
+}
+
 .dashboard-grid-widget.is-editing .dashboard-widget-content {
   pointer-events: none;
 }

@@ -67,7 +67,12 @@ function readMode(value: string | null): RangeMode {
 
 export function GlobalDateFilters() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const { editingWidgets, toggleWidgetEditing } = useWidgetEdit()
+  const {
+    editingWidgets,
+    toggleWidgetEditing,
+    canResetWidgets,
+    resetWidgets,
+  } = useWidgetEdit()
   const [customOpen, setCustomOpen] = useState(false)
   const [draftFrom, setDraftFrom] = useState('')
   const [draftTo, setDraftTo] = useState('')
@@ -280,6 +285,16 @@ export function GlobalDateFilters() {
 
           <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-start gap-2 xl:justify-end">
             <div id="global-header-actions" className="contents" />
+            {editingWidgets && canResetWidgets ? (
+              <button
+                type="button"
+                onClick={resetWidgets}
+                className="inline-flex h-10 items-center gap-2 rounded-lg border bg-background px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Сбросить
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={toggleWidgetEditing}

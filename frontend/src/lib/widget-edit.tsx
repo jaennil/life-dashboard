@@ -1,21 +1,44 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 
 interface WidgetEditContextValue {
   editingWidgets: boolean
   setEditingWidgets: (editing: boolean) => void
   toggleWidgetEditing: () => void
+  canResetWidgets: boolean
+  resetWidgets: () => void
+  registerWidgetReset: (handler: () => void) => () => void
 }
 
 const WidgetEditContext = createContext<WidgetEditContextValue | null>(null)
 
 export function WidgetEditProvider({ children }: { children: ReactNode }) {
   const [editingWidgets, setEditingWidgets] = useState(false)
+  const [canResetWidgets, setCanResetWidgets] = useState(false)
+  const resetHandlerRef = useRef<(() => void) | null>(null)
+
+  const resetWidgets = useCallback(() => {
+    resetHandlerRef.current?.()
+  }, [])
+
+  const registerWidgetReset = useCallback((handler: () => void) => {
+    resetHandlerRef.current = handler
+    setCanResetWidgets(true)
+
+    return () => {
+      if (resetHandlerRef.current !== handler) return
+      resetHandlerRef.current = null
+      setCanResetWidgets(false)
+    }
+  }, [])
 
   const value = useMemo<WidgetEditContextValue>(() => ({
     editingWidgets,
     setEditingWidgets,
     toggleWidgetEditing: () => setEditingWidgets(current => !current),
-  }), [editingWidgets])
+    canResetWidgets,
+    resetWidgets,
+    registerWidgetReset,
+  }), [canResetWidgets, editingWidgets, registerWidgetReset, resetWidgets])
 
   return (
     <WidgetEditContext.Provider value={value}>

@@ -1,12 +1,13 @@
 import {
   Children,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react'
-import { EyeOff, GripVertical, Maximize2, RotateCcw } from 'lucide-react'
+import { EyeOff } from 'lucide-react'
 import {
   Responsive as ResponsiveGridLayout,
   useContainerWidth,
@@ -66,7 +67,6 @@ function MeasuredWidget({
   editing,
   autoHeight,
   onMeasure,
-  onRestoreAutoHeight,
   onHide,
   children,
 }: {
@@ -75,7 +75,6 @@ function MeasuredWidget({
   editing: boolean
   autoHeight: boolean
   onMeasure: (id: string, pixelHeight: number) => void
-  onRestoreAutoHeight: () => void
   onHide: () => void
   children: ReactNode
 }) {
@@ -115,38 +114,15 @@ function MeasuredWidget({
       )}
     >
       {editing ? (
-        <>
-          <button
-            type="button"
-            aria-label={`Перетащить ${label}`}
-            title="Перетащить"
-            className="adaptive-widget-drag-handle absolute left-2 top-2 z-40 inline-flex h-8 w-8 cursor-grab items-center justify-center rounded-lg border bg-background/95 text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
-          >
-            <GripVertical className="h-4 w-4" />
-          </button>
-          <div className="dashboard-widget-action absolute right-2 top-2 z-40 flex items-center gap-1">
-            {!autoHeight ? (
-              <button
-                type="button"
-                onClick={onRestoreAutoHeight}
-                aria-label={`Автовысота ${label}`}
-                title="Вернуть автовысоту"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-background/95 text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
-              >
-                <Maximize2 className="h-4 w-4" />
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={onHide}
-              aria-label={`Скрыть ${label}`}
-              title="Скрыть"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-background/95 text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <EyeOff className="h-4 w-4" />
-            </button>
-          </div>
-        </>
+        <button
+          type="button"
+          onClick={onHide}
+          aria-label={`Скрыть ${label}`}
+          title="Скрыть"
+          className="dashboard-widget-action absolute right-2 top-2 z-40 inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-background/95 text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <EyeOff className="h-4 w-4" />
+        </button>
       ) : null}
       <div className={cn(
         'dashboard-widget-content h-full min-h-0 min-w-0',
@@ -173,7 +149,7 @@ export function AdaptiveWidgetGrid<TId extends string>({
   emptyLabel?: string
   children?: ReactNode
 }) {
-  const { editingWidgets } = useWidgetEdit()
+  const { editingWidgets, registerWidgetReset } = useWidgetEdit()
   const { width, containerRef, mounted } = useContainerWidth({ initialWidth: 1280 })
   const ids = useMemo(() => widgets.map(widget => widget.id), [widgets])
   const defaults = useMemo(() => Object.fromEntries(
@@ -251,12 +227,19 @@ export function AdaptiveWidgetGrid<TId extends string>({
   const hiddenIds = ids.filter(id => state.hidden[id])
   const visibleIds = ids.filter(id => !state.hidden[id])
 
+  useEffect(() => registerWidgetReset(() => {
+    const next = normalizeAdaptiveWidgetLayout({ input: null, ids, defaults })
+    stateRef.current = next
+    setState(next)
+    localStorage.setItem(storageKey, JSON.stringify(next))
+  }), [defaults, ids, registerWidgetReset, storageKey])
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      {editingWidgets ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed bg-card/60 px-3 py-2">
+      {editingWidgets && hiddenIds.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed bg-card/60 px-3 py-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Виджеты</span>
+            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Скрытые</span>
             {hiddenIds.map(id => (
               <button
                 key={id}
@@ -268,15 +251,6 @@ export function AdaptiveWidgetGrid<TId extends string>({
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => applyState(normalizeAdaptiveWidgetLayout({ input: null, ids, defaults }), true)}
-            title="Сбросить расположение"
-            className="inline-flex h-8 items-center gap-2 rounded-lg border bg-background/50 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Сбросить
-          </button>
         </div>
       ) : null}
 
@@ -296,7 +270,6 @@ export function AdaptiveWidgetGrid<TId extends string>({
               dragConfig={{
                 enabled: editingWidgets,
                 bounded: true,
-                handle: '.adaptive-widget-drag-handle',
                 cancel: '.dashboard-widget-action',
                 threshold: 4,
               }}
@@ -346,7 +319,6 @@ export function AdaptiveWidgetGrid<TId extends string>({
                     editing={editingWidgets}
                     autoHeight={state.autoHeight[breakpoint][id]}
                     onMeasure={handleMeasure}
-                    onRestoreAutoHeight={() => updateWidget(id, { autoHeight: true })}
                     onHide={() => updateWidget(id, { hidden: true })}
                   >
                     {widgetContent.get(id)}
