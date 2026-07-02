@@ -1,4 +1,12 @@
-import { Children, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react'
+import {
+  Children,
+  useEffect,
+  useMemo,
+  useState,
+  type DragEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react'
 import { ArrowDown, ArrowUp, EyeOff, GripVertical, RotateCcw } from 'lucide-react'
 import { StyledSelect } from '@/components/StyledSelect'
 import {
@@ -6,6 +14,8 @@ import {
   normalizeWidgetFlowLayout,
   shiftWidgetFlowItem,
   updateWidgetFlowItem,
+  WIDGET_FLOW_MAX_HEIGHT,
+  WIDGET_FLOW_MIN_HEIGHT,
   type WidgetFlowDefaults,
   type WidgetFlowHeight,
   type WidgetFlowLayout,
@@ -27,13 +37,6 @@ const WIDTH_CLASSES: Record<WidgetFlowWidth, string> = {
   1: 'sm:col-span-1 xl:col-span-1',
   2: 'sm:col-span-2 xl:col-span-2',
   3: 'sm:col-span-2 xl:col-span-3',
-}
-
-const HEIGHT_CLASSES: Record<WidgetFlowHeight, string> = {
-  auto: '',
-  compact: 'h-56',
-  medium: 'h-96',
-  tall: 'h-[36rem]',
 }
 
 function loadLayout<TId extends string>(
@@ -89,6 +92,7 @@ export function EditableWidgetFlow<TId extends string>({
   const [layout, setLayout] = useState(() => loadLayout(storageKey, ids, defaults))
   const [draggingId, setDraggingId] = useState<TId | null>(null)
   const [dropTargetId, setDropTargetId] = useState<TId | null>(null)
+  const [resizingId, setResizingId] = useState<TId | null>(null)
   const normalized = useMemo(
     () => normalizeWidgetFlowLayout({ input: layout, ids, defaults }),
     [defaults, ids, layout],
@@ -127,6 +131,53 @@ export function EditableWidgetFlow<TId extends string>({
     setDropTargetId(null)
   }
 
+  function startResizing(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    id: TId,
+    horizontalDirection: -1 | 0 | 1,
+    verticalDirection: -1 | 0 | 1,
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
+    const widget = event.currentTarget.closest<HTMLElement>('[data-widget-id]')
+    const grid = event.currentTarget.closest<HTMLElement>('[data-widget-flow-grid]')
+    if (!widget || !grid) return
+
+    const startX = event.clientX
+    const startY = event.clientY
+    const startRect = widget.getBoundingClientRect()
+    const gridRect = grid.getBoundingClientRect()
+    const columnCount = window.innerWidth >= 1280 ? 3 : window.innerWidth >= 640 ? 2 : 1
+    const columnGap = Number.parseFloat(getComputedStyle(grid).columnGap) || 0
+    const columnWidth = (gridRect.width - columnGap * (columnCount - 1)) / columnCount
+    const columnStep = columnWidth + columnGap
+    setResizingId(id)
+
+    function resize(moveEvent: PointerEvent) {
+      const patch: Partial<{ width: WidgetFlowWidth; height: WidgetFlowHeight }> = {}
+      if (horizontalDirection !== 0 && columnCount > 1) {
+        const pixelWidth = startRect.width + (moveEvent.clientX - startX) * horizontalDirection
+        patch.width = Math.max(1, Math.min(columnCount, Math.round((pixelWidth + columnGap) / columnStep))) as WidgetFlowWidth
+      }
+      if (verticalDirection !== 0) {
+        const pixelHeight = startRect.height + (moveEvent.clientY - startY) * verticalDirection
+        patch.height = Math.max(WIDGET_FLOW_MIN_HEIGHT, Math.min(WIDGET_FLOW_MAX_HEIGHT, Math.round(pixelHeight)))
+      }
+      setLayout(current => updateWidgetFlowItem({ layout: current, id, patch, ids, defaults }))
+    }
+
+    function stopResizing() {
+      window.removeEventListener('pointermove', resize)
+      window.removeEventListener('pointerup', stopResizing)
+      window.removeEventListener('pointercancel', stopResizing)
+      setResizingId(null)
+    }
+
+    window.addEventListener('pointermove', resize)
+    window.addEventListener('pointerup', stopResizing)
+    window.addEventListener('pointercancel', stopResizing)
+  }
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {editingWidgets ? (
@@ -157,10 +208,10 @@ export function EditableWidgetFlow<TId extends string>({
       ) : null}
 
       {visibleIds.length > 0 ? (
-        <div className={cn('grid min-w-0 grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 lg:gap-6', className)}>
+        <div data-widget-flow-grid className={cn('grid min-w-0 grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 lg:gap-6', className)}>
           {visibleIds.map((id, index) => {
             const item = normalized.widgets[id]
-            const fixedHeight = item.height !== 'auto'
+            const fixedHeight = typeof item.height === 'number'
 
             return (
               <div
@@ -174,12 +225,13 @@ export function EditableWidgetFlow<TId extends string>({
                 }}
                 onDragLeave={() => setDropTargetId(current => current === id ? null : current)}
                 onDrop={event => dropOn(event, id)}
+                style={{ height: fixedHeight ? item.height : undefined }}
                 className={cn(
-                  'flex min-w-0 flex-col',
+                  'relative flex min-w-0 flex-col',
                   WIDTH_CLASSES[item.width],
-                  HEIGHT_CLASSES[item.height],
                   editingWidgets && 'rounded-xl border border-dashed border-primary/35 bg-primary/[0.03] p-2',
                   dropTargetId === id && 'ring-2 ring-primary/60',
+                  resizingId === id && 'ring-2 ring-primary/70',
                 )}
               >
                 {editingWidgets ? (
@@ -232,15 +284,20 @@ export function EditableWidgetFlow<TId extends string>({
                     </StyledSelect>
                     <StyledSelect
                       value={item.height}
-                      onChange={event => updateItem(id, { height: event.target.value as WidgetFlowHeight })}
+                      onChange={event => updateItem(id, {
+                        height: event.target.value === 'auto' ? 'auto' : Number(event.target.value),
+                      })}
                       aria-label={`Высота ${labels[id]}`}
                       title="Высота виджета"
                       className="h-8 w-[7.5rem] py-1 text-xs"
                     >
                       <option value="auto">Авто</option>
-                      <option value="compact">224 px</option>
-                      <option value="medium">384 px</option>
-                      <option value="tall">576 px</option>
+                      <option value={224}>224 px</option>
+                      <option value={384}>384 px</option>
+                      <option value={576}>576 px</option>
+                      {fixedHeight && ![224, 384, 576].includes(item.height as number) ? (
+                        <option value={item.height}>{item.height} px</option>
+                      ) : null}
                     </StyledSelect>
                     <button
                       type="button"
@@ -256,6 +313,53 @@ export function EditableWidgetFlow<TId extends string>({
                 <div className={cn('min-h-0 min-w-0 flex-1', fixedHeight && 'overflow-y-auto overscroll-contain')}>
                   {widgetContent.get(id)}
                 </div>
+                {editingWidgets ? (
+                  <>
+                    <button
+                      type="button"
+                      onPointerDown={event => startResizing(event, id, -1, 0)}
+                      aria-label={`Изменить ширину ${labels[id]} слева`}
+                      title="Потянуть левую границу"
+                      className="absolute -left-1 top-11 bottom-3 z-30 w-3 cursor-col-resize touch-none"
+                    >
+                      <span className="absolute left-1 top-0 h-full w-px bg-primary/30" />
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={event => startResizing(event, id, 1, 0)}
+                      aria-label={`Изменить ширину ${labels[id]} справа`}
+                      title="Потянуть правую границу"
+                      className="absolute -right-1 top-11 bottom-3 z-30 w-3 cursor-col-resize touch-none"
+                    >
+                      <span className="absolute right-1 top-0 h-full w-px bg-primary/30" />
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={event => startResizing(event, id, 0, -1)}
+                      aria-label={`Изменить высоту ${labels[id]} сверху`}
+                      title="Потянуть верхнюю границу"
+                      className="absolute -top-1 left-3 right-3 z-30 h-3 cursor-row-resize touch-none"
+                    >
+                      <span className="absolute left-0 top-1 h-px w-full bg-primary/30" />
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={event => startResizing(event, id, 0, 1)}
+                      aria-label={`Изменить высоту ${labels[id]} снизу`}
+                      title="Потянуть нижнюю границу"
+                      className="absolute -bottom-1 left-3 right-3 z-30 h-3 cursor-row-resize touch-none"
+                    >
+                      <span className="absolute bottom-1 left-0 h-px w-full bg-primary/30" />
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={event => startResizing(event, id, 1, 1)}
+                      aria-label={`Изменить размер ${labels[id]} за угол`}
+                      title="Потянуть угол"
+                      className="absolute -bottom-1 -right-1 z-40 h-4 w-4 cursor-nwse-resize touch-none rounded-sm border border-primary/50 bg-background"
+                    />
+                  </>
+                ) : null}
               </div>
             )
           })}

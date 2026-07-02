@@ -31,7 +31,7 @@ describe('widget flow layout', () => {
     })
 
     expect(layout.order).toEqual(['accounts', 'balance', 'trends'])
-    expect(layout.widgets.accounts).toMatchObject({ width: 2, height: 'compact', hidden: true })
+    expect(layout.widgets.accounts).toMatchObject({ width: 2, height: 224, hidden: true })
     expect(layout.widgets.balance).toEqual(defaults.balance)
   })
 
@@ -70,11 +70,16 @@ describe('widget flow layout', () => {
     const layout = updateWidgetFlowItem({
       layout: normalize(null),
       id: 'trends',
-      patch: { width: 2, height: 'tall', hidden: true },
+      patch: { width: 2, height: 612, hidden: true },
       ids,
       defaults,
     })
 
-    expect(layout.widgets.trends).toMatchObject({ width: 2, height: 'tall', hidden: true })
+    expect(layout.widgets.trends).toMatchObject({ width: 2, height: 612, hidden: true })
+  })
+
+  it('clamps pixel heights to safe bounds', () => {
+    expect(normalize({ widgets: { trends: { height: 10 } } }).widgets.trends.height).toBe(160)
+    expect(normalize({ widgets: { trends: { height: 5000 } } }).widgets.trends.height).toBe(1600)
   })
 })

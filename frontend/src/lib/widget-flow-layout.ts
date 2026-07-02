@@ -1,5 +1,8 @@
 export type WidgetFlowWidth = 1 | 2 | 3
-export type WidgetFlowHeight = 'auto' | 'compact' | 'medium' | 'tall'
+export type WidgetFlowHeight = 'auto' | number
+
+export const WIDGET_FLOW_MIN_HEIGHT = 160
+export const WIDGET_FLOW_MAX_HEIGHT = 1600
 
 export type WidgetFlowItem<TId extends string = string> = {
   id: TId
@@ -24,9 +27,14 @@ function normalizeWidth(value: unknown, fallback: WidgetFlowWidth): WidgetFlowWi
 }
 
 function normalizeHeight(value: unknown, fallback: WidgetFlowHeight): WidgetFlowHeight {
-  return value === 'auto' || value === 'compact' || value === 'medium' || value === 'tall'
-    ? value
-    : fallback
+  if (value === 'auto') return value
+  if (value === 'compact') return 224
+  if (value === 'medium') return 384
+  if (value === 'tall') return 576
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(WIDGET_FLOW_MIN_HEIGHT, Math.min(WIDGET_FLOW_MAX_HEIGHT, Math.round(value)))
+  }
+  return fallback
 }
 
 export function normalizeWidgetFlowLayout<TId extends string>({
