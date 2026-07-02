@@ -21,6 +21,7 @@ type StyledSelectProps = {
   wrapperClassName?: string
   disabled?: boolean
   'aria-label'?: string
+  title?: string
   id?: string
   name?: string
 }
@@ -33,6 +34,7 @@ export function StyledSelect({
   children,
   disabled,
   'aria-label': ariaLabel,
+  title,
   id,
   name,
 }: StyledSelectProps) {
@@ -106,6 +108,7 @@ export function StyledSelect({
         type="button"
         disabled={disabled}
         aria-label={ariaLabel}
+        title={title}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => {

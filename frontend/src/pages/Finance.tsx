@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import type { EChartsCoreOption } from 'echarts/core'
 import { EChart } from '@/components/EChart'
+import { EditableWidgetFlow, type EditableFlowWidgetDefinition } from '@/components/EditableWidgetFlow'
 import { ExpandablePanel } from '@/components/ExpandablePanel'
 import { InfoTooltip } from '@/components/InfoTooltip'
 import { PageHeader } from '@/components/PageHeader'
@@ -92,6 +93,27 @@ type TopExpenseTooltipPoint = {
 }
 
 type FinanceSection = 'obligations' | 'trends' | 'categories' | 'accounts'
+type FinanceWidgetId =
+  | 'liquid-balance'
+  | 'net-cashflow'
+  | 'savings-rate'
+  | 'burn-rate'
+  | 'runway'
+  | 'spending-concentration'
+  | FinanceSection
+
+const FINANCE_WIDGETS: Array<EditableFlowWidgetDefinition<FinanceWidgetId>> = [
+  { id: 'liquid-balance', label: 'Ликвидный баланс', width: 1 },
+  { id: 'net-cashflow', label: 'Net cashflow', width: 1 },
+  { id: 'savings-rate', label: 'Savings rate', width: 1 },
+  { id: 'burn-rate', label: 'Burn rate', width: 1 },
+  { id: 'runway', label: 'Runway', width: 1 },
+  { id: 'spending-concentration', label: 'Концентрация расходов', width: 1 },
+  { id: 'obligations', label: 'Обязательные платежи', width: 3 },
+  { id: 'trends', label: 'Динамика', width: 3 },
+  { id: 'categories', label: 'Категории и топ расходов', width: 3 },
+  { id: 'accounts', label: 'Счета и операции', width: 3 },
+]
 
 function fmt(amount: number, currency = 'RUB') {
   return new Intl.NumberFormat('ru-RU', {
@@ -781,7 +803,10 @@ export function Finance() {
         </div>
       ) : null}
 
-      <section aria-label="Ключевые финансовые показатели" className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <EditableWidgetFlow
+        storageKey="finance_widget_flow_v1"
+        widgets={FINANCE_WIDGETS}
+      >
         <FinanceSummaryCard
           title="Ликвидный баланс"
           icon={Wallet}
@@ -846,7 +871,6 @@ export function Finance() {
           caption={topThreeCategories.length > 0 ? concentrationLeaders : undefined}
           hint={topThreeCategories.length > 0 ? 'Концентрация расходов — доля топ-3 категорий в выбранном периоде.' : 'Появится, когда в диапазоне будут категории расходов.'}
         />
-      </section>
 
       <ExpandablePanel
         title="Обязательные платежи"
@@ -1493,6 +1517,7 @@ export function Finance() {
         </div>
       </div>
       </ExpandablePanel>
+      </EditableWidgetFlow>
     </div>
   )
 }
