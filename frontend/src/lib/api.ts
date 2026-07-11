@@ -470,6 +470,8 @@ export interface ProductivityTask {
   due_bucket: 'overdue' | 'today' | 'upcoming' | 'later' | 'no_due'
 }
 
+export type ProductivityTaskFilter = 'all' | 'overdue' | 'today' | 'upcoming' | 'stale'
+
 export interface ProductivityHabitsSummary {
   total: number
   completed_today: number
@@ -524,7 +526,7 @@ export const api = {
   getActivities: (params: CollectionParams = {}) => get<Activity[]>('/fitness/activities' + collectionQuery(params)),
   getWorkouts: (params: CollectionParams = {}) => get<Workout[]>('/fitness/workouts' + collectionQuery(params)),
   getProductivitySummary: (params: DateRangeParams = {}) => get<ProductivitySummary>('/productivity/summary' + dateRangeQuery(params)),
-  getProductivityTasks: (filter: 'all' | 'overdue' | 'today' | 'upcoming' | 'stale' = 'all', params: DateRangeParams = {}) => {
+  getProductivityTasks: (filter: ProductivityTaskFilter = 'all', params: DateRangeParams = {}) => {
     const p = new URLSearchParams()
     p.set('filter', filter)
     if (params.from) p.set('from', params.from)

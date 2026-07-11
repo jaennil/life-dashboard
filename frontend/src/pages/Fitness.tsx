@@ -12,6 +12,13 @@ import { useGlobalDateRange } from '@/hooks/useGlobalDateRange'
 import { useIntegrations } from '@/hooks/useIntegrations'
 import { usePageSync } from '@/hooks/usePageSync'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
+import {
+  isTooltipRecord,
+  readTooltipScalar,
+  readTooltipString,
+  toTooltipList,
+  toTooltipNumber,
+} from '@/lib/echarts-tooltip'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import { type FitnessGoldenCard, type FitnessGoldenMetrics, type Workout } from '@/lib/api'
 import { rawDataHref } from '@/lib/raw-data'
@@ -88,32 +95,6 @@ function fmtWorkoutDistance(meters: number | null) {
   return `${Math.round(meters)} м`
 }
 
-function toNumber(value: number | string | null | undefined) {
-  if (typeof value === 'number') return value
-  if (typeof value === 'string') {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return 0
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function readString(value: unknown) {
-  return typeof value === 'string' ? value : undefined
-}
-
-function readScalar(value: unknown) {
-  if (typeof value === 'number' || typeof value === 'string' || value == null) return value
-  return undefined
-}
-
-function toTooltipList(params: unknown) {
-  return Array.isArray(params) ? params : [params]
-}
-
 function buildStravaGoldenTrendOption(data: FitnessGoldenMetrics['strava']['weekly']): EChartsCoreOption {
   return {
     color: ['#3b82f6', '#f97316', '#10b981'],
@@ -135,12 +116,12 @@ function buildStravaGoldenTrendOption(data: FitnessGoldenMetrics['strava']['week
       formatter: (params: unknown) => {
         const points = toTooltipList(params)
           .map(item => {
-            if (!isRecord(item)) return null
+            if (!isTooltipRecord(item)) return null
             return {
-              marker: readString(item.marker) ?? '',
-              seriesName: readString(item.seriesName) ?? '',
-              value: readScalar(item.value),
-              axisValue: readString(item.axisValue) ?? '',
+              marker: readTooltipString(item.marker) ?? '',
+              seriesName: readTooltipString(item.seriesName) ?? '',
+              value: readTooltipScalar(item.value),
+              axisValue: readTooltipString(item.axisValue) ?? '',
             }
           })
           .filter(Boolean)
@@ -148,8 +129,8 @@ function buildStravaGoldenTrendOption(data: FitnessGoldenMetrics['strava']['week
         const axisValue = points[0]?.axisValue ?? ''
         const lines = points.map(point =>
           `${point!.marker}${point!.seriesName}: ${point!.seriesName === 'Км'
-            ? DECIMAL_FORMATTER.format(toNumber(point!.value))
-            : toNumber(point!.value)}`
+            ? DECIMAL_FORMATTER.format(toTooltipNumber(point!.value))
+            : toTooltipNumber(point!.value)}`
         )
 
         return [`<div>Неделя с ${fmtWeek(axisValue)}</div>`, ...lines].join('<br/>')
@@ -232,18 +213,18 @@ function buildHevyLoadOption(data: FitnessGoldenMetrics['hevy']['weekly']): ECha
       formatter: (params: unknown) => {
         const points = toTooltipList(params)
           .map(item => {
-            if (!isRecord(item)) return null
+            if (!isTooltipRecord(item)) return null
             return {
-              marker: readString(item.marker) ?? '',
-              seriesName: readString(item.seriesName) ?? '',
-              value: readScalar(item.value),
-              axisValue: readString(item.axisValue) ?? '',
+              marker: readTooltipString(item.marker) ?? '',
+              seriesName: readTooltipString(item.seriesName) ?? '',
+              value: readTooltipScalar(item.value),
+              axisValue: readTooltipString(item.axisValue) ?? '',
             }
           })
           .filter(Boolean)
 
         const axisValue = points[0]?.axisValue ?? ''
-        const lines = points.map(point => `${point!.marker}${point!.seriesName}: ${toNumber(point!.value)}`)
+        const lines = points.map(point => `${point!.marker}${point!.seriesName}: ${toTooltipNumber(point!.value)}`)
         return [`<div>Неделя с ${fmtWeek(axisValue)}</div>`, ...lines].join('<br/>')
       },
     },
@@ -314,20 +295,20 @@ function buildHevySplitTimelineOption(data: FitnessGoldenMetrics['hevy']['weekly
       formatter: (params: unknown) => {
         const points = toTooltipList(params)
           .map(item => {
-            if (!isRecord(item)) return null
+            if (!isTooltipRecord(item)) return null
             return {
-              marker: readString(item.marker) ?? '',
-              seriesName: readString(item.seriesName) ?? '',
-              value: readScalar(item.value),
-              axisValue: readString(item.axisValue) ?? '',
+              marker: readTooltipString(item.marker) ?? '',
+              seriesName: readTooltipString(item.seriesName) ?? '',
+              value: readTooltipScalar(item.value),
+              axisValue: readTooltipString(item.axisValue) ?? '',
             }
           })
           .filter(Boolean)
 
         const axisValue = points[0]?.axisValue ?? ''
         const lines = points
-          .filter(point => toNumber(point!.value) > 0)
-          .map(point => `${point!.marker}${point!.seriesName}: ${toNumber(point!.value)}`)
+          .filter(point => toTooltipNumber(point!.value) > 0)
+          .map(point => `${point!.marker}${point!.seriesName}: ${toTooltipNumber(point!.value)}`)
 
         return [`<div>Неделя с ${fmtWeek(axisValue)}</div>`, ...lines].join('<br/>')
       },
@@ -388,10 +369,10 @@ function buildDonutOption(data: Array<{ name: string; value: number; color: stri
       borderColor: CHART_GRID,
       textStyle: { color: CHART_TEXT },
       formatter: (param: unknown) => {
-        if (!isRecord(param)) return ''
-        const name = readString(param.name) ?? ''
-        const value = toNumber(readScalar(param.value))
-        const percent = toNumber(readScalar(param.percent))
+        if (!isTooltipRecord(param)) return ''
+        const name = readTooltipString(param.name) ?? ''
+        const value = toTooltipNumber(readTooltipScalar(param.value))
+        const percent = toTooltipNumber(readTooltipScalar(param.percent))
         return `${name}: ${value}${valueSuffix} (${percent.toFixed(0)}%)`
       },
     },

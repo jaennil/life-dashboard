@@ -351,28 +351,14 @@ func main() {
 		r.Post("/api/v1/ai/checkup", aiHandler.Checkup)
 		r.Get("/api/v1/ai/checkup/latest", aiHandler.GetLatestCheckup)
 
-		if stravaConn != nil {
-			r.Get("/api/v1/auth/strava", authHandler.StravaAuthorize)
-			r.Get("/api/v1/auth/strava/callback", authHandler.StravaCallback)
-		}
-		if fatSecretConn != nil {
-			r.Get("/api/v1/auth/fatsecret", authHandler.FatSecretAuthorize)
-			r.Get("/api/v1/auth/fatsecret/callback", authHandler.FatSecretCallback)
-			r.Get("/api/v1/auth/zenmoney", authHandler.ZenmoneyAuthorize)
-			r.Get("/api/v1/auth/zenmoney/callback", authHandler.ZenmoneyCallback)
-			if googleCalConn != nil {
-				r.Get("/api/v1/auth/google", authHandler.GoogleAuthorize)
-				r.Get("/api/v1/auth/google/callback", authHandler.GoogleCallback)
-			}
-		}
-		if nc.ClientID != "" && nc.ClientSecret != "" {
-			r.Get("/api/v1/auth/notion", authHandler.NotionAuthorize)
-			r.Get("/api/v1/auth/notion/callback", authHandler.NotionCallback)
-		}
-		if todoist.OAuthConfigured() {
-			r.Get("/api/v1/auth/todoist", authHandler.TodoistAuthorize)
-			r.Get("/api/v1/auth/todoist/callback", authHandler.TodoistCallback)
-		}
+		registerOAuthRoutes(r, authHandler, oauthRouteAvailability{
+			strava:         stravaConn != nil,
+			fatSecret:      fatSecretConn != nil,
+			zenmoney:       zenmoney.OAuthConfigured(),
+			googleCalendar: googleCalConn != nil,
+			notion:         nc.ClientID != "" && nc.ClientSecret != "",
+			todoist:        todoist.OAuthConfigured(),
+		})
 		healthWebhook := handlers.NewHealthWebhook(pool, log.Logger)
 		r.Get("/api/v1/health/apikey", healthWebhook.GetAPIKey)
 		r.Post("/api/v1/health/apikey", healthWebhook.GenerateAPIKey)
@@ -410,4 +396,40 @@ func main() {
 		log.Fatal().Err(err).Msg("forced shutdown")
 	}
 	log.Info().Msg("server stopped")
+}
+
+type oauthRouteAvailability struct {
+	strava         bool
+	fatSecret      bool
+	zenmoney       bool
+	googleCalendar bool
+	notion         bool
+	todoist        bool
+}
+
+func registerOAuthRoutes(r chi.Router, authHandler *handlers.AuthHandler, available oauthRouteAvailability) {
+	if available.strava {
+		r.Get("/api/v1/auth/strava", authHandler.StravaAuthorize)
+		r.Get("/api/v1/auth/strava/callback", authHandler.StravaCallback)
+	}
+	if available.fatSecret {
+		r.Get("/api/v1/auth/fatsecret", authHandler.FatSecretAuthorize)
+		r.Get("/api/v1/auth/fatsecret/callback", authHandler.FatSecretCallback)
+	}
+	if available.zenmoney {
+		r.Get("/api/v1/auth/zenmoney", authHandler.ZenmoneyAuthorize)
+		r.Get("/api/v1/auth/zenmoney/callback", authHandler.ZenmoneyCallback)
+	}
+	if available.googleCalendar {
+		r.Get("/api/v1/auth/google", authHandler.GoogleAuthorize)
+		r.Get("/api/v1/auth/google/callback", authHandler.GoogleCallback)
+	}
+	if available.notion {
+		r.Get("/api/v1/auth/notion", authHandler.NotionAuthorize)
+		r.Get("/api/v1/auth/notion/callback", authHandler.NotionCallback)
+	}
+	if available.todoist {
+		r.Get("/api/v1/auth/todoist", authHandler.TodoistAuthorize)
+		r.Get("/api/v1/auth/todoist/callback", authHandler.TodoistCallback)
+	}
 }

@@ -33,10 +33,24 @@ export class APIError extends Error {
   }
 }
 
-export function jsonHeaders(headers?: HeadersInit): HeadersInit {
+export function jsonHeaders(headers?: HeadersInit): Headers {
+  const result = new Headers(headers)
+  if (!result.has('Content-Type')) {
+    result.set('Content-Type', 'application/json')
+  }
+  return result
+}
+
+function jsonRequestInit(
+  method: 'POST' | 'PATCH',
+  body: unknown,
+  init?: RequestInit,
+): RequestInit {
   return {
-    'Content-Type': 'application/json',
-    ...(headers ?? {}),
+    ...init,
+    method,
+    headers: jsonHeaders(init?.headers),
+    body: body === undefined ? init?.body : JSON.stringify(body),
   }
 }
 
@@ -96,31 +110,20 @@ export async function get<T>(path: string): Promise<T> {
 }
 
 export async function postJSON<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
-  const res = await request(path, {
-    method: 'POST',
-    headers: jsonHeaders(init?.headers),
-    ...init,
-    body: body === undefined ? init?.body : JSON.stringify(body),
-  })
+  const res = await request(path, jsonRequestInit('POST', body, init))
   return parseJSON<T>(res)
 }
 
 export async function patchJSON<T>(path: string, body?: unknown): Promise<T> {
-  const res = await request(path, {
-    method: 'PATCH',
-    headers: jsonHeaders(),
-    body: JSON.stringify(body),
-  })
+  const res = await request(path, jsonRequestInit('PATCH', body))
   return parseJSON<T>(res)
 }
 
 export async function postNoContent(path: string, body?: unknown, init?: RequestInit): Promise<void> {
-  await request(path, {
-    method: 'POST',
-    headers: body === undefined && !init?.headers ? undefined : jsonHeaders(init?.headers),
-    ...init,
-    body: body === undefined ? init?.body : JSON.stringify(body),
-  })
+  const requestInit = body === undefined && !init?.headers
+    ? { ...init, method: 'POST' }
+    : jsonRequestInit('POST', body, init)
+  await request(path, requestInit)
 }
 
 export async function deleteNoContent(path: string): Promise<void> {

@@ -1,6 +1,13 @@
 import type { EChartsCoreOption } from 'echarts/core'
 import type { NutritionDay } from '@/lib/api'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
+import {
+  isTooltipRecord,
+  readTooltipScalar,
+  readTooltipString,
+  toTooltipList,
+  toTooltipNumber,
+} from '@/lib/echarts-tooltip'
 import { MACRO_COLORS } from '@/pages/nutrition/constants'
 import {
   fmtDate,
@@ -8,32 +15,6 @@ import {
   hydrationBeverageEmoji,
   hydrationBeverageLabel,
 } from '@/pages/nutrition/format'
-
-function toNumber(value: number | string | null | undefined) {
-  if (typeof value === 'number') return value
-  if (typeof value === 'string') {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return 0
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function readString(value: unknown) {
-  return typeof value === 'string' ? value : undefined
-}
-
-function readScalar(value: unknown) {
-  if (typeof value === 'number' || typeof value === 'string' || value == null) return value
-  return undefined
-}
-
-function toTooltipList(params: unknown) {
-  return Array.isArray(params) ? params : [params]
-}
 
 export function buildCaloriesOption(data: NutritionDay[], calorieTarget?: number): EChartsCoreOption {
   return {
@@ -48,10 +29,10 @@ export function buildCaloriesOption(data: NutritionDay[], calorieTarget?: number
       textStyle: { color: CHART_TEXT },
       formatter: (params: unknown) => {
         const point = toTooltipList(params)[0]
-        if (!isRecord(point)) return ''
+        if (!isTooltipRecord(point)) return ''
         return [
-          `<div>${fmtDate(readString(point.axisValue) ?? '')}</div>`,
-          `${readString(point.marker) ?? ''}${toNumber(readScalar(point.value)).toFixed(0)} ккал`,
+          `<div>${fmtDate(readTooltipString(point.axisValue) ?? '')}</div>`,
+          `${readTooltipString(point.marker) ?? ''}${toTooltipNumber(readTooltipScalar(point.value)).toFixed(0)} ккал`,
         ].join('<br/>')
       },
     },
@@ -111,17 +92,17 @@ export function buildMacrosTrendOption(data: NutritionDay[]): EChartsCoreOption 
       formatter: (params: unknown) => {
         const points = toTooltipList(params)
           .map(item => {
-            if (!isRecord(item)) return null
+            if (!isTooltipRecord(item)) return null
             return {
-              marker: readString(item.marker) ?? '',
-              seriesName: readString(item.seriesName) ?? '',
-              value: readScalar(item.value),
-              axisValue: readString(item.axisValue) ?? '',
+              marker: readTooltipString(item.marker) ?? '',
+              seriesName: readTooltipString(item.seriesName) ?? '',
+              value: readTooltipScalar(item.value),
+              axisValue: readTooltipString(item.axisValue) ?? '',
             }
           })
           .filter(Boolean)
 
-        const lines = points.map(point => `${point!.marker}${point!.seriesName}: ${toNumber(point!.value).toFixed(0)} г`)
+        const lines = points.map(point => `${point!.marker}${point!.seriesName}: ${toTooltipNumber(point!.value).toFixed(0)} г`)
         return [`<div>${fmtDate(points[0]?.axisValue ?? '')}</div>`, ...lines].join('<br/>')
       },
     },
@@ -223,12 +204,12 @@ export function buildHydrationOption(data: NutritionDay[], waterTarget?: number)
       formatter: (params: unknown) => {
         const points = toTooltipList(params)
           .map(item => {
-            if (!isRecord(item)) return null
+            if (!isTooltipRecord(item)) return null
             return {
-              marker: readString(item.marker) ?? '',
-              seriesName: readString(item.seriesName) ?? '',
-              value: toNumber(readScalar(item.value)),
-              axisValue: readString(item.axisValue) ?? '',
+              marker: readTooltipString(item.marker) ?? '',
+              seriesName: readTooltipString(item.seriesName) ?? '',
+              value: toTooltipNumber(readTooltipScalar(item.value)),
+              axisValue: readTooltipString(item.axisValue) ?? '',
             }
           })
           .filter(Boolean)
@@ -287,10 +268,10 @@ export function buildNutritionDonutOption(data: Array<{ name: string; value: num
       borderColor: CHART_GRID,
       textStyle: { color: CHART_TEXT },
       formatter: (param: unknown) => {
-        if (!isRecord(param)) return ''
-        const name = readString(param.name) ?? ''
-        const value = toNumber(readScalar(param.value))
-        const percent = toNumber(readScalar(param.percent))
+        if (!isTooltipRecord(param)) return ''
+        const name = readTooltipString(param.name) ?? ''
+        const value = toTooltipNumber(readTooltipScalar(param.value))
+        const percent = toTooltipNumber(readTooltipScalar(param.percent))
         return `${name}: ${value.toFixed(0)}${suffix} (${percent.toFixed(0)}%)`
       },
     },
@@ -347,12 +328,12 @@ export function buildMealsTimelineOption(
       formatter: (params: unknown) => {
         const points = toTooltipList(params)
           .map(item => {
-            if (!isRecord(item)) return null
+            if (!isTooltipRecord(item)) return null
             return {
-              marker: readString(item.marker) ?? '',
-              seriesName: readString(item.seriesName) ?? '',
-              value: toNumber(readScalar(item.value)),
-              axisValue: readString(item.axisValue) ?? '',
+              marker: readTooltipString(item.marker) ?? '',
+              seriesName: readTooltipString(item.seriesName) ?? '',
+              value: toTooltipNumber(readTooltipScalar(item.value)),
+              axisValue: readTooltipString(item.axisValue) ?? '',
             }
           })
           .filter(point => point && point.value > 0)
@@ -418,8 +399,8 @@ export function buildDailyNutritionTimelineOption(
       textStyle: { color: CHART_TEXT },
       formatter: (params: unknown) => {
         const points = toTooltipList(params)
-        const barPoint = points.find(item => isRecord(item) && readString(item.seriesName) === 'Калории')
-        const dataIndex = isRecord(barPoint) ? toNumber(readScalar(barPoint.dataIndex)) : 0
+        const barPoint = points.find(item => isTooltipRecord(item) && readTooltipString(item.seriesName) === 'Калории')
+        const dataIndex = isTooltipRecord(barPoint) ? toTooltipNumber(readTooltipScalar(barPoint.dataIndex)) : 0
         const day = data[dataIndex]
         if (!day) return ''
 

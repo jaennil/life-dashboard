@@ -5,11 +5,10 @@ import {
   type ProductivityHabitsResponse,
   type ProductivitySummary,
   type ProductivityTask,
+  type ProductivityTaskFilter,
 } from '@/lib/api'
 
-type TaskFilter = 'all' | 'overdue' | 'today' | 'upcoming' | 'stale'
-
-export function useProductivityData(params: DateRangeParams, targetDate: string | undefined, filter: TaskFilter) {
+export function useProductivityData(params: DateRangeParams, targetDate: string | undefined, filter: ProductivityTaskFilter) {
   const [summary, setSummary] = useState<ProductivitySummary | null>(null)
   const [tasks, setTasks] = useState<ProductivityTask[]>([])
   const [habitsData, setHabitsData] = useState<ProductivityHabitsResponse | null>(null)
@@ -25,7 +24,7 @@ export function useProductivityData(params: DateRangeParams, targetDate: string 
     }
   }, [params])
 
-  const reloadTasks = useCallback(async (currentFilter: TaskFilter = filter) => {
+  const reloadTasks = useCallback(async (currentFilter: ProductivityTaskFilter = filter) => {
     setTaskLoading(true)
     try {
       setTasks(await api.getProductivityTasks(currentFilter, params))

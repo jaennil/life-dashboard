@@ -29,13 +29,13 @@ import {
   type ProductivityHabit,
   type ProductivityHabitInput,
   type ProductivityTask,
+  type ProductivityTaskFilter,
 } from '@/lib/api'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 
-type TaskFilter = 'all' | 'overdue' | 'today' | 'upcoming' | 'stale'
 type HabitRoutine = 'morning' | 'evening' | 'anytime'
 
-const FILTERS: Array<{ key: TaskFilter; label: string }> = [
+const FILTERS: Array<{ key: ProductivityTaskFilter; label: string }> = [
   { key: 'overdue', label: 'Overdue' },
   { key: 'today', label: 'Сегодня' },
   { key: 'upcoming', label: '7 дней' },
@@ -242,7 +242,7 @@ export function Productivity() {
   const [habitDeletingID, setHabitDeletingID] = useState<string | null>(null)
   const [habitFormSaving, setHabitFormSaving] = useState(false)
   const [habitFormError, setHabitFormError] = useState('')
-  const [filter, setFilter] = useState<TaskFilter>('overdue')
+  const [filter, setFilter] = useState<ProductivityTaskFilter>('overdue')
   const [editingHabitID, setEditingHabitID] = useState<string | null>(null)
   const [showHabitComposer, setShowHabitComposer] = useState(false)
   const [habitForm, setHabitForm] = useState<ProductivityHabitInput>({

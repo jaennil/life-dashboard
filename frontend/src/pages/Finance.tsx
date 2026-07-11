@@ -35,6 +35,15 @@ import { useFinanceTransactions } from '@/hooks/useFinanceTransactions'
 import { useIntegrations } from '@/hooks/useIntegrations'
 import { usePageSync } from '@/hooks/usePageSync'
 import { CHART_GRID, CHART_MUTED, CHART_TEXT, CHART_TOOLTIP } from '@/lib/chart-theme'
+import {
+  isTooltipRecord,
+  readTooltipNumber,
+  readTooltipScalar,
+  readTooltipString,
+  toTooltipList,
+  toTooltipNumber,
+  type TooltipScalar,
+} from '@/lib/echarts-tooltip'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 import {
   api,
@@ -62,8 +71,6 @@ const MONTH_LABELS: Record<string, string> = {
   '05': 'Май', '06': 'Июн', '07': 'Июл', '08': 'Авг',
   '09': 'Сен', '10': 'Окт', '11': 'Ноя', '12': 'Дек',
 }
-
-type TooltipScalar = number | string | null | undefined
 
 type AxisTooltipPoint = {
   axisValue?: string
@@ -317,15 +324,6 @@ function getAccountTypeLabel(type: string) {
   }
 }
 
-function toTooltipNumber(value: number | string | null | undefined) {
-  if (typeof value === 'number') return value
-  if (typeof value === 'string') {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return 0
-}
-
 function escapeHtml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -339,30 +337,9 @@ function truncateLabel(value: string, limit = 20) {
   return value.length > limit ? `${value.slice(0, limit - 1)}…` : value
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function readTooltipScalar(value: unknown): TooltipScalar {
-  if (typeof value === 'number' || typeof value === 'string' || value == null) return value
-  return undefined
-}
-
-function readTooltipString(value: unknown) {
-  return typeof value === 'string' ? value : undefined
-}
-
-function readTooltipNumber(value: unknown) {
-  return typeof value === 'number' ? value : undefined
-}
-
-function toTooltipArray(params: unknown) {
-  return Array.isArray(params) ? params : [params]
-}
-
 function readAxisTooltipPoints(params: unknown): AxisTooltipPoint[] {
-  return toTooltipArray(params).flatMap((item): AxisTooltipPoint[] => {
-    if (!isRecord(item)) return []
+  return toTooltipList(params).flatMap((item): AxisTooltipPoint[] => {
+    if (!isTooltipRecord(item)) return []
     return [{
       axisValue: readTooltipString(item.axisValue),
       marker: readTooltipString(item.marker),
@@ -373,7 +350,7 @@ function readAxisTooltipPoints(params: unknown): AxisTooltipPoint[] {
 }
 
 function readPieTooltipPoint(param: unknown): PieTooltipPoint | null {
-  if (!isRecord(param)) return null
+  if (!isTooltipRecord(param)) return null
   return {
     marker: readTooltipString(param.marker),
     name: readTooltipString(param.name),
@@ -383,11 +360,11 @@ function readPieTooltipPoint(param: unknown): PieTooltipPoint | null {
 }
 
 function readTopExpenseTooltipPoint(params: unknown): TopExpenseTooltipPoint | null {
-  const point = toTooltipArray(params)[0]
-  if (!isRecord(point)) return null
+  const point = toTooltipList(params)[0]
+  if (!isTooltipRecord(point)) return null
 
   let data: TopExpenseTooltipData | undefined
-  if (isRecord(point.data)) {
+  if (isTooltipRecord(point.data)) {
     data = {
       count: readTooltipNumber(point.data.count),
       fullLabel: readTooltipString(point.data.fullLabel),

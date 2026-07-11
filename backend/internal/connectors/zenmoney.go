@@ -98,6 +98,10 @@ func NewZenmoney(clientID, clientSecret, redirectURI string, db *pgxpool.Pool, l
 	}
 }
 
+func (z *ZenmoneyConnector) OAuthConfigured() bool {
+	return strings.TrimSpace(z.clientID) != "" && strings.TrimSpace(z.clientSecret) != ""
+}
+
 func (z *ZenmoneyConnector) AuthURL(state string) string {
 	return fmt.Sprintf("https://api.zenmoney.ru/oauth2/authorize/?response_type=code&client_id=%s&redirect_uri=%s&state=%s",
 		z.clientID, url.QueryEscape(z.redirectURI), url.QueryEscape(state))

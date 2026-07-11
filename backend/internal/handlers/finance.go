@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -205,106 +204,10 @@ func (h *FinanceHandler) GetTransactions(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 	userID := r.Context().Value(authmw.UserIDKey).(string)
 
-	q := r.URL.Query()
-	filter := q.Get("type")
-	category := q.Get("category")
-	payee := q.Get("payee")
-	search := q.Get("search")
-	from := q.Get("from")
-	to := q.Get("to")
-	sortBy := q.Get("sort")
-	order := q.Get("order")
-	page, _ := strconv.Atoi(q.Get("page"))
-	if page < 1 {
-		page = 1
-	}
-	limit, _ := strconv.Atoi(q.Get("page_size"))
-	if limit <= 0 {
-		limit = 30
-	}
-	if limit > 250 {
-		limit = 250
-	}
-	offset := (page - 1) * limit
+	queryParams := parseFinanceTransactionQuery(r.URL.Query())
+	query := buildFinanceTransactionQuery(userID, queryParams)
 
-	conditions := "t.is_transfer = false AND t.user_id = $1 AND COALESCE(a.in_balance, TRUE) = TRUE"
-	args := []any{userID}
-	argN := 2
-
-	switch filter {
-	case "income":
-		conditions += " AND t.amount > 0"
-	case "expense":
-		conditions += " AND t.amount < 0"
-	}
-
-	if category != "" {
-		if category == "__uncategorized__" || category == "Без категории" {
-			conditions += " AND NULLIF(TRIM(t.category), '') IS NULL"
-		} else {
-			conditions += fmt.Sprintf(" AND t.category = $%d", argN)
-			args = append(args, category)
-			argN++
-		}
-	}
-
-	if payee != "" {
-		conditions += fmt.Sprintf(" AND COALESCE(NULLIF(t.payee,''), NULLIF(t.comment,''), 'Без описания') = $%d", argN)
-		args = append(args, payee)
-		argN++
-	}
-
-	if search != "" {
-		conditions += fmt.Sprintf(" AND (COALESCE(t.comment,'') ILIKE $%d OR COALESCE(t.payee,'') ILIKE $%d OR COALESCE(t.category,'') ILIKE $%d OR COALESCE(a.title,'') ILIKE $%d)", argN, argN, argN, argN)
-		args = append(args, "%"+search+"%")
-		argN++
-	}
-
-	if from != "" {
-		conditions += fmt.Sprintf(" AND t.occurred_at >= $%d", argN)
-		args = append(args, from)
-		argN++
-	}
-	if to != "" {
-		conditions += fmt.Sprintf(" AND t.occurred_at < ($%d::date + INTERVAL '1 day')", argN)
-		args = append(args, to)
-		argN++
-	}
-
-	orderBy := "t.occurred_at DESC"
-	direction := "DESC"
-	if order == "asc" {
-		direction = "ASC"
-	}
-	switch sortBy {
-	case "amount":
-		orderBy = "ABS(t.amount) " + direction
-	case "signed_amount":
-		orderBy = "t.amount " + direction
-	case "date_asc":
-		orderBy = "t.occurred_at ASC"
-	case "amount_asc":
-		orderBy = "ABS(t.amount) ASC"
-	case "date", "occurred_at":
-		orderBy = "t.occurred_at " + direction
-	case "category":
-		orderBy = "t.category " + direction + ", t.occurred_at DESC"
-	case "payee":
-		orderBy = "t.payee " + direction + ", t.occurred_at DESC"
-	}
-
-	args = append(args, limit, offset)
-	query := fmt.Sprintf(`
-		SELECT t.id, t.occurred_at, t.amount, t.currency, COALESCE(t.comment, ''),
-			t.payee, t.category, t.subcategory, a.title, COALESCE(t.tags, ARRAY[]::text[])
-		FROM transactions t
-		LEFT JOIN accounts a ON a.id = t.account_id
-		WHERE %s
-		ORDER BY %s
-		LIMIT $%d OFFSET $%d
-	`, conditions, orderBy, argN, argN+1)
-
-	rows, err := h.db.Query(ctx, query, args...)
+	rows, err := h.db.Query(ctx, query.SQL, query.Args...)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query transactions")
 		http.Error(w, "internal error", http.StatusInternalServerError)
