@@ -1,4 +1,6 @@
-# Database ER diagram
+# Life Dashboard
+
+## Database ER diagram
 
 The diagram reflects migrations `000001` through `000016`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability.
