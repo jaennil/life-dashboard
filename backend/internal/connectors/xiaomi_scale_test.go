@@ -5,28 +5,30 @@ import (
 	"testing"
 )
 
-// Real payloads captured from the eco/scale endpoint for a Body Composition
-// Scale S400 (yunmai.scales.ms104), trimmed to the fields under test.
+// Payloads shaped exactly like the eco/scale endpoint returns for a Body
+// Composition Scale S400 (yunmai.scales.ms104), trimmed to the fields under
+// test and with identifiers anonymised.
 const (
 	// Account owner, full measurement.
 	ownerFullPayload = `{"duid":"1","userType":"1","weight":77.8,"heartRate":"90","status":"0",
 		"bfp":19.4,"slm":59.3,"bwp":56.9,"bmc":3.4,"vfl":"8","smm":32.3,"bmi":22.5,
 		"bmr":"1724","ma":"20","ffm":62.7,"pm":14.3,"bodyRes":641.2,"bodyRes2":584.2,
-		"user":{"name":"Nikita","uid":"4263508105","accountId":"4263508105","height":"186"}}`
+		"user":{"name":"owner","uid":"1111111111","accountId":"1111111111","height":"186"}}`
 
 	// Account owner stepping on with shoes: weight only, everything derived is zero.
 	ownerWeightOnlyPayload = `{"duid":"1","userType":"1","weight":76.4,"heartRate":"0","status":"1",
 		"bfp":0,"slm":0,"bwp":0,"bmc":0,"vfl":"0","smm":0,"bmi":22.1,
 		"bmr":"0","ma":"0","ffm":0,"pm":0,"bodyRes":0,"bodyRes2":0,
-		"user":{"name":"Nikita","uid":"4263508105","accountId":"4263508105","height":"186"}}`
+		"user":{"name":"owner","uid":"1111111111","accountId":"1111111111","height":"186"}}`
 
-	// A family member on the same scale. Note the identical outer uid.
+	// A second profile on the same scale. Note the identical outer uid: only
+	// the inner accountId tells the two people apart.
 	familyMemberPayload = `{"duid":"2","userType":"2","weight":57.2,"heartRate":"0","status":"1",
 		"bfp":0,"bmi":20.03,
-		"user":{"name":"Мария","uid":"4263508105","accountId":"381119563131696","height":"169"}}`
+		"user":{"name":"family","uid":"1111111111","accountId":"2222222222","height":"169"}}`
 )
 
-const testAccountID = "4263508105"
+const testAccountID = "1111111111"
 
 func decodeScalePayload(t *testing.T, raw string) map[string]any {
 	t.Helper()
