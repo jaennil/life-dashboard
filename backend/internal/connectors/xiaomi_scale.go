@@ -164,17 +164,13 @@ func (x *XiaomiScaleConnector) storeRecord(ctx context.Context, userID, accountI
 		return 0, false, fmt.Errorf("decode payload: %w", err)
 	}
 
-	// getUserDataByPage returns every profile on the scale, and they all share
-	// the outer account uid. The inner user.accountId is what actually
-	// distinguishes the account owner from family members.
-	user := jsonObject(payload, "user")
-	if owner := jsonString(user, "accountId"); owner != "" && owner != accountID {
+	if !xiaomiScaleOwnedBy(payload, accountID) {
 		return 0, false, nil
 	}
 
 	measuredAt := record.MeasuredAt()
 	externalID := strconv.FormatInt(record.CreateTime, 10)
-	profile := jsonString(user, "name")
+	profile := jsonString(jsonObject(payload, "user"), "name")
 
 	// Casts are required: the same parameters are reused in the guard, and
 	// Postgres will not deduce a single type for them otherwise.
@@ -190,15 +186,7 @@ func (x *XiaomiScaleConnector) storeRecord(ctx context.Context, userID, accountI
 	}
 
 	saved := 0
-	for _, metric := range xiaomiScaleMetrics {
-		value, ok := xiaomiScaleNumber(payload, metric.field)
-		// A weigh-in with shoes on, or one the scale could not stabilise, has
-		// no impedance, and Xiaomi fills every derived field with zero. None of
-		// these metrics can legitimately be zero, so that means "not measured"
-		// - storing it would put a 0 % body fat point on the chart.
-		if !ok || value <= 0 {
-			continue
-		}
+	for _, metric := range xiaomiScaleValues(payload) {
 		metadata, _ := json.Marshal(map[string]string{
 			"source_field": metric.field,
 			"model":        record.Model,
@@ -213,7 +201,7 @@ func (x *XiaomiScaleConnector) storeRecord(ctx context.Context, userID, accountI
 				value = EXCLUDED.value,
 				unit = EXCLUDED.unit,
 				metadata = EXCLUDED.metadata
-		`, measuredAt, xiaomiScaleSource, metric.metricType, value,
+		`, measuredAt, xiaomiScaleSource, metric.metricType, metric.value,
 			nullIfEmpty(metric.unit), metadata, userID); err != nil {
 			return saved, true, fmt.Errorf("upsert %s: %w", metric.metricType, err)
 		}
@@ -232,6 +220,45 @@ func (x *XiaomiScaleConnector) updateLastSync(ctx context.Context, userID string
 			enabled = TRUE
 	`, xiaomiScaleSource, userID)
 	return err
+}
+
+// xiaomiScaleOwnedBy reports whether a weigh-in belongs to accountID.
+// getUserDataByPage returns every profile registered on the scale, and they
+// all share the outer account uid, so the inner user.accountId is the only
+// field that separates the account owner from family members.
+func xiaomiScaleOwnedBy(payload map[string]any, accountID string) bool {
+	owner := jsonString(jsonObject(payload, "user"), "accountId")
+	return owner == "" || owner == accountID
+}
+
+type xiaomiScaleValue struct {
+	metricType string
+	unit       string
+	field      string
+	value      float64
+}
+
+// xiaomiScaleValues maps a decoded payload onto biometric rows.
+//
+// A weigh-in taken with shoes on, or one the scale could not stabilise, has no
+// impedance, and Xiaomi fills every derived field with zero. None of these
+// metrics can legitimately be zero, so a zero means "not measured" - storing
+// it would put a 0 % body fat point on the chart.
+func xiaomiScaleValues(payload map[string]any) []xiaomiScaleValue {
+	values := make([]xiaomiScaleValue, 0, len(xiaomiScaleMetrics))
+	for _, metric := range xiaomiScaleMetrics {
+		value, ok := xiaomiScaleNumber(payload, metric.field)
+		if !ok || value <= 0 {
+			continue
+		}
+		values = append(values, xiaomiScaleValue{
+			metricType: metric.metricType,
+			unit:       metric.unit,
+			field:      metric.field,
+			value:      value,
+		})
+	}
+	return values
 }
 
 // xiaomiScaleNumber reads a metric that Xiaomi may encode as either a JSON
