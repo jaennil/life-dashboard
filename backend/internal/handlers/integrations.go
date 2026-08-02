@@ -42,7 +42,7 @@ type integrationMeta struct {
 	countQuery  string
 }
 
-var knownIntegrations = []string{"strava", "hevy", "apple_health", "habitify", "todoist", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion"}
+var knownIntegrations = []string{"strava", "hevy", "apple_health", "habitify", "todoist", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion", "xiaomi_scale"}
 
 var personalIntegrations = map[string]bool{
 	"strava":          true,
@@ -55,14 +55,16 @@ var personalIntegrations = map[string]bool{
 	"fatsecret":       true,
 	"google_calendar": true,
 	"notion":          true,
+	"xiaomi_scale":    true,
 }
 
 var manualTokenIntegrations = map[string]bool{
-	"hevy":     true,
-	"habitify": true,
-	"todoist":  true,
-	"notion":   true,
-	"zenmoney": true,
+	"hevy":         true,
+	"habitify":     true,
+	"todoist":      true,
+	"notion":       true,
+	"zenmoney":     true,
+	"xiaomi_scale": true,
 }
 
 var integrationMeta_ = map[string]integrationMeta{
@@ -115,6 +117,11 @@ var integrationMeta_ = map[string]integrationMeta{
 		displayName: "Notion Journal",
 		description: "Личный дневник из Notion",
 		countQuery:  "SELECT COUNT(*) FROM journal_entries WHERE source='notion' AND user_id = $1",
+	},
+	"xiaomi_scale": {
+		displayName: "Xiaomi Scale S400",
+		description: "Состав тела: вес, жир, мышцы, вода, кости, импеданс",
+		countQuery:  "SELECT COUNT(*) FROM biometrics WHERE source='xiaomi_scale' AND user_id = $1",
 	},
 }
 
@@ -329,6 +336,7 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 	var body struct {
 		Token      string `json:"token"`
 		DatabaseID string `json:"database_id,omitempty"`
+		AccountID  string `json:"account_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Token == "" {
 		http.Error(w, "token is required", http.StatusBadRequest)
@@ -338,12 +346,20 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "database_id is required", http.StatusBadRequest)
 		return
 	}
+	if name == "xiaomi_scale" && body.AccountID == "" {
+		http.Error(w, "account_id is required", http.StatusBadRequest)
+		return
+	}
 
 	ctx := r.Context()
 	userID := ctx.Value(authmw.UserIDKey).(string)
+	// refresh_token doubles as the integration's second credential.
 	refreshToken := ""
-	if name == "notion" {
+	switch name {
+	case "notion":
 		refreshToken = body.DatabaseID
+	case "xiaomi_scale":
+		refreshToken = body.AccountID
 	}
 
 	_, err := h.db.Exec(ctx, `
@@ -402,7 +418,8 @@ func hasStoredCredentials(ctx context.Context, db *pgxpool.Pool, source string, 
 
 	query := `SELECT 1 FROM oauth_tokens WHERE source = $1 AND user_id = $2 LIMIT 1`
 	args := []any{source, userID}
-	if source == "notion" {
+	// Both of these need their second credential, not just the token.
+	if source == "notion" || source == "xiaomi_scale" {
 		query = `SELECT 1 FROM oauth_tokens WHERE source = $1 AND user_id = $2 AND refresh_token <> '' LIMIT 1`
 	}
 

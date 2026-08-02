@@ -96,6 +96,11 @@ func main() {
 	activeConnectors = append(activeConnectors, hevy)
 	log.Info().Msg("hevy connector enabled")
 
+	xc := cfg.Connectors.Xiaomi
+	xiaomiScale := connectors.NewXiaomiScale(xc.Region, xc.Model, pool, log.Logger)
+	activeConnectors = append(activeConnectors, xiaomiScale)
+	log.Info().Msg("xiaomi scale connector enabled")
+
 	zenmoney := connectors.NewZenmoney(cfg.Connectors.Zenmoney.ClientID, cfg.Connectors.Zenmoney.ClientSecret, cfg.Connectors.Zenmoney.RedirectURI, pool, log.Logger)
 	activeConnectors = append(activeConnectors, zenmoney)
 	log.Info().Msg("zenmoney connector enabled")
@@ -270,6 +275,7 @@ func main() {
 			"fatsecret":       fsc.ClientID != "" && fsc.ClientSecret != "",
 			"google_calendar": gc.ClientID != "" && gc.ClientSecret != "",
 			"notion":          true,
+			"xiaomi_scale":    true,
 		}
 		oauthConfiguredMap := map[string]bool{
 			"strava":          cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",

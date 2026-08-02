@@ -29,6 +29,14 @@ type ConnectorsConfig struct {
 	GoogleCalendar GoogleCalendarConfig `mapstructure:"google_calendar"`
 	Notion         NotionConfig         `mapstructure:"notion"`
 	Todoist        TodoistConfig        `mapstructure:"todoist"`
+	Xiaomi         XiaomiConfig         `mapstructure:"xiaomi"`
+}
+
+// XiaomiConfig only carries routing. Credentials are per-user and live in
+// oauth_tokens, because Xiaomi rotates the passToken on every login.
+type XiaomiConfig struct {
+	Region string `mapstructure:"region"`
+	Model  string `mapstructure:"model"`
 }
 
 type TodoistConfig struct {
@@ -132,6 +140,8 @@ func Load() (*Config, error) {
 	viper.BindEnv("sentry.release", "SENTRY_RELEASE")
 	viper.BindEnv("sentry.traces_sample_rate", "SENTRY_BACKEND_TRACES_SAMPLE_RATE")
 	viper.BindEnv("connectors.hevy.api_key", "HEVY_API_KEY")
+	viper.BindEnv("connectors.xiaomi.region", "XIAOMI_REGION")
+	viper.BindEnv("connectors.xiaomi.model", "XIAOMI_MODEL")
 	viper.BindEnv("connectors.strava.client_id", "STRAVA_CLIENT_ID")
 	viper.BindEnv("connectors.strava.client_secret", "STRAVA_CLIENT_SECRET")
 	viper.BindEnv("connectors.strava.redirect_uri", "STRAVA_REDIRECT_URI")
