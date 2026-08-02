@@ -79,8 +79,8 @@ func (x *XiaomiScaleConnector) Sync(ctx context.Context, userID string) error {
 	if err := cloud.Login(ctx, accountID, passToken); err != nil {
 		return fmt.Errorf("login: %w", err)
 	}
-	// Xiaomi issues a fresh passToken on every login; persisting it keeps the
-	// unattended sync alive indefinitely.
+	// Xiaomi usually replays the same passToken, but it may hand back a new
+	// one; persisting it keeps the unattended sync alive across a rotation.
 	if fresh := cloud.PassToken(); fresh != "" && fresh != passToken {
 		if err := x.storePassToken(ctx, userID, fresh); err != nil {
 			x.logger.Warn().Err(err).Msg("could not persist refreshed passToken")
@@ -93,17 +93,17 @@ func (x *XiaomiScaleConnector) Sync(ctx context.Context, userID string) error {
 		return fmt.Errorf("fetch measurements: %w", err)
 	}
 
-	saved, skipped := 0, 0
+	saved, mine, foreign := 0, 0, 0
 	for _, record := range records {
-		// getUserDataByPage returns the whole household; keep only this account.
-		if record.UID != 0 && strconv.FormatInt(record.UID, 10) != accountID {
-			skipped++
-			continue
-		}
-		n, err := x.storeRecord(ctx, userID, record)
+		n, ok, err := x.storeRecord(ctx, userID, accountID, record)
 		if err != nil {
 			return fmt.Errorf("store measurement %s: %w", record.MeasuredAt().Format(time.RFC3339), err)
 		}
+		if !ok {
+			foreign++
+			continue
+		}
+		mine++
 		saved += n
 	}
 
@@ -112,9 +112,9 @@ func (x *XiaomiScaleConnector) Sync(ctx context.Context, userID string) error {
 	}
 
 	x.logger.Info().
-		Int("measurements", len(records)-skipped).
+		Int("measurements", mine).
 		Int("metrics", saved).
-		Int("other_profiles", skipped).
+		Int("other_profiles", foreign).
 		Msg("xiaomi scale sync complete")
 	return nil
 }
@@ -155,33 +155,48 @@ func (x *XiaomiScaleConnector) syncCutoff(ctx context.Context, userID string) ti
 	return lastSync.Add(-xiaomiScaleLookback)
 }
 
-// storeRecord expands one weigh-in into biometrics rows and returns how many
-// were written. The full payload goes to raw_events once, not per metric.
-func (x *XiaomiScaleConnector) storeRecord(ctx context.Context, userID string, record XiaomiScaleRecord) (int, error) {
+// storeRecord expands one weigh-in into biometrics rows. It reports how many
+// were written and whether the record belongs to this account at all. The full
+// payload goes to raw_events once, not per metric.
+func (x *XiaomiScaleConnector) storeRecord(ctx context.Context, userID, accountID string, record XiaomiScaleRecord) (int, bool, error) {
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(record.Data), &payload); err != nil {
-		return 0, fmt.Errorf("decode payload: %w", err)
+		return 0, false, fmt.Errorf("decode payload: %w", err)
+	}
+
+	// getUserDataByPage returns every profile on the scale, and they all share
+	// the outer account uid. The inner user.accountId is what actually
+	// distinguishes the account owner from family members.
+	user := jsonObject(payload, "user")
+	if owner := jsonString(user, "accountId"); owner != "" && owner != accountID {
+		return 0, false, nil
 	}
 
 	measuredAt := record.MeasuredAt()
 	externalID := strconv.FormatInt(record.CreateTime, 10)
-	profile := jsonString(jsonObject(payload, "user"), "name")
+	profile := jsonString(user, "name")
 
+	// Casts are required: the same parameters are reused in the guard, and
+	// Postgres will not deduce a single type for them otherwise.
 	if _, err := x.db.Exec(ctx, `
 		INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
-		SELECT $1, 'measurement', $2, $3, $4
+		SELECT $1::varchar, 'measurement', $2::varchar, $3::jsonb, $4::uuid
 		WHERE NOT EXISTS (
 			SELECT 1 FROM raw_events
-			WHERE source = $1 AND external_id = $2 AND user_id = $4
+			WHERE source = $1::varchar AND external_id = $2::varchar AND user_id = $4::uuid
 		)
 	`, xiaomiScaleSource, externalID, record.Data, userID); err != nil {
-		return 0, fmt.Errorf("insert raw event: %w", err)
+		return 0, false, fmt.Errorf("insert raw event: %w", err)
 	}
 
 	saved := 0
 	for _, metric := range xiaomiScaleMetrics {
 		value, ok := xiaomiScaleNumber(payload, metric.field)
-		if !ok {
+		// A weigh-in with shoes on, or one the scale could not stabilise, has
+		// no impedance, and Xiaomi fills every derived field with zero. None of
+		// these metrics can legitimately be zero, so that means "not measured"
+		// - storing it would put a 0 % body fat point on the chart.
+		if !ok || value <= 0 {
 			continue
 		}
 		metadata, _ := json.Marshal(map[string]string{
@@ -200,11 +215,11 @@ func (x *XiaomiScaleConnector) storeRecord(ctx context.Context, userID string, r
 				metadata = EXCLUDED.metadata
 		`, measuredAt, xiaomiScaleSource, metric.metricType, value,
 			nullIfEmpty(metric.unit), metadata, userID); err != nil {
-			return saved, fmt.Errorf("upsert %s: %w", metric.metricType, err)
+			return saved, true, fmt.Errorf("upsert %s: %w", metric.metricType, err)
 		}
 		saved++
 	}
-	return saved, nil
+	return saved, true, nil
 }
 
 func (x *XiaomiScaleConnector) updateLastSync(ctx context.Context, userID string) error {

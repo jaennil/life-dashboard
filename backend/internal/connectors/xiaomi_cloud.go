@@ -25,8 +25,8 @@ import (
 //
 // Auth is passToken-based on purpose. The password flow answers with a captcha
 // and an emailed 2FA code, which a scheduled sync cannot satisfy. Obtain the
-// passToken once with PiotrMachowski/Xiaomi-cloud-tokens-extractor; Xiaomi
-// hands back a fresh one on every login, so it does not expire while syncing.
+// passToken once with PiotrMachowski/Xiaomi-cloud-tokens-extractor; the login
+// response carries a replacement whenever Xiaomi decides to rotate it.
 const (
 	xiaomiLoginURL      = "https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true"
 	xiaomiLoginPrefix   = "&&&START&&&"
