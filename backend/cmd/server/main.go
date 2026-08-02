@@ -373,6 +373,8 @@ func main() {
 	// Public webhook (auth via api_key in body)
 	healthWebhookPublic := handlers.NewHealthWebhook(pool, log.Logger)
 	r.Post("/api/v1/webhook/health", healthWebhookPublic.ReceiveData)
+	screenTimeWebhook := handlers.NewScreenTimeWebhook(pool, log.Logger)
+	r.Post("/api/v1/webhook/screentime", screenTimeWebhook.ReceiveData)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
