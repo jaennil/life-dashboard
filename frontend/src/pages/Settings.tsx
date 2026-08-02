@@ -39,6 +39,11 @@ const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.Reac
     help: <>1. Создайте <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Internal Integration</a> в Notion. 2. Скопируйте токен. 3. Откройте базу данных дневника в Notion → «...» → Connections → добавьте интеграцию. 4. Скопируйте ID базы данных из URL (32 символа после последнего /).</>,
     extraField: { key: 'database_id', placeholder: 'Database ID (32 символа из URL)' },
   },
+  xiaomi_scale: {
+    placeholder: 'passToken от аккаунта Xiaomi',
+    help: <>У Xiaomi нет публичного API, поэтому вход по логину и паролю упирается в капчу и код из почты — для фоновой синхронизации не годится. Получите passToken один раз через <a href="https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Xiaomi-cloud-tokens-extractor</a>: он же покажет числовой user ID. Токен обновляется при каждой синхронизации, так что заново вводить не придётся.</>,
+    extraField: { key: 'account_id', placeholder: 'Xiaomi user ID (числовой)' },
+  },
 }
 
 const ICONS: Record<string, string> = {
@@ -51,6 +56,7 @@ const ICONS: Record<string, string> = {
   myfitnesspal: '🥗',
   google_calendar: '📅',
   notion: '📓',
+  xiaomi_scale: '⚖️',
 }
 
 function fmtCount(n: number, name: string) {
@@ -62,6 +68,7 @@ function fmtCount(n: number, name: string) {
     habitify: ['привычка', 'привычки', 'привычек'],
     todoist: ['привычка', 'привычки', 'привычек'],
     zenmoney: ['транзакция', 'транзакции', 'транзакций'],
+    xiaomi_scale: ['измерение', 'измерения', 'измерений'],
   }
   const l = labels[name] ?? ['запись', 'записи', 'записей']
   const mod = n % 100
