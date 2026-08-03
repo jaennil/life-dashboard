@@ -261,6 +261,48 @@ func TestCollectScreenTimeItems(t *testing.T) {
 	})
 }
 
+func TestSummarizeScreenTimeItems(t *testing.T) {
+	items, _ := collectScreenTimeItems(screenTimeEnvelope{ScreenTime: screenTimeCombinedFixture})
+	summary := summarizeScreenTimeItems(items)
+
+	if summary.appCount != 7 {
+		t.Errorf("appCount = %d, want 7", summary.appCount)
+	}
+	if summary.websiteCount != 4 {
+		t.Errorf("websiteCount = %d, want 4", summary.websiteCount)
+	}
+	// Websites are a subset of browser time, so they are summed separately and
+	// must not appear in appSeconds.
+	wantApps := 6*3600 + 55*60 + 3600 + 13*60 + 11*60 + 4*60 + 34 + 12 + 1
+	if summary.appSeconds != wantApps {
+		t.Errorf("appSeconds = %d, want %d", summary.appSeconds, wantApps)
+	}
+	wantSites := 47*60 + 18*60 + 33 + 5
+	if summary.websiteSeconds != wantSites {
+		t.Errorf("websiteSeconds = %d, want %d", summary.websiteSeconds, wantSites)
+	}
+	if summary.clamped {
+		t.Error("clamped should be false for a sane payload")
+	}
+}
+
+func TestSummarizeScreenTimeItemsDetectsAggregateWindow(t *testing.T) {
+	// What a Shortcut asking for thisMonth instead of specifiedDay produces: a
+	// per-item value that is individually plausible but a total no single day can
+	// reach. The handler refuses these, so the summary has to surface it.
+	items, _ := collectScreenTimeItems(screenTimeEnvelope{
+		Apps: "Instagram (20h)\nSafari (18h)\nTelegram (9h)",
+	})
+	summary := summarizeScreenTimeItems(items)
+
+	if summary.appSeconds <= screenTimeMaxSeconds {
+		t.Fatalf("appSeconds = %d, want more than %d", summary.appSeconds, screenTimeMaxSeconds)
+	}
+	if summary.clamped {
+		t.Error("no single item exceeded 24h, so clamped should be false")
+	}
+}
+
 func TestResolveScreenTimeDay(t *testing.T) {
 	now := time.Now().In(aiDisplayLocation)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)

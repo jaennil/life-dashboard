@@ -170,7 +170,26 @@ func (h *ScreenTimeWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	saved, err := h.persistScreenTime(r.Context(), userID, day, isPartial, items, len(unparsed), stored)
+	// Foreground time does not overlap, so a single day cannot exceed 24h. A
+	// larger total means the Shortcut asked for an aggregate window (thisWeek,
+	// thisMonth, inBetween) instead of one day, which would otherwise be stored
+	// as a single absurd day. Refuse it rather than corrupt the series.
+	summary := summarizeScreenTimeItems(items)
+	resp.AppSeconds = summary.appSeconds
+	resp.WebsiteSeconds = summary.websiteSeconds
+	if summary.appSeconds > screenTimeMaxSeconds || summary.websiteSeconds > screenTimeMaxSeconds {
+		resp.Status = "day_total_exceeds_24h"
+		h.logger.Warn().
+			Str("user_id", userID).
+			Str("day", resp.Day).
+			Int("app_seconds", summary.appSeconds).
+			Int("website_seconds", summary.websiteSeconds).
+			Msg("screen time payload looks like a multi-day aggregate, refusing")
+		writeJSON(w, resp)
+		return
+	}
+
+	saved, err := h.persistScreenTime(r.Context(), userID, day, isPartial, summary, items, len(unparsed), stored)
 	if err != nil {
 		h.logger.Error().Err(err).Str("day", resp.Day).Msg("persist screen time failed")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -257,27 +276,31 @@ type screenTimeSaveResult struct {
 	clamped        bool
 }
 
+func summarizeScreenTimeItems(items []screenTimeItem) screenTimeSaveResult {
+	var summary screenTimeSaveResult
+	for _, item := range items {
+		if item.Kind == screenTimeKindWebsite {
+			summary.websiteCount++
+			summary.websiteSeconds += item.Seconds
+		} else {
+			summary.appCount++
+			summary.appSeconds += item.Seconds
+		}
+		summary.clamped = summary.clamped || item.Clamped
+	}
+	return summary
+}
+
 func (h *ScreenTimeWebhookHandler) persistScreenTime(
 	ctx context.Context,
 	userID string,
 	day time.Time,
 	isPartial bool,
+	saved screenTimeSaveResult,
 	items []screenTimeItem,
 	unparsedLines int,
 	rawPayload []byte,
 ) (screenTimeSaveResult, error) {
-	var saved screenTimeSaveResult
-	for _, item := range items {
-		if item.Kind == screenTimeKindWebsite {
-			saved.websiteCount++
-			saved.websiteSeconds += item.Seconds
-		} else {
-			saved.appCount++
-			saved.appSeconds += item.Seconds
-		}
-		saved.clamped = saved.clamped || item.Clamped
-	}
-
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
 		return saved, err
