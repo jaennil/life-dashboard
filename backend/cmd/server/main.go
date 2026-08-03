@@ -276,6 +276,7 @@ func main() {
 			"google_calendar": gc.ClientID != "" && gc.ClientSecret != "",
 			"notion":          true,
 			"xiaomi_scale":    true,
+			"ios_screentime":  true,
 		}
 		oauthConfiguredMap := map[string]bool{
 			"strava":          cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",

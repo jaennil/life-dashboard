@@ -42,7 +42,7 @@ type integrationMeta struct {
 	countQuery  string
 }
 
-var knownIntegrations = []string{"strava", "hevy", "apple_health", "habitify", "todoist", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion", "xiaomi_scale"}
+var knownIntegrations = []string{"strava", "hevy", "apple_health", "habitify", "todoist", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion", "xiaomi_scale", "ios_screentime"}
 
 var personalIntegrations = map[string]bool{
 	"strava":          true,
@@ -122,6 +122,14 @@ var integrationMeta_ = map[string]integrationMeta{
 		displayName: "Xiaomi Scale S400",
 		description: "Состав тела: вес, жир, мышцы, вода, кости, импеданс",
 		countQuery:  "SELECT COUNT(*) FROM biometrics WHERE source='xiaomi_scale' AND user_id = $1",
+	},
+	// Deliberately absent from personalIntegrations: the api_keys row is shared
+	// with apple_health, and the disable path there deletes it. Screen time must
+	// only ever flip sync_state.enabled.
+	"ios_screentime": {
+		displayName: "Экранное время iPhone",
+		description: "Время в приложениях и на сайтах из iOS Screen Time",
+		countQuery:  "SELECT COUNT(*) FROM screen_time_app_usage WHERE user_id = $1",
 	},
 }
 
