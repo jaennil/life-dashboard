@@ -2,7 +2,7 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000017`. JSON payloads,
+The diagram reflects migrations `000001` through `000018`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability.
 
 ```mermaid
