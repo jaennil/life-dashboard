@@ -2,7 +2,7 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000016`. JSON payloads,
+The diagram reflects migrations `000001` through `000017`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability.
 
 ```mermaid
@@ -364,6 +364,32 @@ erDiagram
         timestamptz created_at
     }
 
+    screen_time_daily {
+        uuid id PK
+        uuid user_id FK
+        varchar source
+        date day
+        integer app_seconds
+        integer website_seconds
+        integer app_count
+        integer website_count
+        integer unparsed_lines
+        boolean clamped
+        boolean is_partial
+    }
+
+    screen_time_app_usage {
+        uuid id PK
+        uuid user_id FK
+        varchar source
+        date day
+        varchar kind
+        varchar item_key
+        varchar display_name
+        integer seconds
+        boolean kind_inferred
+    }
+
     users ||--o{ sync_state : configures
     users ||--o{ oauth_tokens : authorizes
     users ||--o| api_keys : owns
@@ -392,6 +418,8 @@ erDiagram
     habits ||--o{ habit_daily_statuses : records
     users ||--o{ todoist_tasks : owns
     users ||--o{ todoist_task_completions : completes
+    users ||--o{ screen_time_daily : summarizes
+    users ||--o{ screen_time_app_usage : accumulates
     users ||--o{ journal_entries : writes
     users ||--o{ calendar_events : schedules
     users ||--o{ ai_chat_messages : chats
@@ -944,6 +972,48 @@ Calendar events synchronized primarily from Google Calendar.
 | `all_day` | `boolean`, nullable | Whether the event spans calendar dates rather than exact times. |
 | `location` | `varchar(500)`, nullable | Event location. |
 | `source` | `varchar(50)`, nullable | Originating provider; defaults to `google`. |
+| `created_at` | `timestamptz`, nullable | Local insertion time. |
+
+#### `screen_time_daily`
+
+Daily rollup of iOS Screen Time, ingested from the Shortcuts action "Get App &
+Website Activity" through `POST /api/v1/webhook/screentime`. Each payload is a
+full snapshot of one day, so ingestion replaces the day rather than accumulating
+into it.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key. |
+| `user_id` | `uuid` | Day owner; references `users.id`. |
+| `source` | `varchar(30)` | Originating provider; defaults to `ios_screentime`. |
+| `day` | `date` | Reported day, unique together with user and source. |
+| `app_seconds` | `integer` | Sum of `kind = 'app'` rows. Website time is already counted inside the browser app's own total, so this must not be added to `website_seconds`. Also lower than the total iOS reports, because Home Screen, App Library, the app switcher and StandBy are attributed to system pseudo-bundles that the action omits. |
+| `website_seconds` | `integer` | Sum of `kind = 'website'` rows. |
+| `app_count` | `integer` | Number of distinct apps reported for the day. |
+| `website_count` | `integer` | Number of distinct websites reported for the day. |
+| `unparsed_lines` | `integer` | Payload lines the parser could not read, so a silently degraded format stays visible. |
+| `clamped` | `boolean` | Whether any per-item duration exceeded 24h and was clamped; iOS 26 occasionally reports absurd values. |
+| `is_partial` | `boolean` | Whether the day was still in progress when pulled (`during = today`). |
+| `raw_payload` | `jsonb`, nullable | Original webhook body wrapper for re-parsing. |
+| `updated_at` | `timestamptz`, nullable | Last ingestion time. |
+| `created_at` | `timestamptz`, nullable | Local insertion time. |
+
+#### `screen_time_app_usage`
+
+Per-app and per-website daily totals behind `screen_time_daily`.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key. |
+| `user_id` | `uuid` | Row owner; references `users.id`. |
+| `source` | `varchar(30)` | Originating provider; defaults to `ios_screentime`. |
+| `day` | `date` | Reported day. |
+| `kind` | `varchar(10)` | Either `app` or `website`. |
+| `item_key` | `varchar(255)` | Lowercased display name or hostname, unique together with user, source, day and kind. Screen Time exposes display names rather than bundle identifiers, so this is the most stable key available. |
+| `display_name` | `varchar(255)` | Name as iOS reports it, or a bundle identifier when iOS failed to resolve one. |
+| `seconds` | `integer` | Foreground seconds, capped at 86400. |
+| `kind_inferred` | `boolean` | Whether `kind` was guessed from a combined apps-and-websites payload instead of taken from a dedicated apps-only or websites-only field. |
+| `updated_at` | `timestamptz`, nullable | Last ingestion time. |
 | `created_at` | `timestamptz`, nullable | Local insertion time. |
 
 ### Journal and AI
