@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 )
@@ -31,26 +34,38 @@ type screenTimeEnvelope struct {
 	Source    string `json:"source"`
 	EventType string `json:"event_type"`
 	Day       string `json:"day"`
+	During    string `json:"during"`
+	// ScreenTime holds an apps-only list when Websites is also sent, and the
+	// combined "Apps & Websites" list otherwise.
+	ScreenTime string `json:"screen_time"`
+	Apps       string `json:"apps"`
+	Websites   string `json:"websites"`
+	Combined   string `json:"combined"`
 }
 
 type screenTimeCaptureResponse struct {
-	Status        string   `json:"status"`
-	ReceivedBytes int      `json:"received_bytes"`
-	JSONValid     bool     `json:"json_valid"`
-	Repaired      bool     `json:"repaired"`
-	TopLevelKeys  []string `json:"top_level_keys"`
-	RawPreview    string   `json:"raw_preview"`
-	Truncated     bool     `json:"truncated"`
-	RawEventID    string   `json:"raw_event_id"`
+	Status         string   `json:"status"`
+	Day            string   `json:"day"`
+	IsPartial      bool     `json:"is_partial"`
+	AppsSaved      int      `json:"apps_saved"`
+	WebsitesSaved  int      `json:"websites_saved"`
+	AppSeconds     int      `json:"app_seconds"`
+	WebsiteSeconds int      `json:"website_seconds"`
+	UnparsedLines  []string `json:"unparsed_lines"`
+	ReceivedBytes  int      `json:"received_bytes"`
+	JSONValid      bool     `json:"json_valid"`
+	Repaired       bool     `json:"repaired"`
+	TopLevelKeys   []string `json:"top_level_keys"`
+	RawPreview     string   `json:"raw_preview"`
+	Truncated      bool     `json:"truncated"`
+	RawEventID     string   `json:"raw_event_id"`
 }
 
-// POST /api/v1/webhook/screentime — capture Screen Time payloads from the iOS 26
-// Shortcuts action "Get App & Website Activity".
+// POST /api/v1/webhook/screentime — ingest Screen Time from the iOS 26 Shortcuts
+// action "Get App & Website Activity".
 //
-// The output of that action has no documented serialization, so this endpoint
-// deliberately stores the body verbatim in raw_events before interpreting
-// anything, and echoes it back so the shape can be inspected from the phone.
-// Parsing into typed tables comes once the real format is known.
+// The body is stored verbatim in raw_events before anything is interpreted, so a
+// payload can always be re-parsed later without asking the phone for it again.
 func (h *ScreenTimeWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
 	if err != nil {
@@ -58,14 +73,14 @@ func (h *ScreenTimeWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Shortcuts emits literal newlines inside JSON string values. Escape them
-	// instead of deleting them: the Screen Time payload is newline-separated,
-	// so stripping would destroy the line boundaries we need.
+	// Shortcuts can emit literal newlines inside JSON string values. Escape them
+	// instead of deleting them: the Screen Time payload is newline-separated, so
+	// stripping would destroy the line boundaries the parser needs.
 	var envelope screenTimeEnvelope
 	parsed := json.RawMessage(nil)
 	jsonValid := false
 	repaired := false
-	if json.Unmarshal(body, &envelope) == nil && json.Valid(body) {
+	if json.Valid(body) && json.Unmarshal(body, &envelope) == nil {
 		jsonValid = true
 		parsed = json.RawMessage(body)
 	} else if fixed := escapeLiteralNewlines(body); json.Valid(fixed) {
@@ -126,32 +141,204 @@ func (h *ScreenTimeWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Re
 		h.logger.Warn().Err(err).Msg("update screen time sync state failed")
 	}
 
-	preview := string(body)
-	truncated := false
-	if len(preview) > rawPreviewLimit {
-		preview = preview[:rawPreviewLimit]
-		truncated = true
-	}
+	items, unparsed := collectScreenTimeItems(envelope)
+	day, isPartial := resolveScreenTimeDay(envelope)
 
-	h.logger.Info().
-		Str("user_id", userID).
-		Str("event_type", eventType).
-		Int("bytes", len(body)).
-		Bool("json_valid", jsonValid).
-		Bool("repaired", repaired).
-		Msg("screen time payload captured")
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(screenTimeCaptureResponse{
+	resp := screenTimeCaptureResponse{
 		Status:        "ok",
+		Day:           day.Format("2006-01-02"),
+		IsPartial:     isPartial,
+		UnparsedLines: unparsed,
 		ReceivedBytes: len(body),
 		JSONValid:     jsonValid,
 		Repaired:      repaired,
 		TopLevelKeys:  topLevelKeys(parsed),
-		RawPreview:    preview,
-		Truncated:     truncated,
 		RawEventID:    rawEventID,
-	})
+	}
+	resp.RawPreview, resp.Truncated = previewBody(body)
+
+	// An empty item list means the Shortcuts variable did not get substituted.
+	// Never let that wipe a day that was already ingested correctly.
+	if len(items) == 0 {
+		resp.Status = "no_items_parsed"
+		h.logger.Warn().
+			Str("user_id", userID).
+			Int("bytes", len(body)).
+			Int("unparsed", len(unparsed)).
+			Msg("screen time payload had no parsable items")
+		writeJSON(w, resp)
+		return
+	}
+
+	saved, err := h.persistScreenTime(r.Context(), userID, day, isPartial, items, len(unparsed), stored)
+	if err != nil {
+		h.logger.Error().Err(err).Str("day", resp.Day).Msg("persist screen time failed")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	resp.AppsSaved = saved.appCount
+	resp.WebsitesSaved = saved.websiteCount
+	resp.AppSeconds = saved.appSeconds
+	resp.WebsiteSeconds = saved.websiteSeconds
+
+	h.logger.Info().
+		Str("user_id", userID).
+		Str("day", resp.Day).
+		Bool("is_partial", isPartial).
+		Int("apps", saved.appCount).
+		Int("websites", saved.websiteCount).
+		Int("app_seconds", saved.appSeconds).
+		Int("unparsed", len(unparsed)).
+		Bool("repaired", repaired).
+		Msg("screen time ingested")
+
+	writeJSON(w, resp)
+}
+
+// collectScreenTimeItems reads every usage field the payload may carry. When a
+// dedicated websites field is present the screen_time field is authoritative
+// apps-only data; otherwise it is the combined list and kinds get inferred.
+func collectScreenTimeItems(envelope screenTimeEnvelope) ([]screenTimeItem, []string) {
+	hasWebsiteField := strings.TrimSpace(envelope.Websites) != ""
+
+	screenTimeKind := ""
+	if hasWebsiteField || strings.TrimSpace(envelope.Apps) != "" {
+		screenTimeKind = screenTimeKindApp
+	}
+
+	fields := []struct {
+		blob string
+		kind string
+	}{
+		{envelope.Apps, screenTimeKindApp},
+		{envelope.Websites, screenTimeKindWebsite},
+		{envelope.ScreenTime, screenTimeKind},
+		{envelope.Combined, ""},
+	}
+
+	items := []screenTimeItem{}
+	unparsed := []string{}
+	for _, field := range fields {
+		if strings.TrimSpace(field.blob) == "" {
+			continue
+		}
+		result := parseScreenTimeBlob(field.blob, field.kind)
+		items = append(items, result.Items...)
+		unparsed = append(unparsed, result.Unparsed...)
+	}
+	return items, unparsed
+}
+
+// resolveScreenTimeDay trusts an explicit day field over anything derived on the
+// server, because the Shortcut resolves "yesterday" in the phone's timezone.
+func resolveScreenTimeDay(envelope screenTimeEnvelope) (time.Time, bool) {
+	now := time.Now().In(aiDisplayLocation)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
+
+	if explicit := strings.TrimSpace(envelope.Day); explicit != "" {
+		if parsedDay, err := parseDate(explicit); err == nil {
+			day := time.Date(parsedDay.Year(), parsedDay.Month(), parsedDay.Day(), 0, 0, 0, 0, aiDisplayLocation)
+			return day, day.Equal(today)
+		}
+	}
+
+	if strings.EqualFold(strings.TrimSpace(envelope.During), "today") {
+		return today, true
+	}
+	return today.AddDate(0, 0, -1), false
+}
+
+type screenTimeSaveResult struct {
+	appCount       int
+	websiteCount   int
+	appSeconds     int
+	websiteSeconds int
+	clamped        bool
+}
+
+func (h *ScreenTimeWebhookHandler) persistScreenTime(
+	ctx context.Context,
+	userID string,
+	day time.Time,
+	isPartial bool,
+	items []screenTimeItem,
+	unparsedLines int,
+	rawPayload []byte,
+) (screenTimeSaveResult, error) {
+	var saved screenTimeSaveResult
+	for _, item := range items {
+		if item.Kind == screenTimeKindWebsite {
+			saved.websiteCount++
+			saved.websiteSeconds += item.Seconds
+		} else {
+			saved.appCount++
+			saved.appSeconds += item.Seconds
+		}
+		saved.clamped = saved.clamped || item.Clamped
+	}
+
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return saved, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Each payload is a full snapshot of the day, and Apple retroactively drops
+	// history for uninstalled apps, so replace the day rather than upserting into
+	// it and leaving stale rows behind.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM screen_time_app_usage
+		WHERE user_id = $1 AND source = $2 AND day = $3::date
+	`, userID, screenTimeSource, day); err != nil {
+		return saved, err
+	}
+
+	rows := make([][]any, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, []any{
+			userID, screenTimeSource, day, item.Kind,
+			item.ItemKey, item.DisplayName, item.Seconds, item.KindInferred,
+		})
+	}
+	if _, err := tx.CopyFrom(ctx,
+		pgx.Identifier{"screen_time_app_usage"},
+		[]string{"user_id", "source", "day", "kind", "item_key", "display_name", "seconds", "kind_inferred"},
+		pgx.CopyFromRows(rows),
+	); err != nil {
+		return saved, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO screen_time_daily (
+			user_id, source, day, app_seconds, website_seconds,
+			app_count, website_count, unparsed_lines, clamped, is_partial, raw_payload
+		)
+		VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+		ON CONFLICT (user_id, source, day) DO UPDATE SET
+			app_seconds = EXCLUDED.app_seconds,
+			website_seconds = EXCLUDED.website_seconds,
+			app_count = EXCLUDED.app_count,
+			website_count = EXCLUDED.website_count,
+			unparsed_lines = EXCLUDED.unparsed_lines,
+			clamped = EXCLUDED.clamped,
+			is_partial = EXCLUDED.is_partial,
+			raw_payload = EXCLUDED.raw_payload,
+			updated_at = NOW()
+	`, userID, screenTimeSource, day, saved.appSeconds, saved.websiteSeconds,
+		saved.appCount, saved.websiteCount, unparsedLines, saved.clamped, isPartial, rawPayload); err != nil {
+		return saved, err
+	}
+
+	return saved, tx.Commit(ctx)
+}
+
+func previewBody(body []byte) (string, bool) {
+	preview := string(body)
+	if len(preview) > rawPreviewLimit {
+		return preview[:rawPreviewLimit], true
+	}
+	return preview, false
 }
 
 // escapeLiteralNewlines rewrites raw control characters that appear inside JSON
