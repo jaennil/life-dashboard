@@ -206,6 +206,21 @@ func (h *ScreenTimeWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	if existing := h.storedScreenTimeDay(r.Context(), userID, day); isDegradedReread(summary, existing) {
+		resp.Status = "stale_reread_ignored"
+		h.logger.Warn().
+			Str("user_id", userID).
+			Str("day", resp.Day).
+			Str("event_type", eventType).
+			Int("incoming_items", summary.itemCount()).
+			Int("stored_items", existing.itemCount).
+			Int("incoming_app_seconds", summary.appSeconds).
+			Int("stored_app_seconds", existing.appSeconds).
+			Msg("screen time re-read is poorer than the stored day, keeping the stored one")
+		writeJSON(w, resp)
+		return
+	}
+
 	saved, err := h.persistScreenTime(r.Context(), userID, day, isPartial, summary, items, len(unparsed), stored)
 	if err != nil {
 		h.logger.Error().Err(err).Str("day", resp.Day).Msg("persist screen time failed")
@@ -300,6 +315,48 @@ type screenTimeSaveResult struct {
 	appSeconds     int
 	websiteSeconds int
 	clamped        bool
+}
+
+func (r screenTimeSaveResult) itemCount() int {
+	return r.appCount + r.websiteCount
+}
+
+type screenTimeStoredDay struct {
+	exists     bool
+	itemCount  int
+	appSeconds int
+}
+
+// storedScreenTimeDay reads what is already recorded for a day so a degraded
+// re-read can be recognized before it overwrites anything.
+func (h *ScreenTimeWebhookHandler) storedScreenTimeDay(ctx context.Context, userID string, day time.Time) screenTimeStoredDay {
+	var stored screenTimeStoredDay
+	err := h.db.QueryRow(ctx, `
+		SELECT app_count + website_count, app_seconds
+		FROM screen_time_daily
+		WHERE user_id = $1 AND source = $2 AND day = $3::date
+	`, userID, screenTimeSource, day).Scan(&stored.itemCount, &stored.appSeconds)
+	if err != nil {
+		return screenTimeStoredDay{}
+	}
+	stored.exists = true
+	return stored
+}
+
+// isDegradedReread reports whether an incoming payload is strictly poorer than
+// what is already stored for the day.
+//
+// Screen Time only keeps about 30 days on the device and trims the oldest day as
+// the window slides, so re-reading a day near that edge legitimately returns less
+// than it did before. Replacing the stored day with that answer loses history the
+// device can no longer produce again, and this database is the only long-term
+// archive of it. A payload with both fewer items and less app time is therefore
+// treated as an eroded re-read, not a correction.
+func isDegradedReread(incoming screenTimeSaveResult, stored screenTimeStoredDay) bool {
+	if !stored.exists {
+		return false
+	}
+	return incoming.itemCount() < stored.itemCount && incoming.appSeconds < stored.appSeconds
 }
 
 func summarizeScreenTimeItems(items []screenTimeItem) screenTimeSaveResult {

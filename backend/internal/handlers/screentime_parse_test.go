@@ -393,3 +393,44 @@ func TestResolveScreenTimeDayAcceptsBothWireFormats(t *testing.T) {
 		t.Fatalf("parsed as %s, want 2026-07-13", iso.Format("2006-01-02"))
 	}
 }
+
+func TestIsDegradedReread(t *testing.T) {
+	// The real case this exists for: 2026-07-05 was stored with 24 items and
+	// 20925s of app time, then iOS trimmed its 30-day edge and a re-run returned
+	// 16 items and 18144s. Replacing would have lost 46 minutes of history the
+	// device can no longer produce.
+	eroded := screenTimeSaveResult{appCount: 13, websiteCount: 3, appSeconds: 18144}
+	storedDay := screenTimeStoredDay{exists: true, itemCount: 24, appSeconds: 20925}
+
+	tests := []struct {
+		name     string
+		incoming screenTimeSaveResult
+		stored   screenTimeStoredDay
+		want     bool
+	}{
+		{name: "eroded edge day is refused", incoming: eroded, stored: storedDay, want: true},
+		{name: "nothing stored yet is always accepted", incoming: eroded, stored: screenTimeStoredDay{}, want: false},
+		{name: "identical re-read is accepted", incoming: screenTimeSaveResult{appCount: 20, websiteCount: 4, appSeconds: 20925}, stored: storedDay, want: false},
+		{name: "richer re-read is accepted", incoming: screenTimeSaveResult{appCount: 30, websiteCount: 9, appSeconds: 30000}, stored: storedDay, want: false},
+		{
+			name:     "fewer items but more time is accepted",
+			incoming: screenTimeSaveResult{appCount: 5, websiteCount: 1, appSeconds: 30000},
+			stored:   storedDay,
+			want:     false,
+		},
+		{
+			name:     "more items but less time is accepted",
+			incoming: screenTimeSaveResult{appCount: 40, websiteCount: 10, appSeconds: 100},
+			stored:   storedDay,
+			want:     false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isDegradedReread(tc.incoming, tc.stored); got != tc.want {
+				t.Fatalf("isDegradedReread() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
