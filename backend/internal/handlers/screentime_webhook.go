@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -142,7 +143,20 @@ func (h *ScreenTimeWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Re
 	}
 
 	items, unparsed := collectScreenTimeItems(envelope)
-	day, isPartial := resolveScreenTimeDay(envelope)
+
+	day, isPartial, err := resolveScreenTimeDay(envelope)
+	if err != nil {
+		h.logger.Warn().
+			Err(err).
+			Str("user_id", userID).
+			Str("event_type", eventType).
+			Str("raw_event_id", rawEventID).
+			Msg("screen time payload has an unusable day field")
+		resp := screenTimeCaptureResponse{Status: "bad_day_field", ReceivedBytes: len(body), JSONValid: jsonValid, Repaired: repaired, RawEventID: rawEventID, UnparsedLines: unparsed, TopLevelKeys: topLevelKeys(parsed)}
+		resp.RawPreview, resp.Truncated = previewBody(body)
+		writeJSON(w, resp)
+		return
+	}
 
 	resp := screenTimeCaptureResponse{
 		Status:        "ok",
@@ -257,21 +271,27 @@ func collectScreenTimeItems(envelope screenTimeEnvelope) ([]screenTimeItem, []st
 
 // resolveScreenTimeDay trusts an explicit day field over anything derived on the
 // server, because the Shortcut resolves "yesterday" in the phone's timezone.
-func resolveScreenTimeDay(envelope screenTimeEnvelope) (time.Time, bool) {
+//
+// An unparsable day field is an error rather than a reason to fall back: during a
+// backfill it would quietly file one day's numbers under yesterday and overwrite
+// good data.
+func resolveScreenTimeDay(envelope screenTimeEnvelope) (time.Time, bool, error) {
 	now := time.Now().In(aiDisplayLocation)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiDisplayLocation)
 
 	if explicit := strings.TrimSpace(envelope.Day); explicit != "" {
-		if parsedDay, err := parseDate(explicit); err == nil {
-			day := time.Date(parsedDay.Year(), parsedDay.Month(), parsedDay.Day(), 0, 0, 0, 0, aiDisplayLocation)
-			return day, day.Equal(today)
+		parsedDay, err := parseDate(explicit)
+		if err != nil {
+			return time.Time{}, false, fmt.Errorf("unparsable day %q: %w", explicit, err)
 		}
+		day := time.Date(parsedDay.Year(), parsedDay.Month(), parsedDay.Day(), 0, 0, 0, 0, aiDisplayLocation)
+		return day, day.Equal(today), nil
 	}
 
 	if strings.EqualFold(strings.TrimSpace(envelope.During), "today") {
-		return today, true
+		return today, true, nil
 	}
-	return today.AddDate(0, 0, -1), false
+	return today.AddDate(0, 0, -1), false, nil
 }
 
 type screenTimeSaveResult struct {

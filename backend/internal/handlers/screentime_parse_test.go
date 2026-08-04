@@ -328,12 +328,14 @@ func TestResolveScreenTimeDay(t *testing.T) {
 			want:          today,
 			wantIsPartial: true,
 		},
-		{name: "unparsable day falls back", envelope: screenTimeEnvelope{Day: "not a date"}, want: yesterday},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			day, isPartial := resolveScreenTimeDay(tc.envelope)
+			day, isPartial, err := resolveScreenTimeDay(tc.envelope)
+			if err != nil {
+				t.Fatalf("resolveScreenTimeDay returned error: %v", err)
+			}
 			if !day.Equal(tc.want) {
 				t.Errorf("day = %s, want %s", day.Format(time.RFC3339), tc.want.Format(time.RFC3339))
 			}
@@ -341,5 +343,36 @@ func TestResolveScreenTimeDay(t *testing.T) {
 				t.Errorf("isPartial = %v, want %v", isPartial, tc.wantIsPartial)
 			}
 		})
+	}
+}
+
+func TestResolveScreenTimeDayRejectsUnusableDay(t *testing.T) {
+	// Falling back to yesterday here would file a backfilled day's numbers under
+	// the wrong date and overwrite good data, so it has to be an error.
+	for _, bad := range []string{"not a date", "2026-13-45", "yesterday", "8 июля"} {
+		t.Run(bad, func(t *testing.T) {
+			if _, _, err := resolveScreenTimeDay(screenTimeEnvelope{Day: bad}); err == nil {
+				t.Fatalf("resolveScreenTimeDay(%q) returned no error", bad)
+			}
+		})
+	}
+}
+
+func TestResolveScreenTimeDayAcceptsBothWireFormats(t *testing.T) {
+	// The Shortcut may send either the locale format the Screen Time action uses
+	// or an unambiguous ISO date; both must land on the same day.
+	dotted, _, err := resolveScreenTimeDay(screenTimeEnvelope{Day: "13.07.2026"})
+	if err != nil {
+		t.Fatalf("dotted date rejected: %v", err)
+	}
+	iso, _, err := resolveScreenTimeDay(screenTimeEnvelope{Day: "2026-07-13"})
+	if err != nil {
+		t.Fatalf("iso date rejected: %v", err)
+	}
+	if !dotted.Equal(iso) {
+		t.Fatalf("13.07.2026 -> %s but 2026-07-13 -> %s", dotted.Format("2006-01-02"), iso.Format("2006-01-02"))
+	}
+	if iso.Month() != time.July || iso.Day() != 13 {
+		t.Fatalf("parsed as %s, want 2026-07-13", iso.Format("2006-01-02"))
 	}
 }
