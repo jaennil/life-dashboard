@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 )
@@ -27,6 +29,7 @@ const (
 	fsAPIBase                  = "https://platform.fatsecret.com/rest/server.api"
 	nutritionSyncDays          = 90
 	fatSecretScheduledSyncDays = 7
+	fatSecretHistorySlot       = 6 * time.Hour
 )
 
 type requestTokenState struct {
@@ -224,12 +227,12 @@ func (c *FatSecretConnector) getStoredTokens(ctx context.Context, userID string)
 
 func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 	trigger := GetSyncTrigger(ctx)
-	syncDays := fatSecretSyncDays(trigger)
+	syncDates := fatSecretSyncDates(trigger, time.Now())
 
 	c.logger.Info().
 		Str("user_id", userID).
 		Str("trigger", string(trigger)).
-		Int("sync_days", syncDays).
+		Int("sync_days", len(syncDates)).
 		Msg("starting sync")
 
 	token, secret, err := c.getStoredTokens(ctx, userID)
@@ -241,12 +244,10 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 		c.logger.Warn().Err(err).Msg("failed to sync profile")
 	}
 
-	today := time.Now().Truncate(24 * time.Hour)
 	recentFailures := make([]string, 0, fatSecretCriticalSyncDays)
 	recentSuccesses := 0
 	stoppedOnRateLimit := false
-	for i := 0; i < syncDays; i++ {
-		date := today.AddDate(0, 0, -i)
+	for i, date := range syncDates {
 		if err := c.syncDay(ctx, userID, token, secret, date); err != nil {
 			c.logger.Warn().Err(err).Str("date", date.Format("2006-01-02")).Msg("failed to sync day")
 			if i < fatSecretCriticalSyncDays {
@@ -285,9 +286,34 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 
 func fatSecretSyncDays(trigger SyncTrigger) int {
 	if trigger == SyncTriggerScheduled {
-		return fatSecretScheduledSyncDays
+		return fatSecretScheduledSyncDays + 1
 	}
 	return nutritionSyncDays
+}
+
+func fatSecretSyncDates(trigger SyncTrigger, now time.Time) []time.Time {
+	today := calendarDate(now)
+	dates := make([]time.Time, 0, fatSecretSyncDays(trigger))
+	for i := 0; i < fatSecretScheduledSyncDays; i++ {
+		dates = append(dates, today.AddDate(0, 0, -i))
+	}
+
+	if trigger != SyncTriggerScheduled {
+		for i := fatSecretScheduledSyncDays; i < nutritionSyncDays; i++ {
+			dates = append(dates, today.AddDate(0, 0, -i))
+		}
+		return dates
+	}
+
+	historyDays := nutritionSyncDays - fatSecretScheduledSyncDays
+	slot := now.Unix() / int64(fatSecretHistorySlot/time.Second)
+	historyOffset := fatSecretScheduledSyncDays + int(slot%int64(historyDays))
+	return append(dates, today.AddDate(0, 0, -historyOffset))
+}
+
+func calendarDate(t time.Time) time.Time {
+	year, month, day := t.Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 }
 
 // daysSinceEpoch returns FatSecret's date format: days since Jan 1, 1970
@@ -448,7 +474,7 @@ func (c *FatSecretConnector) syncDay(ctx context.Context, userID, token, secret 
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNoContent {
-		return nil
+		return c.storeEntries(ctx, userID, date, nil)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("api status %d", resp.StatusCode)
@@ -467,7 +493,7 @@ func (c *FatSecretConnector) syncDay(ctx context.Context, userID, token, secret 
 	}
 	if result.Error != nil {
 		if strings.Contains(result.Error.Message, "no food entries") {
-			return nil
+			return c.storeEntries(ctx, userID, date, nil)
 		}
 		return fmt.Errorf("api error: %s", result.Error.Message)
 	}
@@ -483,10 +509,6 @@ func (c *FatSecretConnector) syncDay(ctx context.Context, userID, token, secret 
 				entries = []fsFoodEntry{single}
 			}
 		}
-	}
-
-	if len(entries) == 0 {
-		return nil
 	}
 
 	return c.storeEntries(ctx, userID, date, entries)
@@ -565,6 +587,27 @@ func (c *FatSecretConnector) storeProfile(ctx context.Context, userID string, pr
 }
 
 func (c *FatSecretConnector) storeEntries(ctx context.Context, userID string, date time.Time, entries []fsFoodEntry) error {
+	if len(entries) == 0 {
+		var dailyID string
+		err := c.db.QueryRow(ctx, `
+			UPDATE nutrition_daily
+			SET calories_total = 0, protein_g = 0, carbs_g = 0, fat_g = 0, fiber_g = 0
+			WHERE user_id = $1 AND date = $2 AND source = 'fatsecret'
+			RETURNING id
+		`, userID, date).Scan(&dailyID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			return fmt.Errorf("clear daily: %w", err)
+		}
+		if _, err := c.db.Exec(ctx, `DELETE FROM nutrition_items WHERE daily_id = $1`, dailyID); err != nil {
+			return fmt.Errorf("clear daily items: %w", err)
+		}
+		c.logger.Info().Str("date", date.Format("2006-01-02")).Msg("cleared empty day")
+		return nil
+	}
+
 	var totalCal, totalProtein, totalCarbs, totalFat, totalFiber float64
 	for _, e := range entries {
 		totalCal += parseFloat(e.Calories)

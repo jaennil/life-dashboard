@@ -3,6 +3,7 @@ package connectors
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFatSecretRecentSyncError(t *testing.T) {
@@ -40,8 +41,8 @@ func TestIsFatSecretRateLimitError(t *testing.T) {
 }
 
 func TestFatSecretSyncDays(t *testing.T) {
-	if got := fatSecretSyncDays(SyncTriggerScheduled); got != fatSecretScheduledSyncDays {
-		t.Fatalf("expected scheduled sync days %d, got %d", fatSecretScheduledSyncDays, got)
+	if got := fatSecretSyncDays(SyncTriggerScheduled); got != fatSecretScheduledSyncDays+1 {
+		t.Fatalf("expected scheduled sync days %d, got %d", fatSecretScheduledSyncDays+1, got)
 	}
 	if got := fatSecretSyncDays(SyncTriggerManual); got != nutritionSyncDays {
 		t.Fatalf("expected manual sync days %d, got %d", nutritionSyncDays, got)
@@ -51,6 +52,48 @@ func TestFatSecretSyncDays(t *testing.T) {
 	}
 	if got := fatSecretSyncDays(SyncTriggerUnknown); got != nutritionSyncDays {
 		t.Fatalf("expected unknown sync days %d, got %d", nutritionSyncDays, got)
+	}
+}
+
+func TestFatSecretScheduledSyncDates(t *testing.T) {
+	now := time.Date(2026, time.August, 4, 0, 10, 0, 0, time.FixedZone("MSK", 3*60*60))
+	dates := fatSecretSyncDates(SyncTriggerScheduled, now)
+
+	if len(dates) != fatSecretScheduledSyncDays+1 {
+		t.Fatalf("expected %d dates, got %d", fatSecretScheduledSyncDays+1, len(dates))
+	}
+	if got := dates[0].Format("2006-01-02"); got != "2026-08-04" {
+		t.Fatalf("expected current calendar date, got %s", got)
+	}
+	if got := dates[1].Format("2006-01-02"); got != "2026-08-03" {
+		t.Fatalf("expected previous calendar date, got %s", got)
+	}
+
+	historyAge := int(dates[0].Sub(dates[len(dates)-1]).Hours() / 24)
+	if historyAge < fatSecretScheduledSyncDays || historyAge >= nutritionSyncDays {
+		t.Fatalf("expected historical date age in [%d, %d), got %d", fatSecretScheduledSyncDays, nutritionSyncDays, historyAge)
+	}
+}
+
+func TestFatSecretScheduledHistoryRotates(t *testing.T) {
+	now := time.Date(2026, time.August, 4, 0, 10, 0, 0, time.UTC)
+	first := fatSecretSyncDates(SyncTriggerScheduled, now)
+	second := fatSecretSyncDates(SyncTriggerScheduled, now.Add(fatSecretHistorySlot))
+
+	if first[len(first)-1].Equal(second[len(second)-1]) {
+		t.Fatal("expected historical date to rotate between sync slots")
+	}
+}
+
+func TestFatSecretManualSyncDates(t *testing.T) {
+	now := time.Date(2026, time.August, 4, 23, 50, 0, 0, time.FixedZone("MSK", 3*60*60))
+	dates := fatSecretSyncDates(SyncTriggerManual, now)
+
+	if len(dates) != nutritionSyncDays {
+		t.Fatalf("expected %d dates, got %d", nutritionSyncDays, len(dates))
+	}
+	if got := dates[len(dates)-1].Format("2006-01-02"); got != "2026-05-07" {
+		t.Fatalf("expected oldest sync date 2026-05-07, got %s", got)
 	}
 }
 
