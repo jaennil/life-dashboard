@@ -163,6 +163,8 @@ func (h *ScreenTimeWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Re
 		resp.Status = "no_items_parsed"
 		h.logger.Warn().
 			Str("user_id", userID).
+			Str("day", resp.Day).
+			Str("event_type", eventType).
 			Int("bytes", len(body)).
 			Int("unparsed", len(unparsed)).
 			Msg("screen time payload had no parsable items")
@@ -182,6 +184,7 @@ func (h *ScreenTimeWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Re
 		h.logger.Warn().
 			Str("user_id", userID).
 			Str("day", resp.Day).
+			Str("event_type", eventType).
 			Int("app_seconds", summary.appSeconds).
 			Int("website_seconds", summary.websiteSeconds).
 			Msg("screen time payload looks like a multi-day aggregate, refusing")
@@ -204,11 +207,14 @@ func (h *ScreenTimeWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Re
 	h.logger.Info().
 		Str("user_id", userID).
 		Str("day", resp.Day).
+		Str("event_type", eventType).
 		Bool("is_partial", isPartial).
 		Int("apps", saved.appCount).
 		Int("websites", saved.websiteCount).
 		Int("app_seconds", saved.appSeconds).
+		Int("website_seconds", saved.websiteSeconds).
 		Int("unparsed", len(unparsed)).
+		Bool("clamped", saved.clamped).
 		Bool("repaired", repaired).
 		Msg("screen time ingested")
 
