@@ -100,6 +100,23 @@ func TestParseScreenTimeBlobNormalizesNonBreakingSpace(t *testing.T) {
 	}
 }
 
+func TestParseScreenTimeBlobStripsInvisibleMarks(t *testing.T) {
+	// iOS prefixes some display names with a directional mark ("‎WA Business").
+	// If it ever omits the mark, the app must not get a second item_key.
+	marked := parseScreenTimeBlob("‎WA Business (3h 12m)", screenTimeKindApp)
+	plain := parseScreenTimeBlob("WA Business (3h 12m)", screenTimeKindApp)
+
+	if len(marked.Items) != 1 || len(plain.Items) != 1 {
+		t.Fatalf("parsed %d and %d items, want 1 each", len(marked.Items), len(plain.Items))
+	}
+	if marked.Items[0].ItemKey != plain.Items[0].ItemKey {
+		t.Fatalf("item keys differ: %q vs %q", marked.Items[0].ItemKey, plain.Items[0].ItemKey)
+	}
+	if marked.Items[0].DisplayName != "WA Business" {
+		t.Fatalf("display name = %q, want %q", marked.Items[0].DisplayName, "WA Business")
+	}
+}
+
 func TestParseScreenTimeBlobExplicitKindIsAuthoritative(t *testing.T) {
 	// A hostname-looking entry from an apps-only field stays an app.
 	result := parseScreenTimeBlob("example-shop.com (47m)", screenTimeKindApp)

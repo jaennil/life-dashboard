@@ -177,13 +177,18 @@ var screenTimeKnownSuffixes = map[string]bool{
 	"house": true,
 }
 
-// normalizeScreenTimeText normalizes line endings and the exotic spaces iOS puts
-// inside some display names (e.g. "Yandex\u00a0Maps").
+// normalizeScreenTimeText normalizes line endings, the exotic spaces iOS puts
+// inside some display names (e.g. "Yandex\u00a0Maps"), and the invisible marks it
+// prefixes to others (e.g. "\u200eWA Business"). Without stripping the marks, the
+// same app would get a second row on any day iOS omits them.
 func normalizeScreenTimeText(text string) string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 	for _, space := range []string{"\u00a0", "\u2009", "\u202f", "\u2007"} {
 		text = strings.ReplaceAll(text, space, " ")
+	}
+	for _, invisible := range []string{"\u200e", "\u200f", "\u200b", "\u2060", "\ufeff", "\u00ad"} {
+		text = strings.ReplaceAll(text, invisible, "")
 	}
 	return text
 }
