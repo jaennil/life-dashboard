@@ -204,6 +204,107 @@ func TestIsZeppAuthError(t *testing.T) {
 	}
 }
 
+func TestDecodeZeppHeartRate(t *testing.T) {
+	day := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+
+	t.Run("one byte per minute", func(t *testing.T) {
+		// Verified against a live response: 1440 bytes for the day, 254 marking the
+		// minutes the watch recorded nothing.
+		raw := make([]byte, 1440)
+		for i := range raw {
+			raw[i] = 254
+		}
+		raw[0] = 67    // 00:00
+		raw[61] = 133  // 01:01
+		raw[1439] = 80 // 23:59
+		raw[500] = 0   // zero also means absent
+
+		samples, err := decodeZeppHeartRate(base64.StdEncoding.EncodeToString(raw), day)
+		if err != nil {
+			t.Fatalf("decode failed: %v", err)
+		}
+		if len(samples) != 3 {
+			t.Fatalf("samples = %d, want 3: %+v", len(samples), samples)
+		}
+		if samples[0].BPM != 67 || !samples[0].At.Equal(day) {
+			t.Errorf("first = %d bpm at %s", samples[0].BPM, samples[0].At.Format(time.RFC3339))
+		}
+		if samples[1].BPM != 133 || !samples[1].At.Equal(day.Add(61*time.Minute)) {
+			t.Errorf("second = %d bpm at %s", samples[1].BPM, samples[1].At.Format(time.RFC3339))
+		}
+		if !samples[2].At.Equal(day.Add(1439 * time.Minute)) {
+			t.Errorf("last at %s, want 23:59", samples[2].At.Format(time.RFC3339))
+		}
+	})
+
+	t.Run("empty blob is not an error", func(t *testing.T) {
+		samples, err := decodeZeppHeartRate("", day)
+		if err != nil || samples != nil {
+			t.Fatalf("samples = %v, err = %v", samples, err)
+		}
+	})
+
+	t.Run("garbage base64 is an error", func(t *testing.T) {
+		if _, err := decodeZeppHeartRate("!!!not base64!!!", day); err == nil {
+			t.Fatal("expected an error")
+		}
+	})
+}
+
+func TestZeppSummaryExtraFields(t *testing.T) {
+	// Fields discovered on the live account that the reference implementation does
+	// not mention: hr.maxHr, slp.rhr and the running breakdown inside stp.
+	encoded := zeppSummaryFixture(t, `{"stp":{"ttl":8421,"cal":312,"dis":6100,"runDist":1200,"runCal":95},
+		"slp":{"dp":62,"lt":274,"rhr":54,"st":1786000000,"ed":1786025000},
+		"hr":{"maxHr":{"hr":124,"ts":1786305257}},"sn":"ABC123"}`)
+
+	summary, err := decodeZeppSummary(encoded)
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if summary.Heart == nil || summary.Heart.MaxHR == nil || summary.Heart.MaxHR.HR != 124 {
+		t.Errorf("max hr = %+v, want 124", summary.Heart)
+	}
+	if summary.Sleep == nil || summary.Sleep.RestingHR != 54 {
+		t.Errorf("resting hr = %+v, want 54", summary.Sleep)
+	}
+	if summary.Steps == nil || summary.Steps.RunDistance != 1200 || summary.Steps.RunCalories != 95 {
+		t.Errorf("running = %+v", summary.Steps)
+	}
+}
+
+func TestZeppHeadersCarryClientIdentity(t *testing.T) {
+	// Without these the API answers 500 for every request, so their presence is
+	// worth asserting rather than trusting.
+	h := zeppHeaders("tok", "req-1", "Europe/Moscow", "RU")
+	for _, name := range []string{
+		"apptoken", "appname", "appplatform", "channel", "country", "cv",
+		"hm-privacy-ceip", "hm-privacy-diagnostics", "lang", "timezone",
+		"user-agent", "v", "vb", "vn", "x-request-id",
+	} {
+		if h[name] == "" {
+			t.Errorf("header %q missing", name)
+		}
+	}
+	if h["apptoken"] != "tok" || h["x-request-id"] != "req-1" {
+		t.Errorf("per-call values not threaded through: %v", h)
+	}
+}
+
+func TestNewZeppRequestIDIsUniqueHex(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		id := newZeppRequestID()
+		if len(id) != 32 {
+			t.Fatalf("id = %q, want 32 hex chars", id)
+		}
+		if seen[id] {
+			t.Fatalf("duplicate request id %q", id)
+		}
+		seen[id] = true
+	}
+}
+
 func TestZeppHTTPErrorTruncatesBody(t *testing.T) {
 	long := make([]byte, 500)
 	for i := range long {

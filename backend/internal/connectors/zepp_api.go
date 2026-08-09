@@ -7,24 +7,35 @@ import (
 	"time"
 )
 
-// The Zepp cloud API is not documented by Amazfit; the shapes below come from the
-// community reverse engineering that zepp_to_influxdb and hacking-mifit-api rely
-// on. Treat every field as best effort and never fail a whole sync over one.
+// The Zepp cloud API is undocumented. Everything here was verified against a live
+// account: the endpoints, the header set they require, and the field names below.
+//
+// The header set is not optional. With only an apptoken the API answers 500
+// {"code":-50000} for every request, which reads like an auth failure but is not:
+// it is the absence of the client identification headers that Zepp expects.
 const (
-	zeppAuthURLTemplate      = "https://api-user.huami.com/registrations/%s/tokens"
-	zeppLoginURL             = "https://account.huami.com/v2/client/login"
-	zeppBandDataURL          = "https://api-mifit.huami.com/v1/data/band_data.json"
-	zeppEventsURLTemplate    = "https://api-mifit.zepp.com/users/%s/events"
-	zeppPAIEventsURLTemplate = "https://api-mifit-de2.zepp.com/users/%s/events"
+	zeppAPIHost = "https://api-mifit.zepp.com"
+	// Client identification, taken from the Zepp Android app build these headers
+	// were captured from. Bumping the app version means bumping all four together.
+	zeppAppName    = "com.huami.midong"
+	zeppAppVersion = "9.12.5"
+	zeppClientVer  = "151689_9.12.5"
+	zeppBuildVer   = "202509151347"
+	zeppChannel    = "a100900101016"
+	zeppUserAgent  = "Zepp/9.12.5 (Pixel 4; Android 12; Density/2.75)"
 )
 
-// Sleep stage codes as emitted inside the base64 summary blob.
+// Sleep stage codes inside the base64 summary blob.
 const (
 	zeppStageLight = 4
 	zeppStageDeep  = 5
 	zeppStageAwake = 7
 	zeppStageREM   = 8
 )
+
+// Per-minute heart rate samples use 254 as "no reading". Anything at or above the
+// cutoff is treated as absent rather than as an implausible pulse.
+const zeppHeartRateAbsent = 250
 
 type zeppBandDataResponse struct {
 	Data []zeppBandDay `json:"data"`
@@ -34,29 +45,39 @@ type zeppBandDay struct {
 	DateTime string `json:"date_time"`
 	// Summary is base64-encoded JSON, not JSON.
 	Summary string `json:"summary"`
-	// DataHR is a base64 blob of per-minute samples whose encoding is still
-	// unconfirmed, so it is only measured and archived, never decoded.
+	// DataHR is base64 of 1440 bytes: one heart rate sample per minute of the day.
 	DataHR string `json:"data_hr"`
 }
 
 type zeppSummary struct {
 	Steps  *zeppSteps `json:"stp"`
 	Sleep  *zeppSleep `json:"slp"`
+	Heart  *zeppHeart `json:"hr"`
 	Goal   int        `json:"goal"`
 	Serial string     `json:"sn"`
 }
 
 type zeppSteps struct {
-	Total    int `json:"ttl"`
-	Calories int `json:"cal"`
-	Distance int `json:"dis"`
+	Total       int `json:"ttl"`
+	Calories    int `json:"cal"`
+	Distance    int `json:"dis"`
+	RunDistance int `json:"runDist"`
+	RunCalories int `json:"runCal"`
+}
+
+type zeppHeart struct {
+	MaxHR *struct {
+		HR        int   `json:"hr"`
+		Timestamp int64 `json:"ts"`
+	} `json:"maxHr"`
 }
 
 type zeppSleep struct {
-	// DeepMinutes and LightMinutes are the summary totals. Note lt is LIGHT
-	// sleep: the zepp_to_influxdb reference records it as REM, which is wrong.
+	// DeepMinutes and LightMinutes are the summary totals. Note lt is LIGHT sleep:
+	// the zepp_to_influxdb reference records it as REM, which is wrong.
 	DeepMinutes  int             `json:"dp"`
 	LightMinutes int             `json:"lt"`
+	RestingHR    int             `json:"rhr"`
 	Start        int64           `json:"st"`
 	End          int64           `json:"ed"`
 	Stages       []zeppSleepSpan `json:"stage"`
@@ -102,6 +123,28 @@ type zeppOxygenItem struct {
 	Extra string `json:"extra"`
 }
 
+// zeppHeaders builds the client identification the API insists on. x-request-id
+// is supplied per call by the caller so each request is individually traceable.
+func zeppHeaders(appToken, requestID, timezone, country string) map[string]string {
+	return map[string]string{
+		"apptoken":               appToken,
+		"appname":                zeppAppName,
+		"appplatform":            "android_phone",
+		"channel":                zeppChannel,
+		"country":                country,
+		"cv":                     zeppClientVer,
+		"hm-privacy-ceip":        "true",
+		"hm-privacy-diagnostics": "false",
+		"lang":                   "en_US",
+		"timezone":               timezone,
+		"user-agent":             zeppUserAgent,
+		"v":                      "2.0",
+		"vb":                     zeppBuildVer,
+		"vn":                     zeppAppVersion,
+		"x-request-id":           requestID,
+	}
+}
+
 // decodeZeppSummary unwraps the base64-encoded JSON summary of one day.
 func decodeZeppSummary(encoded string) (zeppSummary, error) {
 	var summary zeppSummary
@@ -116,6 +159,36 @@ func decodeZeppSummary(encoded string) (zeppSummary, error) {
 		return summary, fmt.Errorf("json: %w", err)
 	}
 	return summary, nil
+}
+
+type zeppHeartRateSample struct {
+	At  time.Time
+	BPM int
+}
+
+// decodeZeppHeartRate expands the per-minute blob into samples. The blob holds one
+// byte per minute starting at midnight local time; 0 and values at or above the
+// absent cutoff mean the watch recorded nothing for that minute.
+func decodeZeppHeartRate(encoded string, dayStart time.Time) ([]zeppHeartRateSample, error) {
+	if encoded == "" {
+		return nil, nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("base64: %w", err)
+	}
+
+	samples := make([]zeppHeartRateSample, 0, 256)
+	for minute, value := range raw {
+		if value == 0 || value >= zeppHeartRateAbsent {
+			continue
+		}
+		samples = append(samples, zeppHeartRateSample{
+			At:  dayStart.Add(time.Duration(minute) * time.Minute),
+			BPM: int(value),
+		})
+	}
+	return samples, nil
 }
 
 // zeppSleepStageName maps a stage code onto the vocabulary sleep_stages uses.
@@ -141,6 +214,13 @@ func zeppSpanTime(day time.Time, minute int) time.Time {
 	return day.Add(time.Duration(minute) * time.Minute)
 }
 
+type zeppSleepInterval struct {
+	Stage   string
+	Start   time.Time
+	End     time.Time
+	Minutes int
+}
+
 // zeppSleepSpans converts the summary's stage spans into concrete intervals,
 // dropping any span with an unknown code or a non-positive duration.
 func zeppSleepSpans(day time.Time, sleep *zeppSleep) []zeppSleepInterval {
@@ -161,13 +241,6 @@ func zeppSleepSpans(day time.Time, sleep *zeppSleep) []zeppSleepInterval {
 		})
 	}
 	return intervals
-}
-
-type zeppSleepInterval struct {
-	Stage   string
-	Start   time.Time
-	End     time.Time
-	Minutes int
 }
 
 // zeppSleepTotals sums the stage spans. The summary's own dp/lt fields only cover

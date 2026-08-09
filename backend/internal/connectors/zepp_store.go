@@ -14,52 +14,76 @@ type zeppMetric struct {
 	unit       string
 }
 
-// storeBandDay writes the step metrics and the sleep session for one day.
-func (z *ZeppConnector) storeBandDay(ctx context.Context, userID string, day zeppBandDay) (int, bool, error) {
+// storeBandDay writes the step metrics, per-minute heart rate and sleep for one day.
+func (z *ZeppConnector) storeBandDay(ctx context.Context, userID string, day zeppBandDay) (int, bool, int, error) {
 	dayStart, err := time.ParseInLocation("2006-01-02", day.DateTime, time.Local)
 	if err != nil {
-		return 0, false, fmt.Errorf("parse date %q: %w", day.DateTime, err)
+		return 0, false, 0, fmt.Errorf("parse date %q: %w", day.DateTime, err)
 	}
 
 	summary, err := decodeZeppSummary(day.Summary)
 	if err != nil {
-		return 0, false, fmt.Errorf("summary: %w", err)
-	}
-
-	// The per-minute heart rate blob has an unconfirmed encoding, so its size is
-	// recorded for later identification instead of being guessed at.
-	if day.DataHR != "" {
-		z.logger.Debug().
-			Str("day", day.DateTime).
-			Int("data_hr_base64_len", len(day.DataHR)).
-			Msg("zepp heart rate blob present but not decoded")
+		return 0, false, 0, fmt.Errorf("summary: %w", err)
 	}
 
 	metrics := []zeppMetric{}
 	if summary.Steps != nil {
-		// Stamped at local midday so DATE(timestamp) resolves to this day in both
-		// UTC and local time, matching how the health webhook stores aggregates.
 		metrics = append(metrics,
 			zeppMetric{"steps", float64(summary.Steps.Total), "count"},
 			zeppMetric{"walking_running_distance", float64(summary.Steps.Distance), "m"},
 			zeppMetric{"active_energy", float64(summary.Steps.Calories), "kcal"},
 		)
+		if summary.Steps.RunDistance > 0 {
+			metrics = append(metrics, zeppMetric{"running_distance", float64(summary.Steps.RunDistance), "m"})
+		}
+	}
+	if summary.Heart != nil && summary.Heart.MaxHR != nil && summary.Heart.MaxHR.HR > 0 {
+		metrics = append(metrics, zeppMetric{"max_heart_rate", float64(summary.Heart.MaxHR.HR), "bpm"})
+	}
+	if summary.Sleep != nil && summary.Sleep.RestingHR > 0 {
+		metrics = append(metrics, zeppMetric{"resting_heart_rate", float64(summary.Sleep.RestingHR), "bpm"})
 	}
 
 	saved := 0
+	// Daily aggregates are stamped at local midday so DATE(timestamp) resolves to
+	// this day under either timezone, matching how the health webhook stores them.
 	stamp := dayStart.Add(12 * time.Hour)
 	for _, metric := range metrics {
 		if err := z.upsertMetric(ctx, userID, stamp, metric, map[string]any{"zepp_serial": summary.Serial}); err != nil {
-			return saved, false, err
+			return saved, false, 0, err
 		}
 		saved++
 	}
 
+	heartRates, err := z.storeHeartRate(ctx, userID, dayStart, day.DataHR)
+	if err != nil {
+		return saved, false, heartRates, err
+	}
+
 	stored, err := z.storeSleep(ctx, userID, dayStart, summary.Sleep)
 	if err != nil {
-		return saved, false, err
+		return saved, false, heartRates, err
 	}
-	return saved, stored, nil
+	return saved, stored, heartRates, nil
+}
+
+// storeHeartRate expands the per-minute blob into individual readings. Each minute
+// is its own biometrics row, which the natural key already keeps idempotent.
+func (z *ZeppConnector) storeHeartRate(ctx context.Context, userID string, dayStart time.Time, blob string) (int, error) {
+	samples, err := decodeZeppHeartRate(blob, dayStart)
+	if err != nil {
+		return 0, fmt.Errorf("heart rate blob: %w", err)
+	}
+
+	saved := 0
+	for _, sample := range samples {
+		metric := zeppMetric{"heart_rate", float64(sample.BPM), "bpm"}
+		if err := z.upsertMetric(ctx, userID, sample.At, metric, nil); err != nil {
+			return saved, err
+		}
+		saved++
+	}
+	return saved, nil
 }
 
 // storeSleep writes one night into sleep_sessions plus its stage spans. REM and
