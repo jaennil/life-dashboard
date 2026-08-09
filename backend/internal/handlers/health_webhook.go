@@ -333,7 +333,9 @@ func (h *HealthWebhookHandler) upsertSleepSession(ctx context.Context, userID, s
 			deep_sleep_minutes, light_sleep_minutes, rem_sleep_minutes, awake_minutes,
 			sleep_score, avg_hrv, avg_resting_hr, raw_payload
 		)
-		VALUES ($1, $2, $3::date, $4, $5, NULLIF($6, 0), NULLIF($7, 0), NULLIF($8, 0), NULLIF($9, 0), NULLIF($10, 0), NULLIF($11, 0), NULLIF($12, 0), NULLIF($13, 0), $14::jsonb)
+		-- avg_hrv is numeric: comparing it against a bare 0 makes Postgres infer an
+		-- integer parameter, which silently truncated fractional HRV values.
+		VALUES ($1, $2, $3::date, $4, $5, NULLIF($6, 0), NULLIF($7, 0), NULLIF($8, 0), NULLIF($9, 0), NULLIF($10, 0), NULLIF($11, 0), NULLIF($12::numeric, 0), NULLIF($13, 0), $14::jsonb)
 		ON CONFLICT (user_id, source, date) DO UPDATE SET
 			sleep_start = EXCLUDED.sleep_start,
 			sleep_end = EXCLUDED.sleep_end,
