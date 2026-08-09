@@ -141,6 +141,11 @@ func (h *HealthWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Reques
 		RETURNING id
 	`, source, time.Now().UTC().Format(time.RFC3339Nano), rawPayload, userID).Scan(&rawEventID)
 
+	if looksLikeHealthAutoExport(flatFields) {
+		h.ingestHealthAutoExport(w, r, userID, source, bodyBytes, cleaned, rawEventID)
+		return
+	}
+
 	var req healthWebhookRequest
 	if err := json.Unmarshal(cleaned, &req); err != nil {
 		// Not a hard failure: the payload is already archived, so report what
@@ -177,43 +182,7 @@ func (h *HealthWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Reques
 		sleepSessions = append(sleepSessions, flatSleep)
 	}
 
-	savedMetrics := 0
-	skippedMetrics := 0
-	for _, entry := range entries {
-		metricType := normalizeHealthMetricType(firstNonEmpty(entry.Type, entry.Metric))
-		if metricType == "" {
-			skippedMetrics++
-			continue
-		}
-
-		ts, err := parseHealthEntryTime(entry)
-		if err != nil {
-			h.logger.Warn().Str("metric_type", metricType).Err(err).Msg("skip health metric with bad timestamp")
-			skippedMetrics++
-			continue
-		}
-
-		unit := normalizeHealthUnit(metricType, entry.Unit)
-		metadata, _ := json.Marshal(entry.Metadata)
-		if len(metadata) == 0 || string(metadata) == "null" {
-			metadata = []byte("{}")
-		}
-
-		_, err = h.db.Exec(r.Context(), `
-			INSERT INTO biometrics (timestamp, source, metric_type, value, unit, metadata, user_id)
-			VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
-			ON CONFLICT (user_id, timestamp, source, metric_type) DO UPDATE SET
-				value = EXCLUDED.value,
-				unit = EXCLUDED.unit,
-				metadata = EXCLUDED.metadata
-		`, ts, source, metricType, entry.Value, unit, metadata, userID)
-		if err != nil {
-			h.logger.Warn().Err(err).Str("metric_type", metricType).Msg("insert health metric failed")
-			skippedMetrics++
-			continue
-		}
-		savedMetrics++
-	}
+	savedMetrics, skippedMetrics := h.saveHealthMetrics(r.Context(), userID, source, entries)
 
 	savedSleep := 0
 	skippedSleep := 0
@@ -499,6 +468,13 @@ func normalizeHealthMetricType(metricType string) string {
 		return "active_energy"
 	case "body_fat_percentage":
 		return "body_fat"
+	// Health Auto Export spellings, aligned with what the scale connector writes.
+	case "weight_body_mass":
+		return "weight"
+	case "body_mass_index":
+		return "bmi"
+	case "basal_energy_burned":
+		return "bmr"
 	case "oxygen_saturation", "blood_oxygen", "spo2_percent":
 		return "spo2"
 	case "heart_rate_variability", "hrv_sdnn":
