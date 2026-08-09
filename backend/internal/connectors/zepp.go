@@ -18,9 +18,12 @@ import (
 )
 
 const (
-	zeppSource              = "zepp"
-	zeppRequestTimeout      = 60 * time.Second
-	zeppInitialBackfillDays = 90
+	zeppSource         = "zepp"
+	zeppRequestTimeout = 60 * time.Second
+	// Zepp keeps only the days a device actually recorded, and it answers a
+	// multi-year detail query in one request, so the first sync asks for
+	// everything rather than guessing a window.
+	zeppInitialBackfillDays = 2000
 	zeppIncrementalLookback = 3
 	zeppEventPageLimit      = 1000
 	zeppTimezone            = "Europe/Moscow"
