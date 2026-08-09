@@ -17,13 +17,14 @@ import (
 )
 
 const (
-	zeppSource              = "zepp"
+	zeppSource = "zepp"
+	// The obtained app token lives in its own oauth_tokens row, separate from the
+	// login and password, so it can be provisioned or dropped independently.
+	zeppSessionSource       = "zepp_session"
 	zeppRequestTimeout      = 45 * time.Second
 	zeppInitialBackfillDays = 90
 	zeppIncrementalLookback = 3
-	// The Zepp login endpoint rate-limits hard (429), so a session is reused for
-	// the lifetime of the process and only re-established when a call is refused.
-	zeppEventPageLimit = 1000
+	zeppEventPageLimit      = 1000
 )
 
 type zeppSession struct {
@@ -73,7 +74,7 @@ func (z *ZeppConnector) Sync(ctx context.Context, userID string) error {
 	// once with a fresh login before giving up.
 	days, err := z.fetchBandData(ctx, session, from, to)
 	if err != nil && isZeppAuthError(err) {
-		z.invalidate(userID)
+		z.invalidate(ctx, userID)
 		if session, err = z.session(ctx, userID, email, password); err != nil {
 			return err
 		}
@@ -129,6 +130,10 @@ func (z *ZeppConnector) loadCredentials(ctx context.Context, userID string) (ema
 	return strings.TrimSpace(email), password, nil
 }
 
+// session resolves an app token, preferring anything already obtained. The Zepp
+// login endpoint rate-limits extremely aggressively (a handful of attempts is
+// enough for a 429 that lasts), so logging in is the last resort and its result
+// is persisted: a pod restart must not cost another login.
 func (z *ZeppConnector) session(ctx context.Context, userID, email, password string) (zeppSession, error) {
 	z.mu.Lock()
 	cached, ok := z.sessions[userID]
@@ -137,10 +142,18 @@ func (z *ZeppConnector) session(ctx context.Context, userID, email, password str
 		return cached, nil
 	}
 
+	if stored, ok := z.loadSession(ctx, userID); ok {
+		z.mu.Lock()
+		z.sessions[userID] = stored
+		z.mu.Unlock()
+		return stored, nil
+	}
+
 	session, err := z.login(ctx, email, password)
 	if err != nil {
 		return zeppSession{}, err
 	}
+	z.saveSession(ctx, userID, session)
 
 	z.mu.Lock()
 	z.sessions[userID] = session
@@ -148,10 +161,47 @@ func (z *ZeppConnector) session(ctx context.Context, userID, email, password str
 	return session, nil
 }
 
-func (z *ZeppConnector) invalidate(userID string) {
+// loadSession reads a previously obtained app token. It lives in its own
+// oauth_tokens row so the credential row stays untouched and no migration is
+// needed; a token can also be provisioned by hand from an unthrottled address.
+func (z *ZeppConnector) loadSession(ctx context.Context, userID string) (zeppSession, bool) {
+	var session zeppSession
+	err := z.db.QueryRow(ctx, `
+		SELECT access_token, refresh_token
+		FROM oauth_tokens
+		WHERE source = $1 AND user_id = $2
+	`, zeppSessionSource, userID).Scan(&session.appToken, &session.userID)
+	if err != nil || session.appToken == "" || session.userID == "" {
+		return zeppSession{}, false
+	}
+	return session, true
+}
+
+func (z *ZeppConnector) saveSession(ctx context.Context, userID string, session zeppSession) {
+	if _, err := z.db.Exec(ctx, `
+		INSERT INTO oauth_tokens (source, access_token, refresh_token, expires_at, updated_at, user_id)
+		VALUES ($1, $2, $3, NOW() + INTERVAL '100 years', NOW(), $4)
+		ON CONFLICT (source, user_id) DO UPDATE SET
+			access_token = EXCLUDED.access_token,
+			refresh_token = EXCLUDED.refresh_token,
+			updated_at = NOW()
+	`, zeppSessionSource, session.appToken, session.userID, userID); err != nil {
+		z.logger.Warn().Err(err).Msg("persist zepp session failed")
+	}
+}
+
+// invalidate drops the token everywhere so the next attempt logs in again. Only
+// called when Zepp actually refuses the token, never on transport errors.
+func (z *ZeppConnector) invalidate(ctx context.Context, userID string) {
 	z.mu.Lock()
 	delete(z.sessions, userID)
 	z.mu.Unlock()
+
+	if _, err := z.db.Exec(ctx, `
+		DELETE FROM oauth_tokens WHERE source = $1 AND user_id = $2
+	`, zeppSessionSource, userID); err != nil {
+		z.logger.Warn().Err(err).Msg("drop stale zepp session failed")
+	}
 }
 
 // login performs the two-stage Huami handshake: an access token comes back in the
