@@ -89,16 +89,24 @@ func (h *HealthWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Fix common Shortcuts issues: newlines inside values, trailing commas
-	cleaned := strings.ReplaceAll(string(bodyBytes), "\n", "")
-	cleaned = strings.ReplaceAll(cleaned, "\r", "")
+	// Shortcuts can emit literal newlines inside JSON string values. Escape them
+	// rather than deleting them, so a multi-line value survives intact.
+	cleaned := bodyBytes
+	if !json.Valid(cleaned) {
+		cleaned = escapeLiteralNewlines(bodyBytes)
+	}
 
 	var req healthWebhookRequest
-	if err := json.Unmarshal([]byte(cleaned), &req); err != nil {
-		h.logger.Error().Err(err).Str("body", cleaned).Msg("json decode failed")
+	if err := json.Unmarshal(cleaned, &req); err != nil {
+		h.logger.Error().Err(err).Str("body", string(cleaned)).Msg("json decode failed")
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+
+	// Flat top-level fields are the easy shape to build in Shortcuts; the nested
+	// data/metrics/sleep arrays keep working alongside them.
+	var flatFields map[string]json.RawMessage
+	_ = json.Unmarshal(cleaned, &flatFields)
 
 	apiKey := healthAPIKeyFromRequest(r, req.APIKey)
 	if apiKey == "" {
@@ -120,8 +128,20 @@ func (h *HealthWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Reques
 	sleepSessions := append([]healthSleepSession{}, req.Sleep...)
 	sleepSessions = append(sleepSessions, req.Sleeps...)
 
+	flatDay := flatHealthDay(flatFields)
+	flatEntries, flatSkipped := parseFlatHealthMetrics(flatFields, flatDay)
+	entries = append(entries, flatEntries...)
+	if flatSleep, ok := parseFlatHealthSleep(flatFields, flatDay); ok {
+		sleepSessions = append(sleepSessions, flatSleep)
+	}
+
 	source := normalizeHealthSource(req.Source)
-	rawPayload, _ := json.Marshal(req)
+	// Store the body verbatim, not the parsed struct: anything the struct does not
+	// model (including flat metric fields) would otherwise never reach the archive.
+	rawPayload, _ := json.Marshal(map[string]any{
+		"raw":        string(bodyBytes),
+		"json_valid": json.Valid(bodyBytes),
+	})
 	_, _ = h.db.Exec(r.Context(), `
 		INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
 		VALUES ($1, 'webhook', $2, $3, $4)
@@ -190,18 +210,22 @@ func (h *HealthWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Reques
 
 	h.logger.Info().
 		Str("user_id", userID).
+		Str("day", flatDay.Format("2006-01-02")).
 		Int("metrics_saved", savedMetrics).
 		Int("metrics_skipped", skippedMetrics).
 		Int("sleep_saved", savedSleep).
 		Int("sleep_skipped", skippedSleep).
+		Strs("unreadable_fields", flatSkipped).
 		Msg("health data received")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"status":          "ok",
-		"metrics_saved":   savedMetrics,
-		"metrics_skipped": skippedMetrics,
-		"sleep_saved":     savedSleep,
-		"sleep_skipped":   skippedSleep,
+		"status":            "ok",
+		"day":               flatDay.Format("2006-01-02"),
+		"metrics_saved":     savedMetrics,
+		"metrics_skipped":   skippedMetrics,
+		"sleep_saved":       savedSleep,
+		"sleep_skipped":     skippedSleep,
+		"unreadable_fields": flatSkipped,
 	})
 }
 
