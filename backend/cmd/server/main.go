@@ -101,6 +101,10 @@ func main() {
 	activeConnectors = append(activeConnectors, xiaomiScale)
 	log.Info().Msg("xiaomi scale connector enabled")
 
+	zepp := connectors.NewZepp(pool, log.Logger)
+	activeConnectors = append(activeConnectors, zepp)
+	log.Info().Msg("zepp connector enabled")
+
 	zenmoney := connectors.NewZenmoney(cfg.Connectors.Zenmoney.ClientID, cfg.Connectors.Zenmoney.ClientSecret, cfg.Connectors.Zenmoney.RedirectURI, pool, log.Logger)
 	activeConnectors = append(activeConnectors, zenmoney)
 	log.Info().Msg("zenmoney connector enabled")
@@ -277,6 +281,7 @@ func main() {
 			"notion":          true,
 			"xiaomi_scale":    true,
 			"ios_screentime":  true,
+			"zepp":            true,
 		}
 		oauthConfiguredMap := map[string]bool{
 			"strava":          cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",

@@ -42,7 +42,7 @@ type integrationMeta struct {
 	countQuery  string
 }
 
-var knownIntegrations = []string{"strava", "hevy", "apple_health", "habitify", "todoist", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion", "xiaomi_scale", "ios_screentime"}
+var knownIntegrations = []string{"strava", "hevy", "apple_health", "habitify", "todoist", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion", "xiaomi_scale", "ios_screentime", "zepp"}
 
 var personalIntegrations = map[string]bool{
 	"strava":          true,
@@ -56,6 +56,7 @@ var personalIntegrations = map[string]bool{
 	"google_calendar": true,
 	"notion":          true,
 	"xiaomi_scale":    true,
+	"zepp":            true,
 }
 
 var manualTokenIntegrations = map[string]bool{
@@ -65,6 +66,7 @@ var manualTokenIntegrations = map[string]bool{
 	"notion":       true,
 	"zenmoney":     true,
 	"xiaomi_scale": true,
+	"zepp":         true,
 }
 
 var integrationMeta_ = map[string]integrationMeta{
@@ -122,6 +124,11 @@ var integrationMeta_ = map[string]integrationMeta{
 		displayName: "Xiaomi Scale S400",
 		description: "Состав тела: вес, жир, мышцы, вода, кости, импеданс",
 		countQuery:  "SELECT COUNT(*) FROM biometrics WHERE source='xiaomi_scale' AND user_id = $1",
+	},
+	"zepp": {
+		displayName: "Zepp / Amazfit",
+		description: "Часы: сон с фазами, стресс, PAI, SpO2 из облака Zepp",
+		countQuery:  "SELECT (SELECT COUNT(*) FROM biometrics WHERE source='zepp' AND user_id = $1) + (SELECT COUNT(*) FROM sleep_sessions WHERE source='zepp' AND user_id = $1)",
 	},
 	// Deliberately absent from personalIntegrations: the api_keys row is shared
 	// with apple_health, and the disable path there deletes it. Screen time must
@@ -358,6 +365,10 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "account_id is required", http.StatusBadRequest)
 		return
 	}
+	if name == "zepp" && body.AccountID == "" {
+		http.Error(w, "account_id is required", http.StatusBadRequest)
+		return
+	}
 
 	ctx := r.Context()
 	userID := ctx.Value(authmw.UserIDKey).(string)
@@ -367,6 +378,9 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 	case "notion":
 		refreshToken = body.DatabaseID
 	case "xiaomi_scale":
+		refreshToken = body.AccountID
+	case "zepp":
+		// token is the Zepp password, account_id the login.
 		refreshToken = body.AccountID
 	}
 
@@ -427,7 +441,7 @@ func hasStoredCredentials(ctx context.Context, db *pgxpool.Pool, source string, 
 	query := `SELECT 1 FROM oauth_tokens WHERE source = $1 AND user_id = $2 LIMIT 1`
 	args := []any{source, userID}
 	// Both of these need their second credential, not just the token.
-	if source == "notion" || source == "xiaomi_scale" {
+	if source == "notion" || source == "xiaomi_scale" || source == "zepp" {
 		query = `SELECT 1 FROM oauth_tokens WHERE source = $1 AND user_id = $2 AND refresh_token <> '' LIMIT 1`
 	}
 
