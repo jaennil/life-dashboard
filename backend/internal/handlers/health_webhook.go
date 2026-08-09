@@ -96,19 +96,16 @@ func (h *HealthWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Reques
 		cleaned = escapeLiteralNewlines(bodyBytes)
 	}
 
-	var req healthWebhookRequest
-	if err := json.Unmarshal(cleaned, &req); err != nil {
-		h.logger.Error().Err(err).Str("body", string(cleaned)).Msg("json decode failed")
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-
-	// Flat top-level fields are the easy shape to build in Shortcuts; the nested
-	// data/metrics/sleep arrays keep working alongside them.
+	// A tolerant map read first: it survives shapes the typed struct rejects, and
+	// it carries both the api_key and the flat metric fields.
 	var flatFields map[string]json.RawMessage
 	_ = json.Unmarshal(cleaned, &flatFields)
 
-	apiKey := healthAPIKeyFromRequest(r, req.APIKey)
+	bodyAPIKey := ""
+	if raw, ok := flatFields["api_key"]; ok {
+		bodyAPIKey, _ = healthFlatString(raw)
+	}
+	apiKey := healthAPIKeyFromRequest(r, bodyAPIKey)
 	if apiKey == "" {
 		http.Error(w, "api_key required", http.StatusUnauthorized)
 		return
@@ -123,6 +120,51 @@ func (h *HealthWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	sourceName := ""
+	if raw, ok := flatFields["source"]; ok {
+		sourceName, _ = healthFlatString(raw)
+	}
+	source := normalizeHealthSource(sourceName)
+
+	// Archive the verbatim body BEFORE interpreting it. Storing the parsed struct
+	// used to drop anything it did not model, and failing the request on an
+	// unknown shape meant a new exporter's payload could never be inspected at
+	// all. Raw first, parse second.
+	rawPayload, _ := json.Marshal(map[string]any{
+		"raw":        string(bodyBytes),
+		"json_valid": json.Valid(bodyBytes),
+	})
+	var rawEventID string
+	_ = h.db.QueryRow(r.Context(), `
+		INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
+		VALUES ($1, 'webhook', $2, $3, $4)
+		RETURNING id
+	`, source, time.Now().UTC().Format(time.RFC3339Nano), rawPayload, userID).Scan(&rawEventID)
+
+	var req healthWebhookRequest
+	if err := json.Unmarshal(cleaned, &req); err != nil {
+		// Not a hard failure: the payload is already archived, so report what
+		// arrived and let a parser be written against it.
+		preview, truncated := previewBody(bodyBytes)
+		h.logger.Warn().
+			Err(err).
+			Str("user_id", userID).
+			Str("raw_event_id", rawEventID).
+			Int("bytes", len(bodyBytes)).
+			Strs("top_level_keys", topLevelKeys(cleaned)).
+			Msg("health payload shape not recognized, archived for inspection")
+		writeJSON(w, map[string]any{
+			"status":         "unrecognized_shape",
+			"error":          err.Error(),
+			"raw_event_id":   rawEventID,
+			"received_bytes": len(bodyBytes),
+			"top_level_keys": topLevelKeys(cleaned),
+			"raw_preview":    preview,
+			"truncated":      truncated,
+		})
+		return
+	}
+
 	entries := append([]healthEntry{}, req.Data...)
 	entries = append(entries, req.Metrics...)
 	sleepSessions := append([]healthSleepSession{}, req.Sleep...)
@@ -134,18 +176,6 @@ func (h *HealthWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Reques
 	if flatSleep, ok := parseFlatHealthSleep(flatFields, flatDay); ok {
 		sleepSessions = append(sleepSessions, flatSleep)
 	}
-
-	source := normalizeHealthSource(req.Source)
-	// Store the body verbatim, not the parsed struct: anything the struct does not
-	// model (including flat metric fields) would otherwise never reach the archive.
-	rawPayload, _ := json.Marshal(map[string]any{
-		"raw":        string(bodyBytes),
-		"json_valid": json.Valid(bodyBytes),
-	})
-	_, _ = h.db.Exec(r.Context(), `
-		INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
-		VALUES ($1, 'webhook', $2, $3, $4)
-	`, source, time.Now().UTC().Format(time.RFC3339Nano), rawPayload, userID)
 
 	savedMetrics := 0
 	skippedMetrics := 0
