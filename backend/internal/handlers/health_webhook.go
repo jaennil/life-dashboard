@@ -19,6 +19,11 @@ import (
 
 const appleHealthSource = "apple_health"
 
+// healthWebhookMaxBody bounds an inbound export. Health Auto Export sends a year
+// of daily metrics as roughly a megabyte, so this leaves room for finer
+// granularity without letting a runaway request exhaust memory.
+const healthWebhookMaxBody = 64 << 20
+
 type HealthWebhookHandler struct {
 	db     *pgxpool.Pool
 	logger zerolog.Logger
@@ -83,10 +88,18 @@ type healthAPIKeyResponse struct {
 
 // POST /api/v1/webhook/health — receive health data from iOS Shortcuts
 func (h *HealthWebhookHandler) ReceiveData(w http.ResponseWriter, r *http.Request) {
-	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
+	// A Health Auto Export payload covering a year is comfortably past a megabyte,
+	// and a limit that truncates mid-JSON would look like a malformed body rather
+	// than a size problem, so the ceiling is generous and being at it is reported.
+	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, healthWebhookMaxBody))
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
+	}
+	if int64(len(bodyBytes)) == healthWebhookMaxBody {
+		h.logger.Warn().
+			Int("bytes", len(bodyBytes)).
+			Msg("health payload hit the size limit and may be truncated")
 	}
 
 	// Shortcuts can emit literal newlines inside JSON string values. Escape them
