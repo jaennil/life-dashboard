@@ -223,10 +223,24 @@ type zeppSleepInterval struct {
 
 // zeppSleepSpans converts the summary's stage spans into concrete intervals,
 // dropping any span with an unknown code or a non-positive duration.
+//
+// The offsets are minutes from some midnight Zepp does not name, and it is not
+// the midnight of the labelled date: observed spans sat 27 hours (a day plus the
+// local UTC offset) past the session's real start. Rather than reverse-engineer
+// that convention, the earliest offset is pinned to slp.st, which arrives as a
+// true epoch, so the base is derived instead of assumed.
 func zeppSleepSpans(day time.Time, sleep *zeppSleep) []zeppSleepInterval {
 	if sleep == nil {
 		return nil
 	}
+
+	base := day
+	if sleep.Start > 0 {
+		if earliest, ok := zeppEarliestSpanOffset(sleep.Stages); ok {
+			base = zeppUnixTime(sleep.Start).Add(-time.Duration(earliest) * time.Minute)
+		}
+	}
+
 	intervals := make([]zeppSleepInterval, 0, len(sleep.Stages))
 	for _, span := range sleep.Stages {
 		stage := zeppSleepStageName(span.Mode)
@@ -235,12 +249,29 @@ func zeppSleepSpans(day time.Time, sleep *zeppSleep) []zeppSleepInterval {
 		}
 		intervals = append(intervals, zeppSleepInterval{
 			Stage:   stage,
-			Start:   zeppSpanTime(day, span.Start),
-			End:     zeppSpanTime(day, span.Stop),
+			Start:   zeppSpanTime(base, span.Start),
+			End:     zeppSpanTime(base, span.Stop),
 			Minutes: span.Stop - span.Start,
 		})
 	}
 	return intervals
+}
+
+// zeppEarliestSpanOffset returns the smallest usable span offset, which is the
+// one that lines up with the reported sleep start.
+func zeppEarliestSpanOffset(spans []zeppSleepSpan) (int, bool) {
+	earliest := 0
+	found := false
+	for _, span := range spans {
+		if zeppSleepStageName(span.Mode) == "" || span.Stop <= span.Start {
+			continue
+		}
+		if !found || span.Start < earliest {
+			earliest = span.Start
+			found = true
+		}
+	}
+	return earliest, found
 }
 
 // zeppSleepTotals sums the stage spans. The summary's own dp/lt fields only cover

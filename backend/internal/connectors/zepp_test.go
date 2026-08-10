@@ -115,6 +115,70 @@ func TestZeppSleepSpans(t *testing.T) {
 	}
 }
 
+func TestZeppSleepSpansAnchorToReportedStart(t *testing.T) {
+	// Real numbers from the account: the night labelled 2026-08-10 started at
+	// 03:08 Moscow time, and its first span offset was 1628 minutes. Treating the
+	// offsets as minutes past the labelled date put every span 27 hours late.
+	start := time.Date(2026, 8, 10, 0, 8, 0, 0, time.UTC) // 03:08 MSK
+	sleep := &zeppSleep{
+		Start: start.Unix(),
+		Stages: []zeppSleepSpan{
+			{Mode: zeppStageLight, Start: 1628, Stop: 1642},
+			{Mode: zeppStageDeep, Start: 1642, Stop: 1655},
+			{Mode: zeppStageAwake, Start: 1695, Stop: 1712},
+		},
+	}
+
+	// The labelled day is deliberately wrong-footed: it must not influence the
+	// result once slp.st is available.
+	intervals := zeppSleepSpans(time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC), sleep)
+	if len(intervals) != 3 {
+		t.Fatalf("intervals = %d, want 3", len(intervals))
+	}
+	if !intervals[0].Start.Equal(start) {
+		t.Fatalf("first span starts %s, want the reported sleep start %s",
+			intervals[0].Start.Format(time.RFC3339), start.Format(time.RFC3339))
+	}
+	if got := intervals[1].Start.Sub(start); got != 14*time.Minute {
+		t.Errorf("second span offset = %s, want 14m after the start", got)
+	}
+	if got := intervals[2].End.Sub(start); got != 84*time.Minute {
+		t.Errorf("last span ends %s after the start, want 84m", got)
+	}
+}
+
+func TestZeppSleepSpansFallBackToDayWithoutStart(t *testing.T) {
+	day := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+	sleep := &zeppSleep{Stages: []zeppSleepSpan{{Mode: zeppStageLight, Start: 60, Stop: 90}}}
+
+	intervals := zeppSleepSpans(day, sleep)
+	if len(intervals) != 1 {
+		t.Fatalf("intervals = %d, want 1", len(intervals))
+	}
+	if !intervals[0].Start.Equal(day.Add(time.Hour)) {
+		t.Fatalf("start = %s, want the day plus the raw offset", intervals[0].Start.Format(time.RFC3339))
+	}
+}
+
+func TestZeppEarliestSpanOffset(t *testing.T) {
+	_, ok := zeppEarliestSpanOffset(nil)
+	if ok {
+		t.Error("no spans should report no offset")
+	}
+
+	// Unknown codes and zero-length spans must not win the minimum.
+	spans := []zeppSleepSpan{
+		{Mode: 99, Start: 10, Stop: 20},
+		{Mode: zeppStageAwake, Start: 30, Stop: 30},
+		{Mode: zeppStageDeep, Start: 100, Stop: 140},
+		{Mode: zeppStageLight, Start: 80, Stop: 100},
+	}
+	got, ok := zeppEarliestSpanOffset(spans)
+	if !ok || got != 80 {
+		t.Fatalf("earliest = %d (ok=%v), want 80", got, ok)
+	}
+}
+
 func TestZeppSleepSpansNilSafe(t *testing.T) {
 	if got := zeppSleepSpans(time.Now(), nil); got != nil {
 		t.Fatalf("zeppSleepSpans(nil) = %v, want nil", got)
