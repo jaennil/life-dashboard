@@ -22,7 +22,7 @@ func TestDecodeZeppSummary(t *testing.T) {
 			         {"mode":8,"start":1502,"stop":1560},{"mode":7,"start":1560,"stop":1565}]},
 			"goal":8000,"sn":"ABC123"}`)
 
-		summary, err := decodeZeppSummary(encoded)
+		summary, _, err := decodeZeppSummary(encoded)
 		if err != nil {
 			t.Fatalf("decode failed: %v", err)
 		}
@@ -42,14 +42,14 @@ func TestDecodeZeppSummary(t *testing.T) {
 
 	t.Run("rejects garbage", func(t *testing.T) {
 		for _, bad := range []string{"", "not base64 !!!", zeppSummaryFixture(t, "not json")} {
-			if _, err := decodeZeppSummary(bad); err == nil {
+			if _, _, err := decodeZeppSummary(bad); err == nil {
 				t.Errorf("decodeZeppSummary(%q) returned no error", bad)
 			}
 		}
 	})
 
 	t.Run("a day with no sleep leaves slp nil", func(t *testing.T) {
-		summary, err := decodeZeppSummary(zeppSummaryFixture(t, `{"stp":{"ttl":100,"cal":4,"dis":80}}`))
+		summary, _, err := decodeZeppSummary(zeppSummaryFixture(t, `{"stp":{"ttl":100,"cal":4,"dis":80}}`))
 		if err != nil {
 			t.Fatalf("decode failed: %v", err)
 		}
@@ -57,6 +57,81 @@ func TestDecodeZeppSummary(t *testing.T) {
 			t.Fatalf("sleep = %+v, want nil", summary.Sleep)
 		}
 	})
+}
+
+func TestZeppSleepSummaryMatchesTheApp(t *testing.T) {
+	// Three real nights. The Zepp app showed a little over seven hours for the
+	// last one; summing the stage spans instead gave 6h57m, which is what the
+	// dashboard used to display.
+	nights := []struct {
+		name               string
+		summary            string
+		wantTotal          int
+		wantDeep           int
+		wantLight          int
+		wantREM            int
+		wantAwake          int
+		wantScore          int
+		wantRestingHR      int
+		windowFromStartEnd int
+	}{
+		{
+			name:      "2026-08-10",
+			summary:   `{"dp":83,"lt":176,"dt":84,"wk":17,"ss":75,"rhr":55,"st":1786320480,"ed":1786342080}`,
+			wantTotal: 343, wantDeep: 83, wantLight: 176, wantREM: 84, wantAwake: 17,
+			wantScore: 75, wantRestingHR: 55, windowFromStartEnd: 360,
+		},
+		{
+			name:      "2026-08-11",
+			summary:   `{"dp":111,"lt":309,"dt":142,"wk":6,"ss":83,"rhr":52,"st":1786398960,"ed":1786433040}`,
+			wantTotal: 562, wantDeep: 111, wantLight: 309, wantREM: 142, wantAwake: 6,
+			wantScore: 83, wantRestingHR: 52, windowFromStartEnd: 568,
+		},
+		{
+			name:      "2026-08-12",
+			summary:   `{"dp":97,"lt":258,"dt":87,"wk":1,"ss":84,"rhr":52,"st":1786491120,"ed":1786517700}`,
+			wantTotal: 442, wantDeep: 97, wantLight: 258, wantREM: 87, wantAwake: 1,
+			wantScore: 84, wantRestingHR: 52, windowFromStartEnd: 443,
+		},
+	}
+
+	for _, night := range nights {
+		t.Run(night.name, func(t *testing.T) {
+			summary, _, err := decodeZeppSummary(zeppSummaryFixture(t, `{"slp":`+night.summary+`}`))
+			if err != nil {
+				t.Fatalf("decode failed: %v", err)
+			}
+			slp := summary.Sleep
+			if slp == nil {
+				t.Fatal("no sleep block")
+			}
+			if slp.DeepMinutes != night.wantDeep || slp.LightMinutes != night.wantLight ||
+				slp.REMMinutes != night.wantREM || slp.AwakeMinutes != night.wantAwake {
+				t.Errorf("phases = %d/%d/%d/%d, want %d/%d/%d/%d",
+					slp.DeepMinutes, slp.LightMinutes, slp.REMMinutes, slp.AwakeMinutes,
+					night.wantDeep, night.wantLight, night.wantREM, night.wantAwake)
+			}
+			if slp.SleepScore != night.wantScore || slp.RestingHR != night.wantRestingHR {
+				t.Errorf("score/rhr = %d/%d, want %d/%d",
+					slp.SleepScore, slp.RestingHR, night.wantScore, night.wantRestingHR)
+			}
+
+			total := slp.DeepMinutes + slp.LightMinutes + slp.REMMinutes
+			if total != night.wantTotal {
+				t.Errorf("total = %d, want %d", total, night.wantTotal)
+			}
+			// The bed window equals the phases plus awake time, exactly. That
+			// identity is the independent proof that dt is REM and wk is awake:
+			// any other reading of those two fields breaks it.
+			window := int((slp.End - slp.Start) / 60)
+			if window != night.windowFromStartEnd {
+				t.Errorf("window = %d, want %d", window, night.windowFromStartEnd)
+			}
+			if got := total + slp.AwakeMinutes; got != window {
+				t.Errorf("phases + awake = %d, want the %d minute window", got, window)
+			}
+		})
+	}
 }
 
 func TestZeppSleepStageName(t *testing.T) {
@@ -322,7 +397,7 @@ func TestZeppSummaryExtraFields(t *testing.T) {
 		"slp":{"dp":62,"lt":274,"rhr":54,"st":1786000000,"ed":1786025000},
 		"hr":{"maxHr":{"hr":124,"ts":1786305257}},"sn":"ABC123"}`)
 
-	summary, err := decodeZeppSummary(encoded)
+	summary, _, err := decodeZeppSummary(encoded)
 	if err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}

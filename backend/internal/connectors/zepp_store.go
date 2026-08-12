@@ -21,7 +21,10 @@ func (z *ZeppConnector) storeBandDay(ctx context.Context, userID string, day zep
 		return 0, false, 0, fmt.Errorf("parse date %q: %w", day.DateTime, err)
 	}
 
-	summary, err := decodeZeppSummary(day.Summary)
+	// The decoded summary is kept verbatim for raw_payload: storing the parsed
+	// struct instead dropped every field the struct did not model, which is what
+	// made the phase mapping impossible to check without re-fetching from the API.
+	summary, rawSummary, err := decodeZeppSummary(day.Summary)
 	if err != nil {
 		return 0, false, 0, fmt.Errorf("summary: %w", err)
 	}
@@ -60,7 +63,7 @@ func (z *ZeppConnector) storeBandDay(ctx context.Context, userID string, day zep
 		return saved, false, heartRates, err
 	}
 
-	stored, err := z.storeSleep(ctx, userID, dayStart, summary.Sleep)
+	stored, err := z.storeSleep(ctx, userID, dayStart, summary.Sleep, rawSummary)
 	if err != nil {
 		return saved, false, heartRates, err
 	}
@@ -86,9 +89,8 @@ func (z *ZeppConnector) storeHeartRate(ctx context.Context, userID string, daySt
 	return saved, nil
 }
 
-// storeSleep writes one night into sleep_sessions plus its stage spans. REM and
-// awake minutes come from the spans: the summary itself only totals deep and light.
-func (z *ZeppConnector) storeSleep(ctx context.Context, userID string, dayStart time.Time, sleep *zeppSleep) (bool, error) {
+// storeSleep writes one night into sleep_sessions plus its stage spans.
+func (z *ZeppConnector) storeSleep(ctx context.Context, userID string, dayStart time.Time, sleep *zeppSleep, rawSummary []byte) (bool, error) {
 	if sleep == nil || (sleep.DeepMinutes == 0 && sleep.LightMinutes == 0 && len(sleep.Stages) == 0) {
 		return false, nil
 	}
@@ -96,10 +98,14 @@ func (z *ZeppConnector) storeSleep(ctx context.Context, userID string, dayStart 
 	intervals := zeppSleepSpans(dayStart, sleep)
 	totals := zeppSleepTotals(intervals)
 
-	deep := firstPositive(totals["deep"], sleep.DeepMinutes)
-	light := firstPositive(totals["light"], sleep.LightMinutes)
-	rem := totals["rem"]
-	awake := totals["awake"]
+	// The summary wins over the spans: merging spans loses a few minutes per
+	// night, which is why the stored total used to read ~25 minutes short of what
+	// the Zepp app shows. Spans stay as the fallback for a summary that omits a
+	// phase entirely.
+	deep := firstPositive(sleep.DeepMinutes, totals["deep"])
+	light := firstPositive(sleep.LightMinutes, totals["light"])
+	rem := firstPositive(sleep.REMMinutes, totals["rem"])
+	awake := firstPositive(sleep.AwakeMinutes, totals["awake"])
 	total := deep + light + rem
 
 	var start, end *time.Time
@@ -112,14 +118,14 @@ func (z *ZeppConnector) storeSleep(ctx context.Context, userID string, dayStart 
 		end = &value
 	}
 
-	raw, _ := json.Marshal(sleep)
 	var sessionID string
 	err := z.db.QueryRow(ctx, `
 		INSERT INTO sleep_sessions (
 			user_id, source, date, sleep_start, sleep_end, total_sleep_minutes,
-			deep_sleep_minutes, light_sleep_minutes, rem_sleep_minutes, awake_minutes, raw_payload
+			deep_sleep_minutes, light_sleep_minutes, rem_sleep_minutes, awake_minutes,
+			sleep_score, avg_resting_hr, raw_payload
 		)
-		VALUES ($1, $2, $3::date, $4, $5, NULLIF($6, 0), NULLIF($7, 0), NULLIF($8, 0), NULLIF($9, 0), NULLIF($10, 0), $11::jsonb)
+		VALUES ($1, $2, $3::date, $4, $5, NULLIF($6, 0), NULLIF($7, 0), NULLIF($8, 0), NULLIF($9, 0), NULLIF($10, 0), NULLIF($11, 0), NULLIF($12, 0), $13::jsonb)
 		ON CONFLICT (user_id, source, date) DO UPDATE SET
 			sleep_start = EXCLUDED.sleep_start,
 			sleep_end = EXCLUDED.sleep_end,
@@ -128,9 +134,12 @@ func (z *ZeppConnector) storeSleep(ctx context.Context, userID string, dayStart 
 			light_sleep_minutes = EXCLUDED.light_sleep_minutes,
 			rem_sleep_minutes = EXCLUDED.rem_sleep_minutes,
 			awake_minutes = EXCLUDED.awake_minutes,
+			sleep_score = EXCLUDED.sleep_score,
+			avg_resting_hr = EXCLUDED.avg_resting_hr,
 			raw_payload = EXCLUDED.raw_payload
 		RETURNING id
-	`, userID, zeppSource, dayStart, start, end, total, deep, light, rem, awake, raw).Scan(&sessionID)
+	`, userID, zeppSource, dayStart, start, end, total, deep, light, rem, awake,
+		sleep.SleepScore, sleep.RestingHR, rawSummary).Scan(&sessionID)
 	if err != nil {
 		return false, fmt.Errorf("upsert sleep session: %w", err)
 	}

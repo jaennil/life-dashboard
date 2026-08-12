@@ -72,11 +72,23 @@ type zeppHeart struct {
 	} `json:"maxHr"`
 }
 
+// zeppSleep is the summary block. The field names were mapped by comparing three
+// nights against both the stage spans and what the Zepp app itself displays:
+//
+//	dp + lt + dt matched ed - st to within a minute, and matched the app's total,
+//	while the spans came out 3-6% short because merging loses minutes. The summary
+//	is therefore the authority and the spans are only a fallback.
+//
+//	dt  is REM ("dream time"), not daytime sleep: 84/142/87 against 82/131/79 REM
+//	    minutes derived from mode-8 spans.
+//	wk  is awake minutes: 17/6/1 against 16/5/0 from mode-7 spans.
+//	ss  is the sleep score the app shows.
 type zeppSleep struct {
-	// DeepMinutes and LightMinutes are the summary totals. Note lt is LIGHT sleep:
-	// the zepp_to_influxdb reference records it as REM, which is wrong.
 	DeepMinutes  int             `json:"dp"`
 	LightMinutes int             `json:"lt"`
+	REMMinutes   int             `json:"dt"`
+	AwakeMinutes int             `json:"wk"`
+	SleepScore   int             `json:"ss"`
 	RestingHR    int             `json:"rhr"`
 	Start        int64           `json:"st"`
 	End          int64           `json:"ed"`
@@ -145,20 +157,21 @@ func zeppHeaders(appToken, requestID, timezone, country string) map[string]strin
 	}
 }
 
-// decodeZeppSummary unwraps the base64-encoded JSON summary of one day.
-func decodeZeppSummary(encoded string) (zeppSummary, error) {
+// decodeZeppSummary unwraps the base64-encoded JSON and returns both the parsed
+// view and the raw document, so callers can archive what they did not model.
+func decodeZeppSummary(encoded string) (zeppSummary, []byte, error) {
 	var summary zeppSummary
 	if encoded == "" {
-		return summary, fmt.Errorf("empty summary")
+		return summary, nil, fmt.Errorf("empty summary")
 	}
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return summary, fmt.Errorf("base64: %w", err)
+		return summary, nil, fmt.Errorf("base64: %w", err)
 	}
 	if err := json.Unmarshal(decoded, &summary); err != nil {
-		return summary, fmt.Errorf("json: %w", err)
+		return summary, decoded, fmt.Errorf("json: %w", err)
 	}
-	return summary, nil
+	return summary, decoded, nil
 }
 
 type zeppHeartRateSample struct {
