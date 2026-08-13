@@ -422,33 +422,11 @@ func zenmoneyAccountInBalance(acc *zenmoneyAccount) bool {
 }
 
 func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, userID string, tx *zenmoneyTransaction, currencies map[int]string, tagNames map[string]string) error {
-	isTransfer := tx.Income > 0 && tx.Outcome > 0
-
-	var accountExternalID string
-	var amount float64
-	var currencyID int
-	if tx.Income > 0 {
-		accountExternalID = tx.IncomeAccount
-		amount = tx.Income
-		currencyID = tx.IncomeCurrency
-	} else {
-		accountExternalID = tx.OutcomeAccount
-		amount = -tx.Outcome
-		currencyID = tx.OutcomeCurrency
-	}
-
-	currency := currencies[currencyID]
-	if currency == "" {
-		currency = "RUB"
-	}
-
-	var accountID *string
-	if accountExternalID != "" {
-		var id string
-		if err := z.db.QueryRow(ctx, `SELECT id FROM accounts WHERE external_id = $1 AND user_id = $2`, accountExternalID, userID).Scan(&id); err == nil {
-			accountID = &id
-		}
-	}
+	// A ZenMoney transfer carries both an income and an outcome, on two different
+	// accounts. Recording only one of them leaves money that arrives and never
+	// leaves: every transfer used to be stored as a lone credit, which made the
+	// per-account balance drift by the whole transferred amount.
+	legs := zenmoneyTransactionLegs(tx)
 
 	date, err := time.Parse("2006-01-02", tx.Date)
 	if err != nil {
@@ -462,27 +440,106 @@ func (z *ZenmoneyConnector) upsertTransaction(ctx context.Context, userID string
 		}
 	}
 
-	_, err = z.db.Exec(ctx, `
-		INSERT INTO transactions (external_id, account_id, occurred_at, amount, currency, payee, comment, tags, category, is_transfer, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		ON CONFLICT (user_id, external_id) DO UPDATE SET
-			account_id  = EXCLUDED.account_id,
-			occurred_at = EXCLUDED.occurred_at,
-			amount      = EXCLUDED.amount,
-			currency    = EXCLUDED.currency,
-			payee       = EXCLUDED.payee,
-			comment     = EXCLUDED.comment,
-			tags        = EXCLUDED.tags,
-			category    = EXCLUDED.category,
-			is_transfer = EXCLUDED.is_transfer
-	`, tx.ID, accountID, date, amount, currency, tx.Payee, tx.Comment, tx.Tag, category, isTransfer, userID)
-
-	if err != nil {
-		return err
+	// A transfer is stored under suffixed identifiers, so the legacy single row
+	// written before this split has to go or the amount would be counted twice.
+	if len(legs) > 1 {
+		if _, err := z.db.Exec(ctx,
+			`DELETE FROM transactions WHERE user_id = $1 AND external_id = $2`, userID, tx.ID); err != nil {
+			return err
+		}
 	}
 
-	z.logger.Debug().Str("id", tx.ID).Str("date", tx.Date).Float64("amount", amount).Msg("transaction upserted")
+	for _, leg := range legs {
+		currency := currencies[leg.currencyID]
+		if currency == "" {
+			currency = "RUB"
+		}
+
+		var accountID *string
+		if leg.accountExternalID != "" {
+			var id string
+			if err := z.db.QueryRow(ctx,
+				`SELECT id FROM accounts WHERE external_id = $1 AND user_id = $2`,
+				leg.accountExternalID, userID).Scan(&id); err == nil {
+				accountID = &id
+			}
+		}
+
+		if _, err := z.db.Exec(ctx, `
+			INSERT INTO transactions (external_id, account_id, occurred_at, amount, currency, payee, comment, tags, category, is_transfer, user_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			ON CONFLICT (user_id, external_id) DO UPDATE SET
+				account_id  = EXCLUDED.account_id,
+				occurred_at = EXCLUDED.occurred_at,
+				amount      = EXCLUDED.amount,
+				currency    = EXCLUDED.currency,
+				payee       = EXCLUDED.payee,
+				comment     = EXCLUDED.comment,
+				tags        = EXCLUDED.tags,
+				category    = EXCLUDED.category,
+				is_transfer = EXCLUDED.is_transfer
+		`, leg.externalID, accountID, date, leg.amount, currency,
+			tx.Payee, tx.Comment, tx.Tag, category, leg.isTransfer, userID); err != nil {
+			return err
+		}
+
+		z.logger.Debug().
+			Str("id", leg.externalID).
+			Str("date", tx.Date).
+			Float64("amount", leg.amount).
+			Bool("transfer", leg.isTransfer).
+			Msg("transaction upserted")
+	}
 	return nil
+}
+
+// zenmoneyTransactionLeg is one side of a ZenMoney record as stored locally.
+type zenmoneyTransactionLeg struct {
+	externalID        string
+	accountExternalID string
+	amount            float64
+	currencyID        int
+	isTransfer        bool
+}
+
+// zenmoneyTransactionLegs splits a record into the rows it should produce: one
+// for a plain income or expense, and two for a transfer. The transfer legs get
+// suffixed identifiers because external_id is unique per user.
+func zenmoneyTransactionLegs(tx *zenmoneyTransaction) []zenmoneyTransactionLeg {
+	isTransfer := tx.Income > 0 && tx.Outcome > 0
+	if isTransfer {
+		return []zenmoneyTransactionLeg{
+			{
+				externalID:        tx.ID + ":out",
+				accountExternalID: tx.OutcomeAccount,
+				amount:            -tx.Outcome,
+				currencyID:        tx.OutcomeCurrency,
+				isTransfer:        true,
+			},
+			{
+				externalID:        tx.ID + ":in",
+				accountExternalID: tx.IncomeAccount,
+				amount:            tx.Income,
+				currencyID:        tx.IncomeCurrency,
+				isTransfer:        true,
+			},
+		}
+	}
+
+	if tx.Income > 0 {
+		return []zenmoneyTransactionLeg{{
+			externalID:        tx.ID,
+			accountExternalID: tx.IncomeAccount,
+			amount:            tx.Income,
+			currencyID:        tx.IncomeCurrency,
+		}}
+	}
+	return []zenmoneyTransactionLeg{{
+		externalID:        tx.ID,
+		accountExternalID: tx.OutcomeAccount,
+		amount:            -tx.Outcome,
+		currencyID:        tx.OutcomeCurrency,
+	}}
 }
 
 func (z *ZenmoneyConnector) deleteTransaction(ctx context.Context, userID string, externalID string) error {
