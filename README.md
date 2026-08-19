@@ -2,7 +2,7 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000018`. JSON payloads,
+The diagram reflects migrations `000001` through `000019`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability.
 
 ```mermaid
@@ -15,6 +15,7 @@ erDiagram
         boolean totp_enabled
         timestamptz created_at
         timestamptz last_active_at
+        boolean sync_priority
     }
 
     sync_state {
@@ -452,6 +453,7 @@ Application identities and account security settings.
 | `totp_enabled` | `boolean` | Whether TOTP authentication is required. |
 | `created_at` | `timestamptz`, nullable | Account creation time. |
 | `last_active_at` | `timestamptz`, nullable | Most recent activity used to schedule integrations. |
+| `sync_priority` | `boolean` | Exempts the user from activity-based throttling: shortest interval per source, never dormant, minimal failure backoff. |
 
 #### `sync_state`
 
