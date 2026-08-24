@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 func TestFormatAIWorkoutContextIncludesHevyDetails(t *testing.T) {
@@ -441,5 +444,69 @@ func TestFormatAIMealTypesTranslatesKnownMeals(t *testing.T) {
 		if labels[i] != label {
 			t.Fatalf("expected label %q at index %d, got %q", label, i, labels[i])
 		}
+	}
+}
+
+func TestUpstreamBodyOmitsReasoningEffortWhenUnset(t *testing.T) {
+	h := NewAI(nil, AIOptions{Model: "some-model"}, nil, nil, zerolog.Nop())
+
+	raw, err := h.upstreamBody([]ChatMessage{{Role: "user", Content: "hi"}}, true)
+	if err != nil {
+		t.Fatalf("upstreamBody: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// Sending the key with an empty value is not the same as omitting it:
+	// providers that do not support it reject the request outright.
+	if _, present := payload["reasoning_effort"]; present {
+		t.Fatal("reasoning_effort present although no effort is configured")
+	}
+	if payload["stream"] != true {
+		t.Fatalf("stream = %v, want true", payload["stream"])
+	}
+	if payload["model"] != "some-model" {
+		t.Fatalf("model = %v", payload["model"])
+	}
+}
+
+func TestUpstreamBodySendsConfiguredReasoningEffort(t *testing.T) {
+	h := NewAI(nil, AIOptions{Model: "some-model", ReasoningEffort: "high"}, nil, nil, zerolog.Nop())
+
+	raw, err := h.upstreamBody([]ChatMessage{{Role: "user", Content: "hi"}}, false)
+	if err != nil {
+		t.Fatalf("upstreamBody: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort = %v, want high", payload["reasoning_effort"])
+	}
+	if payload["stream"] != false {
+		t.Fatalf("stream = %v, want false", payload["stream"])
+	}
+}
+
+func TestNewAIFallsBackToDefaultTimeout(t *testing.T) {
+	h := NewAI(nil, AIOptions{Model: "m"}, nil, nil, zerolog.Nop())
+	if got := h.upstreamTimeout(); got != aiUpstreamDefaultTimeout {
+		t.Fatalf("timeout = %s, want %s", got, aiUpstreamDefaultTimeout)
+	}
+
+	h = NewAI(nil, AIOptions{Model: "m", RequestTimeout: 42 * time.Second}, nil, nil, zerolog.Nop())
+	if got := h.upstreamTimeout(); got != 42*time.Second {
+		t.Fatalf("timeout = %s, want 42s", got)
+	}
+}
+
+func TestNewAITrimsBaseURLSlash(t *testing.T) {
+	h := NewAI(nil, AIOptions{BaseURL: "http://example.test:8000/"}, nil, nil, zerolog.Nop())
+	if h.opts.BaseURL != "http://example.test:8000" {
+		t.Fatalf("base url = %q", h.opts.BaseURL)
 	}
 }

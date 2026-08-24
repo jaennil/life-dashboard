@@ -1,6 +1,10 @@
 package config
 
-import "github.com/spf13/viper"
+import (
+	"time"
+
+	"github.com/spf13/viper"
+)
 
 type Config struct {
 	Server     ServerConfig     `mapstructure:"server"`
@@ -113,6 +117,13 @@ type AIConfig struct {
 	Model    string `mapstructure:"model"`
 	BaseURL  string `mapstructure:"base_url"`
 	APIKey   string `mapstructure:"api_key"`
+	// ReasoningEffort is passed through to the upstream as reasoning_effort.
+	// Empty means the field is omitted entirely, because a provider that does
+	// not know it rejects the whole request rather than ignoring it.
+	ReasoningEffort string `mapstructure:"reasoning_effort"`
+	// RequestTimeout has to cover thinking, not just writing: a reasoning model
+	// on a high effort setting can spend minutes before it emits a first token.
+	RequestTimeout time.Duration `mapstructure:"request_timeout"`
 }
 
 type LogConfig struct {
@@ -175,7 +186,10 @@ func Load() (*Config, error) {
 	viper.SetDefault("database.max_conns", 10)
 	viper.BindEnv("ai.base_url", "AI_BASE_URL")
 	viper.BindEnv("ai.model", "AI_MODEL")
+	viper.BindEnv("ai.reasoning_effort", "AI_REASONING_EFFORT")
+	viper.BindEnv("ai.request_timeout", "AI_REQUEST_TIMEOUT")
 	viper.SetDefault("ai.provider", "claude-code-api")
+	viper.SetDefault("ai.request_timeout", 10*time.Minute)
 	viper.SetDefault("ai.model", "claude-opus-4-5-20251101")
 	viper.SetDefault("ai.base_url", "http://host.docker.internal:8000")
 	viper.SetDefault("log.level", "debug")

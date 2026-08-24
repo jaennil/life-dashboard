@@ -23,12 +23,24 @@ import (
 
 type AIHandler struct {
 	db      *pgxpool.Pool
-	baseURL string
-	model   string
-	apiKey  string
+	opts    AIOptions
 	weather *WeatherHandler
 	unleash *unleashclient.Client
 	logger  zerolog.Logger
+}
+
+// AIOptions carries the upstream settings. They travel as a struct rather than
+// as positional arguments because they are otherwise three interchangeable
+// strings that are easy to pass in the wrong order.
+type AIOptions struct {
+	BaseURL string
+	Model   string
+	APIKey  string
+	// ReasoningEffort is sent as reasoning_effort when set, and omitted when not.
+	ReasoningEffort string
+	// RequestTimeout bounds a single upstream call. Zero falls back to the
+	// default below.
+	RequestTimeout time.Duration
 }
 
 var aiDisplayLocation = func() *time.Location {
@@ -39,16 +51,43 @@ var aiDisplayLocation = func() *time.Location {
 	return time.FixedZone("MSK", 3*60*60)
 }()
 
-func NewAI(db *pgxpool.Pool, baseURL, model, apiKey string, weather *WeatherHandler, unleashClient *unleashclient.Client, logger zerolog.Logger) *AIHandler {
+func NewAI(db *pgxpool.Pool, opts AIOptions, weather *WeatherHandler, unleashClient *unleashclient.Client, logger zerolog.Logger) *AIHandler {
+	opts.BaseURL = strings.TrimRight(opts.BaseURL, "/")
+	if opts.RequestTimeout <= 0 {
+		opts.RequestTimeout = aiUpstreamDefaultTimeout
+	}
 	return &AIHandler{
 		db:      db,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		model:   model,
-		apiKey:  apiKey,
+		opts:    opts,
 		weather: weather,
 		unleash: unleashClient,
 		logger:  logger.With().Str("handler", "ai").Logger(),
 	}
+}
+
+// upstreamBody builds the chat-completions payload. reasoning_effort only
+// appears when configured: providers that do not know the field answer 400 for
+// the whole request instead of ignoring the extra key.
+func (h *AIHandler) upstreamBody(messages []ChatMessage, stream bool) ([]byte, error) {
+	payload := map[string]any{
+		"model":    h.opts.Model,
+		"messages": messages,
+		"stream":   stream,
+	}
+	if h.opts.ReasoningEffort != "" {
+		payload["reasoning_effort"] = h.opts.ReasoningEffort
+	}
+	return json.Marshal(payload)
+}
+
+// upstreamTimeout is the budget for one call, and doubles as the time allowed
+// before the first byte: a thinking model stays silent while it reasons, so a
+// separate, shorter header timeout would cut off exactly the calls we want.
+func (h *AIHandler) upstreamTimeout() time.Duration {
+	if h.opts.RequestTimeout > 0 {
+		return h.opts.RequestTimeout
+	}
+	return aiUpstreamDefaultTimeout
 }
 
 type ChatMessage struct {
@@ -104,8 +143,7 @@ type aiProgressUpdate struct {
 
 const (
 	aiUpstreamDialTimeout     = 5 * time.Second
-	aiUpstreamHeaderTimeout   = 150 * time.Second
-	aiUpstreamRequestTimeout  = 150 * time.Second
+	aiUpstreamDefaultTimeout  = 10 * time.Minute
 	aiUpstreamResponseLogSize = 512
 	aiJournalDefaultLimit     = 300
 	aiCheckupJournalTotalSize = 50000
@@ -384,31 +422,27 @@ func (h *AIHandler) complete(ctx context.Context, operation string, messages []C
 		observability.ObserveAIUpstream(operation, observability.AIStatusFromError(err), time.Since(start))
 	}()
 
-	body, err := json.Marshal(map[string]any{
-		"model":    h.model,
-		"messages": messages,
-		"stream":   false,
-	})
+	body, err := h.upstreamBody(messages, false)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("marshal ai request")
 		return "", err
 	}
 
-	upstreamCtx, cancel := context.WithTimeout(ctx, aiUpstreamRequestTimeout)
+	upstreamCtx, cancel := context.WithTimeout(ctx, h.upstreamTimeout())
 	defer cancel()
 
 	apiReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost,
-		h.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+		h.opts.BaseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	apiReq.Header.Set("Content-Type", "application/json")
-	if h.apiKey != "" {
-		apiReq.Header.Set("Authorization", "Bearer "+h.apiKey)
+	if h.opts.APIKey != "" {
+		apiReq.Header.Set("Authorization", "Bearer "+h.opts.APIKey)
 	}
 
 	client := &http.Client{
-		Timeout: aiUpstreamRequestTimeout,
+		Timeout: h.upstreamTimeout(),
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
@@ -416,7 +450,7 @@ func (h *AIHandler) complete(ctx context.Context, operation string, messages []C
 				KeepAlive: 30 * time.Second,
 			}).DialContext,
 			TLSHandshakeTimeout:   aiUpstreamDialTimeout,
-			ResponseHeaderTimeout: aiUpstreamHeaderTimeout,
+			ResponseHeaderTimeout: h.upstreamTimeout(),
 		},
 	}
 
@@ -473,31 +507,27 @@ func (h *AIHandler) completeStream(ctx context.Context, operation string, messag
 		observability.ObserveAIUpstream(operation, observability.AIStatusFromError(err), time.Since(start))
 	}()
 
-	body, err := json.Marshal(map[string]any{
-		"model":    h.model,
-		"messages": messages,
-		"stream":   true,
-	})
+	body, err := h.upstreamBody(messages, true)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("marshal ai stream request")
 		return "", err
 	}
 
-	upstreamCtx, cancel := context.WithTimeout(ctx, aiUpstreamRequestTimeout)
+	upstreamCtx, cancel := context.WithTimeout(ctx, h.upstreamTimeout())
 	defer cancel()
 
 	apiReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost,
-		h.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+		h.opts.BaseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	apiReq.Header.Set("Content-Type", "application/json")
-	if h.apiKey != "" {
-		apiReq.Header.Set("Authorization", "Bearer "+h.apiKey)
+	if h.opts.APIKey != "" {
+		apiReq.Header.Set("Authorization", "Bearer "+h.opts.APIKey)
 	}
 
 	client := &http.Client{
-		Timeout: aiUpstreamRequestTimeout,
+		Timeout: h.upstreamTimeout(),
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
@@ -505,7 +535,7 @@ func (h *AIHandler) completeStream(ctx context.Context, operation string, messag
 				KeepAlive: 30 * time.Second,
 			}).DialContext,
 			TLSHandshakeTimeout:   aiUpstreamDialTimeout,
-			ResponseHeaderTimeout: aiUpstreamHeaderTimeout,
+			ResponseHeaderTimeout: h.upstreamTimeout(),
 		},
 	}
 
