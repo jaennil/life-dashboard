@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pquerna/otp/totp"
 	"github.com/rs/zerolog"
 	"golang.org/x/crypto/bcrypt"
 
 	"life-dashboard/internal/middleware"
+	"life-dashboard/internal/session"
 	"life-dashboard/internal/syncstate"
 )
 
@@ -137,32 +137,15 @@ func (h *UsersHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UsersHandler) issueToken(ctx context.Context, w http.ResponseWriter, r *http.Request, id, username string, totpEnabled bool) {
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub":      id,
-		"username": username,
-		"exp":      time.Now().Add(7 * 24 * time.Hour).Unix(),
-		"iat":      time.Now().Unix(),
-	})
-	signed, err := token.SignedString([]byte(h.jwtSecret))
-	if err != nil {
-		h.logger.Error().Err(err).Msg("sign jwt")
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
 	if err := syncstate.ForceUserActivity(ctx, h.db, id); err != nil {
 		h.logger.Warn().Err(err).Str("user_id", id).Msg("touch user activity on login")
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "token",
-		Value:    signed,
-		Path:     "/",
-		MaxAge:   7 * 24 * 3600,
-		HttpOnly: true,
-		Secure:   isSecureRequest(r),
-		SameSite: http.SameSiteLaxMode,
-	})
+	if err := session.Issue(w, r, h.jwtSecret, id, username, time.Now()); err != nil {
+		h.logger.Error().Err(err).Msg("sign jwt")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	h.logger.Info().Str("username", username).Msg("user logged in")
 	w.Header().Set("Content-Type", "application/json")
@@ -170,15 +153,7 @@ func (h *UsersHandler) issueToken(ctx context.Context, w http.ResponseWriter, r 
 }
 
 func (h *UsersHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "token",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		Secure:   isSecureRequest(r),
-		SameSite: http.SameSiteLaxMode,
-	})
+	session.Clear(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }
 

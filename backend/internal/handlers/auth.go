@@ -15,6 +15,7 @@ import (
 	"life-dashboard/internal/connectors"
 	"life-dashboard/internal/middleware"
 	"life-dashboard/internal/observability"
+	"life-dashboard/internal/session"
 )
 
 type AuthHandler struct {
@@ -329,7 +330,7 @@ func oauthStateCookieName(source string) string {
 }
 
 func isSecureRequest(r *http.Request) bool {
-	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	return session.SecureRequest(r)
 }
 
 func (h *AuthHandler) runInitialSync(source string, userID string, conn connectors.Connector) error {

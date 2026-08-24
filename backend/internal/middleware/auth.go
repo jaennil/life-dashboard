@@ -6,6 +6,8 @@ import (
 
 	sentry "github.com/getsentry/sentry-go"
 	"github.com/golang-jwt/jwt/v5"
+
+	"life-dashboard/internal/session"
 )
 
 type contextKey string
@@ -16,7 +18,7 @@ const UsernameKey contextKey = "username"
 func Auth(jwtSecret string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			cookie, err := r.Cookie("token")
+			cookie, err := r.Cookie(session.CookieName)
 			if err != nil {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
@@ -44,6 +46,11 @@ func Auth(jwtSecret string) func(http.Handler) http.Handler {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
+
+			// Renewed here rather than at login so a session that keeps being
+			// used keeps living. Failure to renew is not failure to authorise:
+			// the request proceeds on the token it already presented.
+			session.Renew(w, r, jwtSecret, claims)
 
 			ctx := context.WithValue(r.Context(), UserIDKey, userID)
 			if username, ok := claims["username"].(string); ok && username != "" {
