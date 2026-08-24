@@ -62,8 +62,37 @@ func TestCheckupToolExecutionsOrder(t *testing.T) {
 	}
 
 	executions := handler.checkupToolExecutions(context.Background(), "user-1", window)
-	if len(executions) != 9 {
-		t.Fatalf("expected 9 executions, got %d", len(executions))
+	if len(executions) != 10 {
+		t.Fatalf("expected 10 executions, got %d", len(executions))
+	}
+
+	// The daily series is the one execution that does not follow the report
+	// window: it always spans its own 90 days, so it carries neither the
+	// requested period nor the window boundaries.
+	if executions[0].Name != aiToolDailySeries {
+		t.Fatalf("expected the daily series first, got %q", executions[0].Name)
+	}
+	if executions[0].Section != "сводный дневной ряд" {
+		t.Fatalf("daily series section = %q", executions[0].Section)
+	}
+	if executions[0].Days != aiDailySeriesDefaultDays {
+		t.Fatalf("daily series days = %d, want %d", executions[0].Days, aiDailySeriesDefaultDays)
+	}
+	if executions[0].RequestedPeriod != "" {
+		t.Fatalf("daily series must not claim the report period, got %q", executions[0].RequestedPeriod)
+	}
+	// The window is anchored to now rather than to the report period, so the
+	// assertion is on its span: the test period itself sits in the past.
+	if executions[0].Start == nil || executions[0].End == nil {
+		t.Fatal("daily series is missing its window")
+	}
+	span := executions[0].End.Sub(*executions[0].Start)
+	wantSpan := time.Duration(aiDailySeriesDefaultDays-1) * 24 * time.Hour
+	if span < wantSpan-time.Hour || span > wantSpan+time.Hour {
+		t.Fatalf("daily series spans %s, want about %s", span, wantSpan)
+	}
+	if executions[0].Run == nil || executions[0].Data == nil {
+		t.Fatal("daily series is missing its run or data func")
 	}
 
 	expected := []struct {
@@ -81,7 +110,8 @@ func TestCheckupToolExecutionsOrder(t *testing.T) {
 		{aiToolCalendarOverview, "календарь"},
 	}
 
-	for i, item := range expected {
+	for offset, item := range expected {
+		i := offset + 1
 		if executions[i].Name != item.name {
 			t.Fatalf("expected execution %d to be %q, got %q", i, item.name, executions[i].Name)
 		}

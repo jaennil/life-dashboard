@@ -25,6 +25,7 @@ const (
 	aiToolJournalOverview      aiToolName = "journal_overview"
 	aiToolCalendarOverview     aiToolName = "calendar_overview"
 	aiToolWeatherOverview      aiToolName = "weather_overview"
+	aiToolDailySeries          aiToolName = "daily_series"
 )
 
 const (

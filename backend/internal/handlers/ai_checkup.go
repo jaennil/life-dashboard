@@ -430,7 +430,49 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 		return data, nil
 	}
 
+	seriesStart := time.Now().In(aiDisplayLocation).AddDate(0, 0, -(aiDailySeriesDefaultDays - 1))
+	seriesEnd := time.Now().In(aiDisplayLocation)
+	var seriesData *AIDailySeriesData
+	loadSeriesData := func() (AIDailySeriesData, error) {
+		if seriesData != nil {
+			return *seriesData, nil
+		}
+		data, err := h.buildDailySeries(ctx, userID, aiDailySeriesDefaultDays)
+		if err != nil {
+			return AIDailySeriesData{}, err
+		}
+		seriesData = &data
+		return data, nil
+	}
+
 	return []aiToolExecution{
+		{
+			// Deliberately first and deliberately wider than the report window:
+			// this is the only section where the domains sit on the same rows, so
+			// it is the only one that can support a claim about one affecting
+			// another.
+			Name:    aiToolDailySeries,
+			Section: "сводный дневной ряд",
+			Days:    aiDailySeriesDefaultDays,
+			Start:   &seriesStart,
+			End:     &seriesEnd,
+			Data: func() (any, error) {
+				data, err := loadSeriesData()
+				if err != nil {
+					return nil, err
+				}
+				return data, nil
+			},
+			Run: func(sb *strings.Builder) error {
+				data, err := loadSeriesData()
+				if err != nil {
+					return err
+				}
+				sb.WriteString("\n")
+				sb.WriteString(renderDailySeriesText(data))
+				return nil
+			},
+		},
 		{
 			Name:            aiToolFinanceOverview,
 			Section:         "финансы",
