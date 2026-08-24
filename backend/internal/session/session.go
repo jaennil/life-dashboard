@@ -20,8 +20,11 @@ import (
 const CookieName = "token"
 
 const (
-	// TTL is how long a freshly issued token stays valid.
-	TTL = 7 * 24 * time.Hour
+	// TTL is how long a freshly issued token stays valid. It is long because the
+	// phone is the main client and being asked to log in again there is the whole
+	// complaint this policy exists to answer; renewal keeps an active session
+	// from ever reaching it.
+	TTL = 30 * 24 * time.Hour
 	// MaxLifetime caps renewal against the original login rather than the
 	// current token, so a stolen cookie cannot be renewed indefinitely. Past
 	// this the account has to log in again.
