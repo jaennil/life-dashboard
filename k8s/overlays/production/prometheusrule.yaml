@@ -39,20 +39,13 @@ spec:
     - name: life-dashboard.integrations
       rules:
         - alert: LifeDashboardSyncErrors
-          expr: |
-            sum by (source) (
-              increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",status="error"}[1h])
-            ) >= 2
-            and on (source)
-            sum by (source) (
-              increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",status="success"}[30m])
-            ) == 0
-          for: 5m
+          expr: increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",status="error"}[15m]) > 0
+          for: 0m
           labels:
             severity: warning
           annotations:
-            summary: Life Dashboard {{ $labels.source }} sync keeps failing
-            description: Connector {{ $labels.source }} failed at least twice in one hour without a successful sync in the last 30 minutes.
+            summary: Life Dashboard sync errors detected
+            description: One or more connector sync runs failed in the last 15 minutes.
     - name: life-dashboard.ai
       rules:
         - alert: LifeDashboardAIUpstreamErrors
