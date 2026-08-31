@@ -2,7 +2,7 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000020`. JSON payloads,
+The diagram reflects migrations `000001` through `000021`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability.
 
 ```mermaid
@@ -74,6 +74,26 @@ erDiagram
         integer reps
         integer duration_seconds
         numeric rpe
+    }
+
+    voice_workout_sessions {
+        uuid id PK
+        uuid user_id FK
+        varchar status
+        timestamptz started_at
+        timestamptz last_utterance_at
+        timestamptz finished_at
+        varchar title
+        integer duration_seconds
+        varchar hevy_workout_id
+    }
+
+    voice_workout_utterances {
+        uuid id PK
+        uuid session_id FK
+        timestamptz said_at
+        text text
+        boolean is_finish
     }
 
     hevy_exercise_templates {
@@ -409,6 +429,8 @@ erDiagram
     workouts o|--o{ workout_sets : contains
     users ||--o{ workout_routines : owns
     users ||--o{ hevy_exercise_templates : owns custom
+    users ||--o{ voice_workout_sessions : dictates
+    voice_workout_sessions ||--o{ voice_workout_utterances : collects
     workout_routines ||--o{ routine_exercises : contains
     routine_exercises ||--o{ routine_sets : contains
     users ||--o{ activities : records
@@ -602,6 +624,47 @@ Planned sets attached to routine exercises.
 | `distance_meters` | `numeric(10,2)`, nullable | Planned distance in meters. |
 | `duration_seconds` | `integer`, nullable | Planned duration in seconds. |
 | `custom_metric` | `jsonb`, nullable | Provider-specific target not covered by standard columns. |
+
+#### `voice_workout_sessions`
+
+A workout dictated by voice, accumulated until it is finished and only then
+written to Hevy. The phone tracks no session identifier: it posts text, and the
+user's open session is the session, enforced by a partial unique index on
+`status = 'open'`. A session left open is closed once it has been idle for a few
+hours, so an abandoned workout cannot absorb the next one's phrases.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key. |
+| `user_id` | `uuid` | Session owner; references `users.id`. |
+| `status` | `varchar(20)` | `open`, `finished`, `pushed`, or `failed`. |
+| `started_at` | `timestamptz` | First phrase of the session. |
+| `last_utterance_at` | `timestamptz` | Most recent phrase; drives the idle close. |
+| `finished_at` | `timestamptz`, nullable | When the session was closed. |
+| `title` | `varchar(255)`, nullable | Generated from the exercises actually logged. |
+| `duration_seconds` | `integer`, nullable | Spoken length, used when a whole workout is dictated afterwards. |
+| `draft` | `jsonb`, nullable | Merged draft of the workout, rebuilt as phrases arrive. |
+| `hevy_workout_id` | `varchar(64)`, nullable | Provider workout id once the session has been pushed. |
+| `push_error` | `text`, nullable | Why the write to Hevy failed, if it did. |
+| `created_at` | `timestamptz`, nullable | Local insertion time. |
+| `updated_at` | `timestamptz`, nullable | Last modification time. |
+
+#### `voice_workout_utterances`
+
+Every dictated phrase, kept verbatim next to what was made of it. Speech
+recognition and parsing both fail in ways that are only diagnosable from the
+original wording, so the text is archived before anything interprets it.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key. |
+| `session_id` | `uuid` | Parent session; references `voice_workout_sessions.id` and cascades on deletion. |
+| `said_at` | `timestamptz` | When the phrase was received. |
+| `text` | `text` | Normalized dictated text. |
+| `is_finish` | `boolean` | Whether this phrase ended the session. |
+| `parsed` | `jsonb`, nullable | Structured exercises and sets extracted from the phrase. |
+| `parse_error` | `text`, nullable | Why the phrase could not be interpreted, if it could not. |
+| `created_at` | `timestamptz`, nullable | Local insertion time. |
 
 #### `hevy_exercise_templates`
 

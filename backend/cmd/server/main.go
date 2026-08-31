@@ -194,6 +194,25 @@ func main() {
 			log.Fatal().Err(err).Str("connector", conn.Name()).Msg("failed to register sync job")
 		}
 	}
+	// The lazy close in the webhook only fires when the next phrase arrives, so
+	// this sweep is what actually bounds a dictated session that was never
+	// finished out loud.
+	voiceSessions := handlers.NewVoiceWorkout(pool, log.Logger)
+	if err := sched.AddJob("0 */10 * * * *", "voice_workout_idle_close", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		closed, err := voiceSessions.CloseIdleSessions(ctx)
+		if err != nil {
+			log.Error().Err(err).Msg("close idle voice workout sessions")
+			return
+		}
+		if closed > 0 {
+			log.Info().Int("sessions", closed).Msg("closed idle voice workout sessions")
+		}
+	}); err != nil {
+		log.Fatal().Err(err).Msg("failed to register voice workout sweep")
+	}
+
 	sched.Start()
 	defer sched.Stop()
 
@@ -387,6 +406,8 @@ func main() {
 	r.Post("/api/v1/webhook/health", healthWebhookPublic.ReceiveData)
 	screenTimeWebhook := handlers.NewScreenTimeWebhook(pool, log.Logger)
 	r.Post("/api/v1/webhook/screentime", screenTimeWebhook.ReceiveData)
+
+	r.Post("/api/v1/webhook/voice-workout", voiceSessions.ReceiveText)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
