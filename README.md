@@ -2,7 +2,7 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000019`. JSON payloads,
+The diagram reflects migrations `000001` through `000020`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability.
 
 ```mermaid
@@ -74,6 +74,16 @@ erDiagram
         integer reps
         integer duration_seconds
         numeric rpe
+    }
+
+    hevy_exercise_templates {
+        varchar id PK
+        uuid owner_user_id FK
+        varchar title
+        varchar type
+        varchar primary_muscle_group
+        varchar equipment
+        boolean is_custom
     }
 
     workout_routines {
@@ -398,6 +408,7 @@ erDiagram
     users ||--o{ workouts : performs
     workouts o|--o{ workout_sets : contains
     users ||--o{ workout_routines : owns
+    users ||--o{ hevy_exercise_templates : owns custom
     workout_routines ||--o{ routine_exercises : contains
     routine_exercises ||--o{ routine_sets : contains
     users ||--o{ activities : records
@@ -591,6 +602,30 @@ Planned sets attached to routine exercises.
 | `distance_meters` | `numeric(10,2)`, nullable | Planned distance in meters. |
 | `duration_seconds` | `integer`, nullable | Planned duration in seconds. |
 | `custom_metric` | `jsonb`, nullable | Provider-specific target not covered by standard columns. |
+
+#### `hevy_exercise_templates`
+
+Hevy's exercise catalogue, mirrored locally. Writing a workout back to Hevy
+requires an `exercise_template_id`, so a dictated or typed exercise name has to
+be resolved against this table first. Built-in templates are shared by every
+Hevy account and carry no owner; custom ones are visible only to the account
+that created them and record it, so matching can exclude another user's custom
+exercises. Rows are never pruned, because workouts already logged against a
+template stay referenced by it.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | `varchar(64)` | Primary key; Hevy's own template identifier. |
+| `owner_user_id` | `uuid`, nullable | Set only for custom templates; references `users.id`. |
+| `title` | `varchar(255)` | Exercise name as Hevy spells it. |
+| `type` | `varchar(50)` | Measurement kind, such as `weight_reps` or `reps_only`. Decides which set fields are legal when writing. |
+| `primary_muscle_group` | `varchar(100)`, nullable | Main muscle group. |
+| `secondary_muscle_groups` | `text[]`, nullable | Additional muscle groups. |
+| `equipment` | `varchar(100)`, nullable | Required equipment. |
+| `is_custom` | `boolean` | Whether the template was created by the account rather than shipped by Hevy. |
+| `raw_payload` | `jsonb`, nullable | Original provider template object. |
+| `created_at` | `timestamptz`, nullable | Local insertion time. |
+| `updated_at` | `timestamptz`, nullable | Last refresh from the provider. |
 
 ### Endurance activities
 

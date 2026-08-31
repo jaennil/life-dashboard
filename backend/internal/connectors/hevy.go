@@ -185,6 +185,10 @@ func (h *HevyConnector) Sync(ctx context.Context, userID string) error {
 		return fmt.Errorf("sync routines: %w", err)
 	}
 
+	if err := h.syncExerciseTemplates(ctx, userID, apiKey); err != nil {
+		return fmt.Errorf("sync exercise templates: %w", err)
+	}
+
 	return h.updateLastSync(ctx, userID)
 }
 
