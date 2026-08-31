@@ -39,7 +39,7 @@ spec:
             # zenmoney and xiaomi_scale syncs. A datacenter exit also looks like
             # fraud to the risk checks these services run.
             - name: NO_PROXY
-              value: "localhost,127.0.0.1,postgres-rw,claude-code-api,192.168.3.4,.svc.cluster.local,.cluster.local,10.0.0.0/8,192.168.0.0/16,api.zenmoney.ru,ru.api.io.mi.com,account.xiaomi.com"
+              value: "localhost,127.0.0.1,postgres-rw,claude-code-api,192.168.3.4,.svc.cluster.local,.cluster.local,10.0.0.0/8,192.168.0.0/16,api.zenmoney.ru,ru.api.io.mi.com,account.xiaomi.com,api.aitunnel.ru"
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
@@ -65,9 +65,14 @@ spec:
             - name: TODOIST_REDIRECT_URI
               value: https://lifedash.dubrovskih.ru/api/v1/auth/todoist/callback
             - name: AI_BASE_URL
-              value: http://192.168.3.4:8000
+              value: https://api.aitunnel.ru
             - name: AI_MODEL
-              value: claude-opus-4-5-20251101
+              value: deepseek-v4-pro
+            # AITunnel forwards reasoning_effort to the model rather than
+            # rejecting it, verified against the live API: the same trivial
+            # prompt took 2.6s without it and 10.2s with it.
+            - name: AI_REASONING_EFFORT
+              value: high
 
           envFrom:
             - secretRef:
