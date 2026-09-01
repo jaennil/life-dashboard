@@ -1,7 +1,9 @@
 package connectors
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 )
@@ -95,5 +97,45 @@ func TestTemplatePageSizeStaysSmall(t *testing.T) {
 	// dozens of requests.
 	if hevyTemplateMaxAge < 12*time.Hour {
 		t.Fatalf("template max age = %s, too eager for a catalogue that rarely changes", hevyTemplateMaxAge)
+	}
+}
+
+func TestIsHevyStallOnlyMatchesWaiting(t *testing.T) {
+	// The two forms observed: the request times out waiting for headers, or the
+	// body stops mid-stream and the decoder reports the deadline underneath.
+	for _, message := range []string{
+		`Get "https://api.hevyapp.com/v1/routines?page=2&pageSize=1": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`,
+		"decode response: context deadline exceeded",
+		"decode response: unexpected EOF",
+		"net/http: TLS handshake timeout",
+	} {
+		if !isHevyStall(errors.New(message)) {
+			t.Errorf("not recognized as a stall: %s", message)
+		}
+	}
+	if !isHevyStall(context.DeadlineExceeded) {
+		t.Fatal("context.DeadlineExceeded not recognized")
+	}
+
+	// Repeating these would fail identically and only burn the retry budget.
+	for _, other := range []error{
+		nil,
+		errors.New("hevy api returned status 404"),
+		errors.New("decode response: invalid character 'x'"),
+	} {
+		if isHevyStall(other) {
+			t.Errorf("%v mistaken for a stall", other)
+		}
+	}
+}
+
+func TestHevyRetryBudgetIsBounded(t *testing.T) {
+	// Three attempts of twelve seconds stays inside the client's own timeout
+	// budget rather than turning one flaky page into a minute of waiting.
+	if hevyRequestAttempts < 2 || hevyRequestAttempts > 4 {
+		t.Fatalf("attempts = %d", hevyRequestAttempts)
+	}
+	if hevyAttemptTimeout > 15*time.Second {
+		t.Fatalf("attempt timeout = %s, too long to notice a stall", hevyAttemptTimeout)
 	}
 }

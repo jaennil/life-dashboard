@@ -3,8 +3,11 @@ package connectors
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -189,12 +192,17 @@ func (h *HevyConnector) Sync(ctx context.Context, userID string) error {
 		}
 	}
 
+	// Routines and the template catalogue are secondary, and their endpoints stall
+	// at random. Failing the whole sync over them marked ten consecutive failures
+	// while every workout came through - the alert said the connector was broken
+	// when the data it exists for was arriving. A warning keeps the breakage
+	// visible without lying about the sync.
 	if err := h.syncRoutines(ctx, userID, apiKey); err != nil {
-		return fmt.Errorf("sync routines: %w", err)
+		h.logger.Warn().Err(err).Msg("sync routines failed")
 	}
 
 	if err := h.syncExerciseTemplates(ctx, userID, apiKey); err != nil {
-		return fmt.Errorf("sync exercise templates: %w", err)
+		h.logger.Warn().Err(err).Msg("sync exercise templates failed")
 	}
 
 	return h.updateLastSync(ctx, userID)
@@ -293,8 +301,47 @@ func (h *HevyConnector) fetchRoutinesPage(ctx context.Context, apiKey string, pa
 	return doRequest[hevyRoutinesResponse](ctx, h.client, apiKey, url)
 }
 
+// hevyRequestAttempts and hevyAttemptTimeout exist because the API stalls at
+// random.
+//
+// Observed on the same URL fifteen minutes apart: a 2.7 KB page of routines
+// returned in 0.42 seconds, then answered 200 and went silent until the client
+// gave up. Size looked like the cause at first - larger pages stalled more often
+// - but a one-item page stalling disproves that. So the request is given a short
+// budget and simply tried again, which every manual retry has satisfied.
+const (
+	hevyRequestAttempts = 3
+	hevyAttemptTimeout  = 12 * time.Second
+)
+
 func doRequest[T any](ctx context.Context, client *http.Client, apiKey, url string) (*T, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	var lastErr error
+	for attempt := 1; attempt <= hevyRequestAttempts; attempt++ {
+		result, err := doRequestOnce[T](ctx, client, apiKey, url)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+
+		// Only a stall is worth repeating. A 404 or a decode failure would repeat
+		// identically and only waste the budget.
+		if !isHevyStall(err) || attempt == hevyRequestAttempts {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt) * time.Second):
+		}
+	}
+	return nil, lastErr
+}
+
+func doRequestOnce[T any](ctx context.Context, client *http.Client, apiKey, url string) (*T, error) {
+	attemptCtx, cancel := context.WithTimeout(ctx, hevyAttemptTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -315,6 +362,22 @@ func doRequest[T any](ctx context.Context, client *http.Client, apiKey, url stri
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return &result, nil
+}
+
+// isHevyStall reports whether a request died waiting rather than being answered.
+// A stall shows up either as a client timeout or, when the body stops mid-stream,
+// as a decode error carrying the same deadline underneath.
+func isHevyStall(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "deadline exceeded") ||
+		strings.Contains(message, "timeout") ||
+		strings.Contains(message, "unexpected eof")
 }
 
 // ---- Database helpers ----
