@@ -273,6 +273,12 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 	if err := fatSecretRecentSyncError(recentFailures, recentSuccesses); err != nil {
 		return err
 	}
+	// Runs on every sync, not only manual ones: the point is that the history
+	// catches up by itself rather than by pressing a button.
+	if err := c.backfillMissingFoodIDs(ctx, userID, token, secret); err != nil {
+		c.logger.Warn().Err(err).Msg("food id backfill failed")
+	}
+
 	if stoppedOnRateLimit {
 		c.logger.Warn().
 			Str("user_id", userID).
