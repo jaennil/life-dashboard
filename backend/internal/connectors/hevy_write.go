@@ -65,12 +65,42 @@ type hevySetPayload struct {
 	RPE             *float64 `json:"rpe"`
 }
 
+// hevyCreateWorkoutResponse reads the id back out of the create response.
+//
+// The endpoint answers with the workout wrapped in a single-element ARRAY -
+// {"workout":[{...}]} - even though it creates exactly one. Decoding it as an
+// object failed after the workout had already been created, which is the worst
+// possible place to fail: the write succeeded, the id was lost, and a retry would
+// have duplicated it. Both shapes are accepted now, and the top-level id is kept
+// as a further fallback.
 type hevyCreateWorkoutResponse struct {
-	Workout struct {
+	Workout hevyCreatedWorkout `json:"workout"`
+	ID      string             `json:"id"`
+}
+
+type hevyCreatedWorkout struct {
+	ID string
+}
+
+func (w *hevyCreatedWorkout) UnmarshalJSON(data []byte) error {
+	var single struct {
 		ID string `json:"id"`
-	} `json:"workout"`
-	// Some responses return the object at the top level instead.
-	ID string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &single); err == nil {
+		w.ID = single.ID
+		return nil
+	}
+
+	var many []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &many); err != nil {
+		return fmt.Errorf("workout is neither an object nor an array: %w", err)
+	}
+	if len(many) > 0 {
+		w.ID = many[0].ID
+	}
+	return nil
 }
 
 // CreateWorkout writes a workout to Hevy and returns its provider id.
