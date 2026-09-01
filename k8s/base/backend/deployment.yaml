@@ -32,14 +32,18 @@ spec:
               value: "http://xray.proxy.svc.cluster.local:1081"
             - name: HTTP_PROXY
               value: "http://xray.proxy.svc.cluster.local:1081"
-            # Russian APIs are excluded from the proxy on purpose. They are
-            # reachable from this node directly, while the proxy sends them out
-            # through whichever foreign exit its balancer happens to pick, which
-            # produced intermittent "TLS handshake timeout" failures for the
-            # zenmoney and xiaomi_scale syncs. A datacenter exit also looks like
-            # fraud to the risk checks these services run.
+            # Hosts excluded from the proxy on purpose: all of them answer from
+            # this node directly, while the proxy sends them out through whichever
+            # foreign exit its balancer happens to pick, which produced
+            # intermittent "TLS handshake timeout" failures - first for zenmoney
+            # and xiaomi_scale, then four in a row for hevy. FatSecret is here for
+            # a second reason: it throttles per account and a stable source
+            # address is worth more than a rotating one.
+            #
+            # Measured from the node: only api.notion.com and www.strava.com fail
+            # to connect directly and genuinely need the proxy.
             - name: NO_PROXY
-              value: "localhost,127.0.0.1,postgres-rw,claude-code-api,192.168.3.4,.svc.cluster.local,.cluster.local,10.0.0.0/8,192.168.0.0/16,api.zenmoney.ru,ru.api.io.mi.com,account.xiaomi.com,api.aitunnel.ru"
+              value: "localhost,127.0.0.1,postgres-rw,claude-code-api,192.168.3.4,.svc.cluster.local,.cluster.local,10.0.0.0/8,192.168.0.0/16,api.zenmoney.ru,ru.api.io.mi.com,account.xiaomi.com,api.aitunnel.ru,api.hevyapp.com,platform.fatsecret.com,authentication.fatsecret.com"
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
