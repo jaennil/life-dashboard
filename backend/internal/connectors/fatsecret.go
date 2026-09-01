@@ -23,12 +23,18 @@ import (
 )
 
 const (
-	fsRequestTokenURL          = "https://authentication.fatsecret.com/oauth/request_token"
-	fsAuthorizeURL             = "https://authentication.fatsecret.com/oauth/authorize"
-	fsAccessTokenURL           = "https://authentication.fatsecret.com/oauth/access_token"
-	fsAPIBase                  = "https://platform.fatsecret.com/rest/server.api"
-	nutritionSyncDays          = 90
-	fatSecretScheduledSyncDays = 7
+	fsRequestTokenURL = "https://authentication.fatsecret.com/oauth/request_token"
+	fsAuthorizeURL    = "https://authentication.fatsecret.com/oauth/authorize"
+	fsAccessTokenURL  = "https://authentication.fatsecret.com/oauth/access_token"
+	fsAPIBase         = "https://platform.fatsecret.com/rest/server.api"
+	nutritionSyncDays = 90
+	// Only today and yesterday are re-read on the hourly schedule. Eight days
+	// used to be, which cost eight requests an hour - and since the account
+	// answers about two requests per run before it starts stalling, the hot
+	// window consumed the entire allowance and the backfill always found a dead
+	// API. Older days are still revisited by the rotating history slot below and
+	// by the backfill.
+	fatSecretScheduledSyncDays = 2
 	fatSecretHistorySlot       = 6 * time.Hour
 )
 
@@ -275,7 +281,10 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 			if i < fatSecretCriticalSyncDays {
 				recentFailures = append(recentFailures, date.Format("2006-01-02"))
 			}
-			if isFatSecretRateLimitError(err) {
+			if isFatSecretThrottled(err) {
+				// Same reasoning as the backfill: the throttle also arrives as
+				// silence, and walking on spends thirty seconds a day waiting for
+				// an answer that will not come.
 				stoppedOnRateLimit = true
 				break
 			}

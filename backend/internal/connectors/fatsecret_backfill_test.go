@@ -54,3 +54,18 @@ func TestIsFatSecretThrottledCatchesBothShapes(t *testing.T) {
 		}
 	}
 }
+
+func TestScheduledWindowLeavesRoomForTheBackfill(t *testing.T) {
+	// The account answers roughly two requests per run before it starts stalling.
+	// A hot window wider than that consumed the whole allowance and the backfill
+	// never advanced a single day, run after run.
+	if fatSecretScheduledSyncDays > 3 {
+		t.Fatalf("scheduled window = %d days, too wide to leave the backfill anything",
+			fatSecretScheduledSyncDays)
+	}
+	// And the full history has to stay reachable some other way.
+	if nutritionSyncDays <= fatSecretScheduledSyncDays {
+		t.Fatalf("history depth %d does not exceed the hot window %d",
+			nutritionSyncDays, fatSecretScheduledSyncDays)
+	}
+}
