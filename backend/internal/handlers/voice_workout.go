@@ -37,13 +37,18 @@ type VoiceWorkoutHandler struct {
 	// Parsing runs on its own model: see the note at the call site.
 	parseModel  string
 	parseEffort string
-	logger      zerolog.Logger
+	// hevy writes the finished workout. Nil keeps everything else working and
+	// simply leaves the draft in the database, which is how this ran while the
+	// parse was still being proven.
+	hevy   workoutWriter
+	logger zerolog.Logger
 }
 
-func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, parseModel, parseEffort string, logger zerolog.Logger) *VoiceWorkoutHandler {
+func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, hevy workoutWriter, parseModel, parseEffort string, logger zerolog.Logger) *VoiceWorkoutHandler {
 	return &VoiceWorkoutHandler{
 		db:          db,
 		ai:          ai,
+		hevy:        hevy,
 		parseModel:  parseModel,
 		parseEffort: parseEffort,
 		logger:      logger.With().Str("handler", "voice_workout").Logger(),
@@ -69,14 +74,16 @@ type voiceWorkoutResponse struct {
 	// phrase, so the Shortcut can show both while the phone is still in hand.
 	// Getting this wrong silently is the main risk of dictating, and this is the
 	// only place it can be caught before the workout is written.
-	Heard      string   `json:"heard"`
-	Understood string   `json:"understood,omitempty"`
-	Workout    string   `json:"workout,omitempty"`
-	Unmatched  []string `json:"unmatched,omitempty"`
-	Title      string   `json:"title,omitempty"`
-	ParseError string   `json:"parse_error,omitempty"`
-	Domain     string   `json:"domain,omitempty"`
-	Message    string   `json:"message,omitempty"`
+	Heard         string   `json:"heard"`
+	Understood    string   `json:"understood,omitempty"`
+	Workout       string   `json:"workout,omitempty"`
+	Unmatched     []string `json:"unmatched,omitempty"`
+	Title         string   `json:"title,omitempty"`
+	ParseError    string   `json:"parse_error,omitempty"`
+	Domain        string   `json:"domain,omitempty"`
+	HevyWorkoutID string   `json:"hevy_workout_id,omitempty"`
+	PushError     string   `json:"push_error,omitempty"`
+	Message       string   `json:"message,omitempty"`
 	// Display is the one field the Shortcut reads: whatever happened, this is
 	// what to show.
 	Display string `json:"display"`
@@ -213,6 +220,7 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 			return
 		}
 		response.Title = title
+		h.pushSession(ctx, userID, sessionID, &response)
 	}
 
 	count, err := h.countUtterances(ctx, sessionID)
