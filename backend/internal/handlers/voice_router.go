@@ -63,3 +63,41 @@ func (h *VoiceWorkoutHandler) archivePhrase(ctx context.Context, userID, text st
 	`, payload, userID)
 	return err
 }
+
+// composeVoiceDisplay builds the single line the phone shows.
+//
+// It exists so the Shortcut needs exactly one dictionary key. Deciding between
+// the workout summary, a routing message and a parse error inside Shortcuts
+// would mean nested If actions configured by hand on a phone, and that logic
+// belongs somewhere it can be tested.
+func composeVoiceDisplay(response voiceWorkoutResponse) string {
+	var parts []string
+
+	switch {
+	case response.ParseError != "":
+		parts = append(parts, "Не разобрал: "+response.ParseError)
+	case response.Message != "":
+		parts = append(parts, response.Message)
+	}
+
+	if response.Workout != "" {
+		parts = append(parts, response.Workout)
+	}
+	if len(response.Unmatched) > 0 {
+		parts = append(parts, "Не понял: "+strings.Join(response.Unmatched, "; "))
+	}
+	if response.Finished {
+		finished := "Тренировка закончена"
+		if response.Title != "" {
+			finished += ": " + response.Title
+		}
+		parts = append(parts, finished)
+	}
+
+	if len(parts) == 0 {
+		// Heard but understood as nothing: say so rather than show a blank sheet,
+		// which reads as a broken shortcut.
+		return "Услышал, но ничего не разобрал: " + response.Heard
+	}
+	return strings.Join(parts, "\n")
+}

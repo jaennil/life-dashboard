@@ -1,6 +1,9 @@
 package handlers
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestResolveVoiceDomainTrustsAClaimedDomain(t *testing.T) {
 	for _, domain := range []string{"workout", "food", "note", "weight"} {
@@ -45,5 +48,55 @@ func TestUnimplementedDomainsHaveAReply(t *testing.T) {
 	}
 	if voiceDomainReplies[voiceDomainWorkout] != "" {
 		t.Error("workout is implemented and must not carry a not-supported reply")
+	}
+}
+
+func TestComposeVoiceDisplayShowsWorkoutAndFinish(t *testing.T) {
+	got := composeVoiceDisplay(voiceWorkoutResponse{
+		Heard:    "на бицепс 16 килограмм 11 раз два подхода, закончить тренировку",
+		Workout:  "Bicep Curl (Dumbbell): 11×16кг, 11×16кг",
+		Finished: true,
+		Title:    "Спина и бицепс",
+	})
+
+	for _, want := range []string{"Bicep Curl (Dumbbell): 11×16кг", "Тренировка закончена: Спина и бицепс"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("display missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestComposeVoiceDisplayShowsRoutingMessage(t *testing.T) {
+	got := composeVoiceDisplay(voiceWorkoutResponse{
+		Heard:   "съел 200 грамм творога",
+		Domain:  voiceDomainFood,
+		Message: voiceDomainReplies[voiceDomainFood],
+	})
+
+	if !strings.Contains(got, "FatSecret") {
+		t.Fatalf("display = %q", got)
+	}
+}
+
+func TestComposeVoiceDisplayReportsUnmatched(t *testing.T) {
+	got := composeVoiceDisplay(voiceWorkoutResponse{
+		Heard:     "жал что-то непонятное",
+		Workout:   "Pull Up: 5",
+		Unmatched: []string{"что-то непонятное (неизвестное упражнение)"},
+	})
+
+	if !strings.Contains(got, "Не понял: что-то непонятное") {
+		t.Fatalf("display = %q", got)
+	}
+}
+
+func TestComposeVoiceDisplayNeverBlank(t *testing.T) {
+	// A blank result sheet is indistinguishable from a broken shortcut.
+	got := composeVoiceDisplay(voiceWorkoutResponse{Heard: "мгмгм"})
+	if got == "" {
+		t.Fatal("display is empty")
+	}
+	if !strings.Contains(got, "мгмгм") {
+		t.Fatalf("display does not echo what was heard: %q", got)
 	}
 }

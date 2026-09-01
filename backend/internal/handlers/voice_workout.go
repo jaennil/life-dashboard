@@ -73,6 +73,9 @@ type voiceWorkoutResponse struct {
 	ParseError string   `json:"parse_error,omitempty"`
 	Domain     string   `json:"domain,omitempty"`
 	Message    string   `json:"message,omitempty"`
+	// Display is the one field the Shortcut reads: whatever happened, this is
+	// what to show.
+	Display string `json:"display"`
 }
 
 // ReceiveText accepts one dictated phrase. It appends to the open session,
@@ -146,6 +149,7 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 		} else {
 			response.Message = "Не понял, к чему отнести фразу. Она сохранена."
 		}
+		response.Display = composeVoiceDisplay(response)
 		h.logger.Info().Str("user_id", userID).Str("domain", interpreted.Domain).Msg("voice phrase routed")
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
@@ -196,6 +200,7 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 		h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("count utterances")
 	}
 	response.Utterances = count
+	response.Display = composeVoiceDisplay(response)
 
 	h.logger.Info().Str("user_id", userID).Str("session_id", sessionID).
 		Bool("finished", finish).Int("utterances", count).
