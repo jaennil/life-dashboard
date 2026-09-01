@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -124,8 +125,20 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 	}
 
 	text := normalizeVoiceText(envelope.Text)
-	if text == "" {
-		http.Error(w, "text required", http.StatusBadRequest)
+	if !voiceHasContent(text) {
+		// Starting dictation and saying nothing is a normal thing to do at a
+		// machine, and iOS hands it over as "" or as a lone ".". It used to come
+		// back as a 400 with a plain-text body, which fails the Shortcut outright
+		// and shows a system error dialog instead of our text. Nothing is archived
+		// and no model is called - there is nothing to interpret - but the phone
+		// gets a proper answer.
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(voiceWorkoutResponse{
+			Status:  "ok",
+			Domain:  voiceDomainUnknown,
+			Heard:   text,
+			Display: "Ничего не услышал. Повтори.",
+		})
 		return
 	}
 
@@ -371,6 +384,17 @@ func looksLikeWorkoutFinish(text string) bool {
 	lowered := strings.ToLower(strings.Trim(normalizeVoiceText(text), ".!?,"))
 	for _, phrase := range voiceFinishPhrases {
 		if strings.Contains(lowered, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// voiceHasContent reports whether a phrase carries anything to interpret. A lone
+// "." or "..." is what dictation produces for silence; "Ммм." is a phrase.
+func voiceHasContent(text string) bool {
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			return true
 		}
 	}

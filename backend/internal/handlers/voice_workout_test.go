@@ -108,3 +108,18 @@ func TestSanitizeWorkoutTitleKeepsCyrillicIntactWhenTruncating(t *testing.T) {
 		t.Fatalf("truncation split a rune: %q", title)
 	}
 }
+
+func TestVoiceHasContentTellsSilenceFromSpeech(t *testing.T) {
+	// What dictation hands over when nothing was said.
+	for _, silent := range []string{"", "   ", ".", "...", "—", "?!", "​"} {
+		if voiceHasContent(normalizeVoiceText(silent)) {
+			t.Errorf("%q counted as speech", silent)
+		}
+	}
+	// Anything with a letter or a digit is a phrase, however short.
+	for _, spoken := range []string{"Ммм.", "8", "ещё 8", "a", "закончить тренировку"} {
+		if !voiceHasContent(normalizeVoiceText(spoken)) {
+			t.Errorf("%q counted as silence", spoken)
+		}
+	}
+}
