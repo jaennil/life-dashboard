@@ -244,6 +244,12 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 		c.logger.Warn().Err(err).Msg("failed to sync profile")
 	}
 
+	// Non-fatal: the diary is the point of this sync, and the catalogue only
+	// matters for writing food back later.
+	if err := c.syncFoodCatalogue(ctx, userID, token, secret); err != nil {
+		c.logger.Warn().Err(err).Msg("failed to sync food catalogue")
+	}
+
 	recentFailures := make([]string, 0, fatSecretCriticalSyncDays)
 	recentSuccesses := 0
 	stoppedOnRateLimit := false

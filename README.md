@@ -2,7 +2,7 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000021`. JSON payloads,
+The diagram reflects migrations `000001` through `000022`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability.
 
 ```mermaid
@@ -74,6 +74,15 @@ erDiagram
         integer reps
         integer duration_seconds
         numeric rpe
+    }
+
+    fatsecret_foods {
+        uuid user_id FK
+        varchar food_id PK
+        varchar food_name
+        varchar brand_name
+        varchar source
+        timestamptz last_seen_at
     }
 
     voice_workout_sessions {
@@ -429,6 +438,7 @@ erDiagram
     workouts o|--o{ workout_sets : contains
     users ||--o{ workout_routines : owns
     users ||--o{ hevy_exercise_templates : owns custom
+    users ||--o{ fatsecret_foods : has eaten
     users ||--o{ voice_workout_sessions : dictates
     voice_workout_sessions ||--o{ voice_workout_utterances : collects
     workout_routines ||--o{ routine_exercises : contains
@@ -804,6 +814,36 @@ Individual foods and servings belonging to a daily nutrition record.
 | `serving_description` | `varchar(255)`, nullable | Human-readable serving size. |
 | `calories` | `numeric(7,2)`, nullable | Serving energy in kilocalories. |
 | `macros` | `jsonb`, nullable | Provider nutrient breakdown not normalized into columns. |
+
+#### `fatsecret_foods`
+
+The account's own food catalogue, mirrored from its FatSecret eating history.
+
+Writing a dictated meal to the diary needs a `food_id`, and searching for one is
+not available: the developer key is on the US dataset, where Russian queries
+return nothing and the `region` parameter is accepted but silently ignored.
+The account's own history solves it - `foods.get_most_eaten` and
+`foods.get_recently_eaten` return real `food_id` values under the Russian names
+and brands the app shows. Anything not in this table is not guessed at: it has to
+be logged once in the FatSecret app, after which it appears here on the next
+refresh. Refreshed at most daily, because the two endpoints cost eight calls
+against a rate-limited account and the catalogue only changes when something new
+is eaten.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `user_id` | `uuid` | Catalogue owner; part of the primary key, references `users.id`. |
+| `food_id` | `varchar(64)` | Provider food identifier; part of the primary key. |
+| `food_name` | `varchar(255)` | Food name as FatSecret stores it, in the account's own language. |
+| `brand_name` | `varchar(255)`, nullable | Brand, where the food is a branded product. |
+| `food_type` | `varchar(50)`, nullable | Provider classification, such as `Brand` or `Generic`. |
+| `food_url` | `text`, nullable | Provider page for the food. |
+| `source` | `varchar(20)` | Which history endpoint surfaced it: `most_eaten` or `recently_eaten`. |
+| `meals` | `text[]`, nullable | Meals it has been eaten in, used to guess the meal when a phrase does not name one. |
+| `last_seen_at` | `timestamptz`, nullable | When it was last present in the history. |
+| `raw_payload` | `jsonb`, nullable | Original provider food object. |
+| `created_at` | `timestamptz`, nullable | Local insertion time. |
+| `updated_at` | `timestamptz`, nullable | Last refresh from the provider. |
 
 #### `nutrition_targets`
 
