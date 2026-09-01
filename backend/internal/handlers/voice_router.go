@@ -48,19 +48,43 @@ func resolveVoiceDomain(claimed string, workoutOpen bool) string {
 	return voiceDomainUnknown
 }
 
-// archivePhrase stores the dictated text before anything interprets it, and
-// before it is known which domain it belongs to. That ordering is what makes a
-// misclassified phrase recoverable: the wording survives even when the
-// interpretation is wrong or the domain is not implemented yet.
-func (h *VoiceWorkoutHandler) archivePhrase(ctx context.Context, userID, text string) error {
-	payload, err := json.Marshal(map[string]string{"text": text})
+// archivePhrase stores the dictated phrase before anything interprets it and
+// before its domain is known. That ordering is what makes a misclassified phrase
+// recoverable: the wording survives even when the interpretation is wrong or the
+// domain is not implemented yet.
+//
+// Both forms are kept. The normalized text is what the parser saw; the raw body
+// is what the phone actually sent, which is the only way to tell later whether a
+// surprise came from the phone, from normalization, or from the model.
+func (h *VoiceWorkoutHandler) archivePhrase(ctx context.Context, userID, text string, rawBody []byte) (string, error) {
+	payload, err := json.Marshal(map[string]string{
+		"text": text,
+		"raw":  string(rawBody),
+	})
 	if err != nil {
-		return err
+		return "", err
 	}
-	_, err = h.db.Exec(ctx, `
+
+	var id string
+	err = h.db.QueryRow(ctx, `
 		INSERT INTO raw_events (source, event_type, payload, user_id)
 		VALUES ('voice', 'phrase', $1::jsonb, $2)
-	`, payload, userID)
+		RETURNING id
+	`, payload, userID).Scan(&id)
+	return id, err
+}
+
+// recordPhraseDomain writes the routing verdict onto the archived phrase. Without
+// it the archive says what was said but not where it went, which is exactly what
+// has to be auditable once a phrase can end up in someone's food diary.
+func (h *VoiceWorkoutHandler) recordPhraseDomain(ctx context.Context, eventID, domain string) error {
+	if eventID == "" {
+		return nil
+	}
+	_, err := h.db.Exec(ctx, `
+		UPDATE raw_events SET payload = jsonb_set(payload, '{domain}', to_jsonb($2::text))
+		WHERE id = $1
+	`, eventID, domain)
 	return err
 }
 

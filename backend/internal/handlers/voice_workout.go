@@ -116,7 +116,8 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 
 	// Archived before anything interprets it and before the domain is known, so a
 	// misclassified or not-yet-supported phrase still survives verbatim.
-	if err := h.archivePhrase(r.Context(), userID, text); err != nil {
+	eventID, err := h.archivePhrase(r.Context(), userID, text, body)
+	if err != nil {
 		h.logger.Warn().Err(err).Str("user_id", userID).Msg("archive phrase")
 	}
 
@@ -140,6 +141,9 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 		interpreted = h.classify(r.Context(), userID, spoken, openSessionID, workoutOpen, &response)
 	}
 	response.Domain = interpreted.Domain
+	if err := h.recordPhraseDomain(r.Context(), eventID, interpreted.Domain); err != nil {
+		h.logger.Warn().Err(err).Str("event_id", eventID).Msg("record phrase domain")
+	}
 
 	if interpreted.Domain != voiceDomainWorkout {
 		// Not a workout: no session is opened and none is touched. The reply says
