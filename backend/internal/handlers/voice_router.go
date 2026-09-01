@@ -64,14 +64,24 @@ func (h *VoiceWorkoutHandler) archivePhrase(ctx context.Context, userID, text st
 	return err
 }
 
-// composeVoiceDisplay builds the single line the phone shows.
+// composeVoiceDisplay builds what the phone shows.
 //
-// It exists so the Shortcut needs exactly one dictionary key. Deciding between
-// the workout summary, a routing message and a parse error inside Shortcuts
-// would mean nested If actions configured by hand on a phone, and that logic
-// belongs somewhere it can be tested.
+// It opens with what iOS actually recognized, because two very different
+// failures look identical otherwise: iOS mishearing a word or a number, and the
+// model misreading a correct transcript. Only the first line separates them, and
+// only the first is unrecoverable - the audio is never kept, so a misheard number
+// has to be caught while the set is still fresh.
+//
+// It also exists so the Shortcut needs exactly one dictionary key: choosing
+// between the parse, a routing message and an error inside Shortcuts would mean
+// nested If actions configured by hand on a phone, and that logic belongs
+// somewhere it can be tested.
 func composeVoiceDisplay(response voiceWorkoutResponse) string {
 	var parts []string
+	if response.Heard != "" {
+		parts = append(parts, "Услышал: "+response.Heard)
+	}
+	heardOnly := len(parts)
 
 	switch {
 	case response.ParseError != "":
@@ -94,10 +104,10 @@ func composeVoiceDisplay(response voiceWorkoutResponse) string {
 		parts = append(parts, finished)
 	}
 
-	if len(parts) == 0 {
-		// Heard but understood as nothing: say so rather than show a blank sheet,
-		// which reads as a broken shortcut.
-		return "Услышал, но ничего не разобрал: " + response.Heard
+	if len(parts) == heardOnly {
+		// Recognized but understood as nothing: say so rather than show only the
+		// transcript, which reads as a shortcut that half worked.
+		parts = append(parts, "Ничего не разобрал.")
 	}
 	return strings.Join(parts, "\n")
 }

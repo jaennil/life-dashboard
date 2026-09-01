@@ -59,7 +59,13 @@ func TestComposeVoiceDisplayShowsWorkoutAndFinish(t *testing.T) {
 		Title:    "Спина и бицепс",
 	})
 
-	for _, want := range []string{"Bicep Curl (Dumbbell): 11×16кг", "Тренировка закончена: Спина и бицепс"} {
+	for _, want := range []string{
+		// The transcript comes first: it is the only way to tell an iOS
+		// mishearing from a model misparse.
+		"Услышал: на бицепс 16 килограмм 11 раз два подхода, закончить тренировку",
+		"Bicep Curl (Dumbbell): 11×16кг",
+		"Тренировка закончена: Спина и бицепс",
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("display missing %q:\n%s", want, got)
 		}
@@ -98,5 +104,29 @@ func TestComposeVoiceDisplayNeverBlank(t *testing.T) {
 	}
 	if !strings.Contains(got, "мгмгм") {
 		t.Fatalf("display does not echo what was heard: %q", got)
+	}
+	if !strings.Contains(got, "Ничего не разобрал") {
+		t.Fatalf("display does not admit it understood nothing: %q", got)
+	}
+}
+
+func TestComposeVoiceDisplayLeadsWithTheTranscript(t *testing.T) {
+	// The case this is for: iOS heard "3.5" instead of "13.5". The parse is
+	// faithful to a wrong transcript, so only the first line reveals whose
+	// mistake it was.
+	got := composeVoiceDisplay(voiceWorkoutResponse{
+		Heard:   "lateral raises по 3.5 килограмма 12 раз",
+		Workout: "Lateral Raise (Dumbbell): 12×3.5кг",
+	})
+
+	lines := strings.Split(got, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("display = %q", got)
+	}
+	if !strings.HasPrefix(lines[0], "Услышал: ") {
+		t.Fatalf("first line is not the transcript: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "12×3.5кг") {
+		t.Fatalf("second line is not the parse: %q", lines[1])
 	}
 }
