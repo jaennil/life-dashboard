@@ -14,6 +14,14 @@ import (
 const (
 	hevyBaseURL  = "https://api.hevyapp.com/v1"
 	hevyPageSize = 10
+	// Routines page one at a time because the endpoint truncates large responses.
+	// Measured against the live API: pageSize 1 and 2 return complete JSON in
+	// under half a second, while 5 and 10 answer 200, send about 12-14 KB and then
+	// stall until the client gives up - which surfaced as "decode response:
+	// context deadline exceeded" and failed the whole sync six times while
+	// workouts were syncing fine. Raising the timeout would only wait longer for a
+	// body that never arrives.
+	hevyRoutinePageSize = 1
 )
 
 // ---- API response types ----
@@ -281,7 +289,7 @@ func (h *HevyConnector) fetchEventsPage(ctx context.Context, apiKey string, sinc
 }
 
 func (h *HevyConnector) fetchRoutinesPage(ctx context.Context, apiKey string, page int) (*hevyRoutinesResponse, error) {
-	url := fmt.Sprintf("%s/routines?page=%d&pageSize=%d", hevyBaseURL, page, hevyPageSize)
+	url := fmt.Sprintf("%s/routines?page=%d&pageSize=%d", hevyBaseURL, page, hevyRoutinePageSize)
 	return doRequest[hevyRoutinesResponse](ctx, h.client, apiKey, url)
 }
 

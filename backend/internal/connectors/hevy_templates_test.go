@@ -64,3 +64,20 @@ func TestHevyTemplateOwnerOnlyForCustom(t *testing.T) {
 		t.Fatalf("custom template owner = %v, want user-1", owner)
 	}
 }
+
+func TestRoutinePageSizeStaysBelowTheTruncationThreshold(t *testing.T) {
+	// The endpoint answers 200 and then stops mid-body once the response grows
+	// past roughly 12 KB. Measured: pageSize 1 gave 4.3 KB, 2 gave 7.0 KB, 5 gave
+	// a truncated 12.5 KB and 10 gave a truncated 13-14 KB. Anything above two is
+	// gambling on how large the account's routines happen to be.
+	if hevyRoutinePageSize > 2 {
+		t.Fatalf("routine page size = %d, large enough to hit the truncation", hevyRoutinePageSize)
+	}
+	if hevyRoutinePageSize < 1 {
+		t.Fatalf("routine page size = %d", hevyRoutinePageSize)
+	}
+	// Workouts and events are unaffected and should keep their larger pages.
+	if hevyPageSize <= hevyRoutinePageSize {
+		t.Fatalf("workout page size %d was reduced along with routines", hevyPageSize)
+	}
+}
