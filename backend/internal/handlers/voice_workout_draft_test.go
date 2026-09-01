@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -232,5 +233,98 @@ func TestValidateReportsPartiallyDroppedSets(t *testing.T) {
 	}
 	if !strings.Contains(rejected[0], "Lateral Raise (Dumbbell)") || !strings.Contains(rejected[0], "1 подход") {
 		t.Fatalf("report does not name what was lost: %q", rejected[0])
+	}
+}
+
+func TestDecodeSetAcceptsCommaDecimalWeight(t *testing.T) {
+	// Real dictation: "Lateral Rises 13,5 килограмм 10 раз". iOS writes the
+	// Russian decimal comma, and a model may pass it through as a quoted string.
+	// Strict decoding would fail the whole phrase over this one field.
+	cases := map[string]float64{
+		`{"type":"normal","reps":10,"weight_kg":13.5}`:     13.5,
+		`{"type":"normal","reps":10,"weight_kg":"13.5"}`:   13.5,
+		`{"type":"normal","reps":10,"weight_kg":"13,5"}`:   13.5,
+		`{"type":"normal","reps":10,"weight_kg":" 13,5 "}`: 13.5,
+	}
+	for payload, want := range cases {
+		var set voiceParsedSet
+		if err := json.Unmarshal([]byte(payload), &set); err != nil {
+			t.Fatalf("unmarshal %s: %v", payload, err)
+		}
+		if set.WeightKg == nil || *set.WeightKg != want {
+			t.Fatalf("%s -> %v, want %v", payload, set.WeightKg, want)
+		}
+		if set.Reps == nil || *set.Reps != 10 {
+			t.Fatalf("%s lost reps: %v", payload, set.Reps)
+		}
+	}
+}
+
+func TestDecodeSetAcceptsQuotedAndFloatReps(t *testing.T) {
+	cases := map[string]int{
+		`{"reps":"12"}`:   12,
+		`{"reps":12.0}`:   12,
+		`{"reps":"12.0"}`: 12,
+	}
+	for payload, want := range cases {
+		var set voiceParsedSet
+		if err := json.Unmarshal([]byte(payload), &set); err != nil {
+			t.Fatalf("unmarshal %s: %v", payload, err)
+		}
+		if set.Reps == nil || *set.Reps != want {
+			t.Fatalf("%s -> %v, want %d", payload, set.Reps, want)
+		}
+	}
+}
+
+func TestDecodeSetKeepsAbsentFieldsAbsent(t *testing.T) {
+	// Absence and zero mean different things: a reps_only exercise has no weight
+	// at all, and turning that into 0 kg would be a claim nobody made.
+	for _, payload := range []string{
+		`{"type":"normal","reps":5}`,
+		`{"type":"normal","reps":5,"weight_kg":null}`,
+		`{"type":"normal","reps":5,"weight_kg":""}`,
+		`{"type":"normal","reps":5,"weight_kg":"около двадцати"}`,
+	} {
+		var set voiceParsedSet
+		if err := json.Unmarshal([]byte(payload), &set); err != nil {
+			t.Fatalf("unmarshal %s: %v", payload, err)
+		}
+		if set.WeightKg != nil {
+			t.Fatalf("%s produced a weight of %v", payload, *set.WeightKg)
+		}
+		if set.Reps == nil || *set.Reps != 5 {
+			t.Fatalf("%s lost reps: %v", payload, set.Reps)
+		}
+	}
+}
+
+func TestDecodeParseResultSurvivesOneBadField(t *testing.T) {
+	// The point of leniency: a single unreadable field must not cost the sets that
+	// were understood.
+	answer := `{"domain":"workout","exercises":[{"template_id":"422B08F1","title":"Lateral Raise (Dumbbell)",
+	  "sets":[{"type":"normal","reps":12,"weight_kg":"13,5"},{"type":"normal","reps":12,"weight_kg":"хз"}]}],"unmatched":[]}`
+
+	result, err := decodeVoiceParseResult(answer)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result.Exercises) != 1 || len(result.Exercises[0].Sets) != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+
+	kept, _ := validateParsedExercises(result.Exercises, voiceTestCandidates)
+	if len(kept) != 1 || len(kept[0].Sets) != 2 {
+		t.Fatalf("kept = %+v", kept)
+	}
+	if kept[0].Sets[0].WeightKg == nil || *kept[0].Sets[0].WeightKg != 13.5 {
+		t.Fatalf("first set weight = %v", kept[0].Sets[0].WeightKg)
+	}
+	// The unreadable weight is dropped, but the twelve reps survive.
+	if kept[0].Sets[1].WeightKg != nil {
+		t.Fatalf("second set kept a bogus weight: %v", *kept[0].Sets[1].WeightKg)
+	}
+	if kept[0].Sets[1].Reps == nil || *kept[0].Sets[1].Reps != 12 {
+		t.Fatalf("second set lost reps: %v", kept[0].Sets[1].Reps)
 	}
 }

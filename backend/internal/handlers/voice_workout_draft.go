@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -197,4 +198,78 @@ func describeVoiceSet(set voiceParsedSet) string {
 		described += " (" + set.Type + ")"
 	}
 	return described
+}
+
+// UnmarshalJSON accepts the shapes a model actually produces for a set, not only
+// the one it was asked for. A weight can arrive as 13.5, as "13.5", or - after a
+// phrase dictated in Russian, where the decimal separator is a comma - as "13,5".
+// Strict decoding would fail the whole phrase over one field, losing sets that
+// were understood perfectly, so each field is coerced on its own and an
+// unreadable one simply stays absent.
+func (s *voiceParsedSet) UnmarshalJSON(data []byte) error {
+	var lenient struct {
+		Type            string          `json:"type"`
+		Reps            json.RawMessage `json:"reps"`
+		WeightKg        json.RawMessage `json:"weight_kg"`
+		DurationSeconds json.RawMessage `json:"duration_seconds"`
+	}
+	if err := json.Unmarshal(data, &lenient); err != nil {
+		return err
+	}
+
+	s.Type = lenient.Type
+	s.Reps = lenientInt(lenient.Reps)
+	s.WeightKg = lenientFloat(lenient.WeightKg)
+	s.DurationSeconds = lenientInt(lenient.DurationSeconds)
+	return nil
+}
+
+// lenientFloat reads a number that may be quoted and may use a comma as the
+// decimal separator. Anything unreadable returns nil rather than zero: a weight
+// of zero is a claim, absence is not.
+func lenientFloat(raw json.RawMessage) *float64 {
+	text := numericText(raw)
+	if text == "" {
+		return nil
+	}
+	value, err := strconv.ParseFloat(strings.Replace(text, ",", ".", 1), 64)
+	if err != nil {
+		return nil
+	}
+	return &value
+}
+
+func lenientInt(raw json.RawMessage) *int {
+	text := numericText(raw)
+	if text == "" {
+		return nil
+	}
+	// Reps arriving as "10.0" is still ten reps, so the value is parsed as a
+	// float and then rounded rather than rejected.
+	value, err := strconv.ParseFloat(strings.Replace(text, ",", ".", 1), 64)
+	if err != nil {
+		return nil
+	}
+	rounded := int(value + 0.5)
+	if value < 0 {
+		rounded = int(value - 0.5)
+	}
+	return &rounded
+}
+
+// numericText unwraps a raw JSON value down to the digits it carries, whether it
+// arrived quoted or bare.
+func numericText(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, `"`) {
+		var text string
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return ""
+		}
+		return strings.TrimSpace(text)
+	}
+	return trimmed
 }
