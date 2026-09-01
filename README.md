@@ -2,7 +2,7 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000023`. JSON payloads,
+The diagram reflects migrations `000001` through `000024`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability.
 
 ```mermaid
@@ -835,7 +835,7 @@ is eaten.
 | --- | --- | --- |
 | `user_id` | `uuid` | Catalogue owner; part of the primary key, references `users.id`. |
 | `food_id` | `varchar(64)` | Provider food identifier; part of the primary key. |
-| `food_name` | `varchar(255)` | Food name as FatSecret stores it, in the account's own language. |
+| `food_name` | `varchar(255)` | Food name as FatSecret stores it, in the account's own language. Indexed as `lower(food_name COLLATE "ru-RU-x-icu")`, because the database runs with `LC_COLLATE = C` where plain `lower()` leaves Cyrillic untouched; a query has to use the same expression to match. |
 | `brand_name` | `varchar(255)`, nullable | Brand, where the food is a branded product. |
 | `food_type` | `varchar(50)`, nullable | Provider classification, such as `Brand` or `Generic`. |
 | `food_url` | `text`, nullable | Provider page for the food. |
