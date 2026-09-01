@@ -2,7 +2,10 @@ package connectors
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -11,13 +14,36 @@ const (
 	// point is to finish on its own over a few runs rather than in one burst: the
 	// account has a generous daily budget - around 5000 calls - but throttles on
 	// rapid bursts, which is what error 12 is.
-	fatSecretBackfillDaysPerRun = 10
+	fatSecretBackfillDaysPerRun = 5
 	// fatSecretBackfillPause spaces the requests out. Walking 57 days back to back
 	// is what earned "User is performing too many actions" in the first place, and
 	// the API publishes no Retry-After to aim at, so the only defence is not to
 	// burst.
-	fatSecretBackfillPause = 400 * time.Millisecond
+	fatSecretBackfillPause = time.Second
 )
+
+// isFatSecretThrottled recognizes both shapes the throttle takes.
+//
+// Documented: error 12, "User is performing too many actions". Observed: the
+// server accepts the connection and never answers, so the request dies on the
+// client timeout instead. The second form is the dangerous one - it does not look
+// like a rate limit, so the run kept walking and spent thirty seconds per day
+// waiting for nothing, ten days in a row, never advancing.
+func isFatSecretThrottled(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isFatSecretRateLimitError(err) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "deadline exceeded") ||
+		strings.Contains(message, "timeout") ||
+		strings.Contains(message, "client.timeout")
+}
 
 // backfillMissingFoodIDs re-syncs days whose items predate food_id being stored.
 //
@@ -46,10 +72,10 @@ func (c *FatSecretConnector) backfillMissingFoodIDs(ctx context.Context, userID,
 		}
 
 		if err := c.syncDay(ctx, userID, token, secret, date); err != nil {
-			if isFatSecretRateLimitError(err) {
+			if isFatSecretThrottled(err) {
 				// Throttling clears within minutes, and the scheduler comes back
 				// every fifteen, so stopping here costs nothing but a wait.
-				c.logger.Info().Int("days_done", done).
+				c.logger.Info().Int("days_done", done).Err(err).
 					Msg("backfill paused by throttling, resuming on the next sync")
 				return nil
 			}
