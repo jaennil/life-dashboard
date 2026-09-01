@@ -76,15 +76,7 @@ func (c *FatSecretConnector) syncFoodCatalogue(ctx context.Context, userID, toke
 		return nil
 	}
 
-	// A food eaten at several meals arrives several times; the meals are collected
-	// so the writer can guess the meal when the phrase does not name one.
-	type collected struct {
-		food   fsCatalogueFood
-		source string
-		meals  map[string]bool
-	}
-	catalogue := map[string]*collected{}
-
+	catalogue := map[string]*fsCatalogueEntry{}
 	for _, method := range []string{"foods.get_most_eaten", "foods.get_recently_eaten"} {
 		for _, meal := range fatSecretMeals {
 			foods, err := c.fetchFoodHistory(ctx, token, secret, method, meal)
@@ -94,34 +86,13 @@ func (c *FatSecretConnector) syncFoodCatalogue(ctx context.Context, userID, toke
 					Msg("food history request failed")
 				continue
 			}
-
-			for _, food := range foods {
-				if food.FoodID == "" {
-					continue
-				}
-				entry, seen := catalogue[food.FoodID]
-				if !seen {
-					entry = &collected{food: food, source: historySource(method), meals: map[string]bool{}}
-					catalogue[food.FoodID] = entry
-				}
-				// most_eaten wins over recently_eaten as the recorded source.
-				if historySource(method) == "most_eaten" {
-					entry.source = "most_eaten"
-				}
-				entry.meals[meal] = true
-			}
+			collectFoodHistory(catalogue, foods, method, meal)
 		}
 	}
 
 	saved := 0
 	for _, entry := range catalogue {
-		meals := make([]string, 0, len(entry.meals))
-		for _, meal := range fatSecretMeals {
-			if entry.meals[meal] {
-				meals = append(meals, meal)
-			}
-		}
-		if err := c.upsertCatalogueFood(ctx, userID, entry.food, entry.source, meals); err != nil {
+		if err := c.upsertCatalogueFood(ctx, userID, entry); err != nil {
 			return fmt.Errorf("upsert food %s: %w", entry.food.FoodID, err)
 		}
 		saved++
@@ -129,6 +100,62 @@ func (c *FatSecretConnector) syncFoodCatalogue(ctx context.Context, userID, toke
 
 	c.logger.Info().Int("foods", saved).Msg("food catalogue synced")
 	return nil
+}
+
+// fsCatalogueEntry accumulates one food across the eight history responses.
+type fsCatalogueEntry struct {
+	food   fsCatalogueFood
+	source string
+	meals  map[string]bool
+	// rank is the best position the food reached in a most-eaten list, 1-based.
+	// Zero means it never appeared in one.
+	rank int
+}
+
+// mealList returns the meals in a stable order.
+func (e *fsCatalogueEntry) mealList() []string {
+	meals := make([]string, 0, len(e.meals))
+	for _, meal := range fatSecretMeals {
+		if e.meals[meal] {
+			meals = append(meals, meal)
+		}
+	}
+	return meals
+}
+
+// collectFoodHistory folds one history response into the catalogue being built.
+//
+// The response order carries the signal: foods.get_most_eaten returns the most
+// habitual first, so position is frequency. The best position across meals is
+// kept, because a food that ranks first at breakfast is a habit even if it never
+// appears at dinner.
+func collectFoodHistory(catalogue map[string]*fsCatalogueEntry, foods []fsCatalogueFood, method, meal string) {
+	source := historySource(method)
+	for position, food := range foods {
+		if food.FoodID == "" {
+			continue
+		}
+
+		entry, seen := catalogue[food.FoodID]
+		if !seen {
+			entry = &fsCatalogueEntry{food: food, source: source, meals: map[string]bool{}}
+			catalogue[food.FoodID] = entry
+		}
+		// most_eaten wins over recently_eaten as the recorded source.
+		if source == "most_eaten" {
+			entry.source = "most_eaten"
+		}
+		entry.meals[meal] = true
+
+		// Only the most-eaten lists are ranked by frequency; position in a recent
+		// list means recency, which is a different question.
+		if source == "most_eaten" {
+			rank := position + 1
+			if entry.rank == 0 || rank < entry.rank {
+				entry.rank = rank
+			}
+		}
+	}
 }
 
 func historySource(method string) string {
@@ -189,8 +216,8 @@ func (c *FatSecretConnector) fetchFoodHistory(ctx context.Context, token, secret
 	return decoded.Foods.Foods, nil
 }
 
-func (c *FatSecretConnector) upsertCatalogueFood(ctx context.Context, userID string, food fsCatalogueFood, source string, meals []string) error {
-	raw, err := json.Marshal(food)
+func (c *FatSecretConnector) upsertCatalogueFood(ctx context.Context, userID string, entry *fsCatalogueEntry) error {
+	raw, err := json.Marshal(entry.food)
 	if err != nil {
 		return err
 	}
@@ -198,9 +225,10 @@ func (c *FatSecretConnector) upsertCatalogueFood(ctx context.Context, userID str
 	_, err = c.db.Exec(ctx, `
 		INSERT INTO fatsecret_foods (
 			user_id, food_id, food_name, brand_name, food_type, food_url,
-			source, meals, last_seen_at, raw_payload, updated_at
+			source, meals, most_eaten_rank, last_seen_at, raw_payload, updated_at
 		)
-		VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''), $7, $8, NOW(), $9::jsonb, NOW())
+		VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''), $7, $8,
+		        NULLIF($9, 0), NOW(), $10::jsonb, NOW())
 		ON CONFLICT (user_id, food_id) DO UPDATE SET
 			food_name    = EXCLUDED.food_name,
 			brand_name   = EXCLUDED.brand_name,
@@ -208,11 +236,16 @@ func (c *FatSecretConnector) upsertCatalogueFood(ctx context.Context, userID str
 			food_url     = EXCLUDED.food_url,
 			source       = EXCLUDED.source,
 			meals        = EXCLUDED.meals,
+			-- A food that slipped out of the top twenty keeps its last known rank
+			-- rather than losing the signal entirely. The rank goes slightly stale;
+			-- dropping it would leave nothing to break a tie with.
+			most_eaten_rank = COALESCE(EXCLUDED.most_eaten_rank, fatsecret_foods.most_eaten_rank),
 			last_seen_at = NOW(),
 			raw_payload  = EXCLUDED.raw_payload,
 			updated_at   = NOW()
-	`, userID, food.FoodID, food.FoodName, food.BrandName, food.FoodType, food.FoodURL,
-		source, meals, raw)
+	`, userID, entry.food.FoodID, entry.food.FoodName, entry.food.BrandName,
+		entry.food.FoodType, entry.food.FoodURL, entry.source, entry.mealList(),
+		entry.rank, raw)
 	return err
 }
 

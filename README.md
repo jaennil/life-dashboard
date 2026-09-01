@@ -2,7 +2,7 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000022`. JSON payloads,
+The diagram reflects migrations `000001` through `000023`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability.
 
 ```mermaid
@@ -82,6 +82,7 @@ erDiagram
         varchar food_name
         varchar brand_name
         varchar source
+        integer most_eaten_rank
         timestamptz last_seen_at
     }
 
@@ -839,6 +840,7 @@ is eaten.
 | `food_type` | `varchar(50)`, nullable | Provider classification, such as `Brand` or `Generic`. |
 | `food_url` | `text`, nullable | Provider page for the food. |
 | `source` | `varchar(20)` | Which history endpoint surfaced it: `most_eaten` or `recently_eaten`. |
+| `most_eaten_rank` | `integer`, nullable | Best position reached in a most-eaten list, 1-based; the frequency signal used to break ties between similarly named foods. `NULL` means it only ever appeared in the recent lists. |
 | `meals` | `text[]`, nullable | Meals it has been eaten in, used to guess the meal when a phrase does not name one. |
 | `last_seen_at` | `timestamptz`, nullable | When it was last present in the history. |
 | `raw_payload` | `jsonb`, nullable | Original provider food object. |
