@@ -124,6 +124,13 @@ type AIConfig struct {
 	// RequestTimeout has to cover thinking, not just writing: a reasoning model
 	// on a high effort setting can spend minutes before it emits a first token.
 	RequestTimeout time.Duration `mapstructure:"request_timeout"`
+	// ParseModel and ParseReasoningEffort override Model and ReasoningEffort for
+	// extraction work such as turning a dictated phrase into exercises. Measured
+	// on the same phrase: the checkup model spent 43s and 2 RUB thinking, the fast
+	// one 5s and 0.09 RUB with no thinking at all, and the answer was as good once
+	// the prompt spelled out the set-count rule.
+	ParseModel           string `mapstructure:"parse_model"`
+	ParseReasoningEffort string `mapstructure:"parse_reasoning_effort"`
 }
 
 type LogConfig struct {
@@ -187,6 +194,8 @@ func Load() (*Config, error) {
 	viper.BindEnv("ai.base_url", "AI_BASE_URL")
 	viper.BindEnv("ai.model", "AI_MODEL")
 	viper.BindEnv("ai.reasoning_effort", "AI_REASONING_EFFORT")
+	viper.BindEnv("ai.parse_model", "AI_PARSE_MODEL")
+	viper.BindEnv("ai.parse_reasoning_effort", "AI_PARSE_REASONING_EFFORT")
 	viper.BindEnv("ai.request_timeout", "AI_REQUEST_TIMEOUT")
 	viper.SetDefault("ai.provider", "claude-code-api")
 	viper.SetDefault("ai.request_timeout", 10*time.Minute)

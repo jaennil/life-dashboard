@@ -160,6 +160,35 @@ func main() {
 	}
 
 	// Scheduler
+	// The AI handler is built here rather than inside the authenticated group
+	// because the voice-workout webhook, which is public and authenticates with an
+	// api_key, parses dictated phrases through the same upstream configuration.
+	weatherHandler := handlers.NewWeather(cfg.Weather.Lat, cfg.Weather.Lon, cfg.Weather.City, log.Logger)
+	// Unleash feature flags
+	var unleashClient *unleashclient.Client
+	if cfg.Unleash.URL != "" && cfg.Unleash.APIToken != "" {
+		var err error
+		unleashClient, err = unleashclient.NewClient(
+			unleashclient.WithUrl(cfg.Unleash.URL),
+			unleashclient.WithCustomHeaders(http.Header{"Authorization": {cfg.Unleash.APIToken}}),
+			unleashclient.WithAppName(cfg.Unleash.AppName),
+			unleashclient.WithRefreshInterval(10),
+		)
+		if err != nil {
+			log.Warn().Err(err).Msg("unleash client failed to initialize")
+		} else {
+			log.Info().Str("url", cfg.Unleash.URL).Msg("unleash client initialized")
+		}
+	}
+
+	aiHandler := handlers.NewAI(pool, handlers.AIOptions{
+		BaseURL:         cfg.AI.BaseURL,
+		Model:           cfg.AI.Model,
+		APIKey:          cfg.AI.APIKey,
+		ReasoningEffort: cfg.AI.ReasoningEffort,
+		RequestTimeout:  cfg.AI.RequestTimeout,
+	}, weatherHandler, unleashClient, log.Logger)
+
 	sched := scheduler.New(log.Logger)
 	for _, conn := range activeConnectors {
 		connCopy := conn
@@ -197,7 +226,7 @@ func main() {
 	// The lazy close in the webhook only fires when the next phrase arrives, so
 	// this sweep is what actually bounds a dictated session that was never
 	// finished out loud.
-	voiceSessions := handlers.NewVoiceWorkout(pool, log.Logger)
+	voiceSessions := handlers.NewVoiceWorkout(pool, aiHandler, cfg.AI.ParseModel, cfg.AI.ParseReasoningEffort, log.Logger)
 	if err := sched.AddJob("0 */10 * * * *", "voice_workout_idle_close", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
@@ -274,6 +303,7 @@ func main() {
 	authHandler := handlers.NewAuth(stravaConn, fatSecretConn, zenmoney, googleCalConn, notionConn, todoist, log.Logger)
 
 	// Protected routes
+
 	r.Group(func(r chi.Router) {
 		r.Use(authmw.Auth(cfg.Auth.JWTSecret))
 		r.Use(authmw.AttachSentryUser)
@@ -355,33 +385,8 @@ func main() {
 		r.Delete("/api/v1/productivity/habits/{habitID}", productivityHandler.DeleteHabit)
 		r.Post("/api/v1/productivity/habits/{habitID}/status", productivityHandler.SetHabitStatus)
 
-		weatherHandler := handlers.NewWeather(cfg.Weather.Lat, cfg.Weather.Lon, cfg.Weather.City, log.Logger)
 		r.Get("/api/v1/weather", weatherHandler.GetWeather)
 
-		// Unleash feature flags
-		var unleashClient *unleashclient.Client
-		if cfg.Unleash.URL != "" && cfg.Unleash.APIToken != "" {
-			var err error
-			unleashClient, err = unleashclient.NewClient(
-				unleashclient.WithUrl(cfg.Unleash.URL),
-				unleashclient.WithCustomHeaders(http.Header{"Authorization": {cfg.Unleash.APIToken}}),
-				unleashclient.WithAppName(cfg.Unleash.AppName),
-				unleashclient.WithRefreshInterval(10),
-			)
-			if err != nil {
-				log.Warn().Err(err).Msg("unleash client failed to initialize")
-			} else {
-				log.Info().Str("url", cfg.Unleash.URL).Msg("unleash client initialized")
-			}
-		}
-
-		aiHandler := handlers.NewAI(pool, handlers.AIOptions{
-			BaseURL:         cfg.AI.BaseURL,
-			Model:           cfg.AI.Model,
-			APIKey:          cfg.AI.APIKey,
-			ReasoningEffort: cfg.AI.ReasoningEffort,
-			RequestTimeout:  cfg.AI.RequestTimeout,
-		}, weatherHandler, unleashClient, log.Logger)
 		r.Get("/api/v1/ai/history", aiHandler.GetHistory)
 		r.Delete("/api/v1/ai/history", aiHandler.ClearHistory)
 		r.Post("/api/v1/ai/chat", aiHandler.Chat)

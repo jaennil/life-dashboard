@@ -73,6 +73,13 @@ spec:
             # prompt took 2.6s without it and 10.2s with it.
             - name: AI_REASONING_EFFORT
               value: high
+            # Turning a dictated phrase into exercises is extraction, not
+            # reasoning. Measured on the same phrase against the live API: the
+            # checkup model spent 43s and 2.02 RUB, the fast one 0.14 RUB with no
+            # thinking tokens and the same answer. Waiting 43 seconds at a machine
+            # is what makes the difference matter.
+            - name: AI_PARSE_MODEL
+              value: deepseek-v4-flash
 
           envFrom:
             - secretRef:

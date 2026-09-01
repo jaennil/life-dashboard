@@ -65,6 +65,31 @@ func NewAI(db *pgxpool.Pool, opts AIOptions, weather *WeatherHandler, unleashCli
 	}
 }
 
+// Complete exposes a single non-streaming upstream call. The voice-workout
+// webhook parses dictated phrases through it so that provider, model and
+// reasoning effort stay configured in exactly one place.
+func (h *AIHandler) Complete(ctx context.Context, operation string, messages []ChatMessage) (string, error) {
+	return h.complete(ctx, operation, messages)
+}
+
+// CompleteWithModel is Complete with the model and reasoning effort overridden
+// for this call. Empty values keep the configured defaults, so a caller can pass
+// through whatever it was given without checking it first.
+func (h *AIHandler) CompleteWithModel(ctx context.Context, operation string, messages []ChatMessage, model, effort string) (string, error) {
+	if model == "" && effort == "" {
+		return h.complete(ctx, operation, messages)
+	}
+
+	override := *h
+	if model != "" {
+		override.opts.Model = model
+	}
+	if effort != "" {
+		override.opts.ReasoningEffort = effort
+	}
+	return override.complete(ctx, operation, messages)
+}
+
 // upstreamBody builds the chat-completions payload. reasoning_effort only
 // appears when configured: providers that do not know the field answer 400 for
 // the whole request instead of ignoring the extra key.

@@ -25,14 +25,24 @@ const (
 )
 
 type VoiceWorkoutHandler struct {
-	db     *pgxpool.Pool
-	logger zerolog.Logger
+	db *pgxpool.Pool
+	// ai is borrowed rather than reconstructed so the provider, model and
+	// reasoning effort stay configured in one place. It may be nil, in which case
+	// phrases are still archived and simply left unparsed.
+	ai *AIHandler
+	// Parsing runs on its own model: see the note at the call site.
+	parseModel  string
+	parseEffort string
+	logger      zerolog.Logger
 }
 
-func NewVoiceWorkout(db *pgxpool.Pool, logger zerolog.Logger) *VoiceWorkoutHandler {
+func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, parseModel, parseEffort string, logger zerolog.Logger) *VoiceWorkoutHandler {
 	return &VoiceWorkoutHandler{
-		db:     db,
-		logger: logger.With().Str("handler", "voice_workout").Logger(),
+		db:          db,
+		ai:          ai,
+		parseModel:  parseModel,
+		parseEffort: parseEffort,
+		logger:      logger.With().Str("handler", "voice_workout").Logger(),
 	}
 }
 
@@ -51,9 +61,16 @@ type voiceWorkoutResponse struct {
 	SessionID  string `json:"session_id"`
 	Utterances int    `json:"utterances"`
 	Finished   bool   `json:"finished"`
-	// Heard echoes the text back so the Shortcut can show what was understood
-	// while the phone is still in hand.
-	Heard string `json:"heard"`
+	// Heard echoes the recognized text and Understood what was made of this
+	// phrase, so the Shortcut can show both while the phone is still in hand.
+	// Getting this wrong silently is the main risk of dictating, and this is the
+	// only place it can be caught before the workout is written.
+	Heard      string   `json:"heard"`
+	Understood string   `json:"understood,omitempty"`
+	Workout    string   `json:"workout,omitempty"`
+	Unmatched  []string `json:"unmatched,omitempty"`
+	Title      string   `json:"title,omitempty"`
+	ParseError string   `json:"parse_error,omitempty"`
 }
 
 // ReceiveText accepts one dictated phrase. It appends to the open session,
@@ -108,6 +125,19 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	response := voiceWorkoutResponse{
+		Status:    "ok",
+		SessionID: sessionID,
+		Finished:  finish,
+		Heard:     text,
+	}
+
+	// A phrase that is nothing but the finish command carries no exercises, so it
+	// is not worth an upstream call.
+	if remainder := stripFinishPhrase(text); remainder != "" {
+		h.interpret(r.Context(), userID, sessionID, remainder, &response)
+	}
+
 	if envelope.DurationMinutes > 0 {
 		if err := h.setSpokenDuration(r.Context(), sessionID, envelope.DurationMinutes); err != nil {
 			h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("store spoken duration")
@@ -115,29 +145,27 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 	}
 
 	if finish {
-		if err := h.finishSession(r.Context(), sessionID, now); err != nil {
+		title := h.generateTitle(r.Context(), sessionID)
+		if err := h.finishSession(r.Context(), sessionID, now, title); err != nil {
 			h.logger.Error().Err(err).Str("session_id", sessionID).Msg("finish session")
 			http.Error(w, "cannot finish session", http.StatusInternalServerError)
 			return
 		}
+		response.Title = title
 	}
 
 	count, err := h.countUtterances(r.Context(), sessionID)
 	if err != nil {
 		h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("count utterances")
 	}
+	response.Utterances = count
 
 	h.logger.Info().Str("user_id", userID).Str("session_id", sessionID).
-		Bool("finished", finish).Int("utterances", count).Msg("voice phrase stored")
+		Bool("finished", finish).Int("utterances", count).
+		Int("unmatched", len(response.Unmatched)).Msg("voice phrase stored")
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(voiceWorkoutResponse{
-		Status:     "ok",
-		SessionID:  sessionID,
-		Utterances: count,
-		Finished:   finish,
-		Heard:      text,
-	})
+	json.NewEncoder(w).Encode(response)
 }
 
 // openOrResumeSession returns the user's open session, closing a stale one first
@@ -161,7 +189,9 @@ func (h *VoiceWorkoutHandler) openOrResumeSession(ctx context.Context, userID st
 		}
 		return sessionID, nil
 	case err == nil:
-		if err := h.finishSession(ctx, sessionID, lastUtteranceAt); err != nil {
+		// A stale session is closed without a title: it was abandoned rather
+		// than finished, and naming it would imply otherwise.
+		if err := h.finishSession(ctx, sessionID, lastUtteranceAt, ""); err != nil {
 			return "", err
 		}
 	case !errors.Is(err, pgx.ErrNoRows):
@@ -194,12 +224,13 @@ func (h *VoiceWorkoutHandler) setSpokenDuration(ctx context.Context, sessionID s
 	return err
 }
 
-func (h *VoiceWorkoutHandler) finishSession(ctx context.Context, sessionID string, at time.Time) error {
+func (h *VoiceWorkoutHandler) finishSession(ctx context.Context, sessionID string, at time.Time, title string) error {
 	_, err := h.db.Exec(ctx, `
 		UPDATE voice_workout_sessions
-		SET status = 'finished', finished_at = $2, updated_at = NOW()
+		SET status = 'finished', finished_at = $2, title = COALESCE(NULLIF($3, ''), title),
+		    updated_at = NOW()
 		WHERE id = $1 AND status = 'open'
-	`, sessionID, at)
+	`, sessionID, at, title)
 	return err
 }
 
