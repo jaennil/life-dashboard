@@ -2,7 +2,7 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000024`. JSON payloads,
+The diagram reflects migrations `000001` through `000025`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability.
 
 ```mermaid
@@ -207,6 +207,9 @@ erDiagram
         varchar serving_description
         numeric calories
         jsonb macros
+        varchar food_id
+        varchar serving_id
+        numeric number_of_units
     }
 
     nutrition_targets {
@@ -815,6 +818,16 @@ Individual foods and servings belonging to a daily nutrition record.
 | `serving_description` | `varchar(255)`, nullable | Human-readable serving size. |
 | `calories` | `numeric(7,2)`, nullable | Serving energy in kilocalories. |
 | `macros` | `jsonb`, nullable | Provider nutrient breakdown not normalized into columns. |
+| `food_id` | `varchar(64)`, nullable | Provider food identifier, needed to write the same food back to the diary. |
+| `serving_id` | `varchar(64)`, nullable | Provider serving identifier the entry was logged against. |
+| `number_of_units` | `numeric(10,3)`, nullable | How many of that serving were logged; the natural default when the food is dictated again. |
+
+Every synced day also adds its foods to `fatsecret_foods`, which is how the long
+tail becomes reachable: the history endpoints return only the top twenty foods
+per meal, about a third of what has actually been logged. A diary sighting never
+overwrites a richer catalogue row - the diary spells a food as one string
+(`Snickers Сникерс Супер`) while the history endpoints split the brand out and
+carry a frequency rank.
 
 #### `fatsecret_foods`
 

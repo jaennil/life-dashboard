@@ -165,3 +165,45 @@ func TestCollectFoodHistorySkipsFoodsWithoutID(t *testing.T) {
 		t.Fatalf("rank = %d, want the true position 2", catalogue["real"].rank)
 	}
 }
+
+func TestDecodeDiaryEntryKeepsProviderIdentifiers(t *testing.T) {
+	// Captured from food_entries.get. The connector used to declare neither
+	// food_id nor serving_id, so both were silently discarded - and they are
+	// exactly what food_entry.create needs to write a meal back.
+	payload := `{"food_entry_id":"123","food_entry_name":"Snickers Сникерс Супер",
+	  "food_id":"86855602","serving_id":"69898085","number_of_units":"2.000",
+	  "meal":"Other","calories":"440","protein":"7","carbohydrate":"55","fat":"21"}`
+
+	var entry fsFoodEntry
+	if err := json.Unmarshal([]byte(payload), &entry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if entry.FoodID != "86855602" {
+		t.Fatalf("food_id = %q", entry.FoodID)
+	}
+	if entry.ServingID != "69898085" {
+		t.Fatalf("serving_id = %q", entry.ServingID)
+	}
+	if entry.NumberOfUnits != "2.000" {
+		t.Fatalf("number_of_units = %q", entry.NumberOfUnits)
+	}
+	// The diary name is the brand and product glued together, which is why a
+	// name-based join against the split catalogue names matches almost nothing.
+	if entry.FoodEntryName != "Snickers Сникерс Супер" {
+		t.Fatalf("food_entry_name = %q", entry.FoodEntryName)
+	}
+}
+
+func TestParseFloatOnProviderDecimalStrings(t *testing.T) {
+	// number_of_units and the macros all arrive as strings.
+	if got := parseFloat("2.000"); got != 2 {
+		t.Fatalf(`parseFloat("2.000") = %v`, got)
+	}
+	if got := parseFloat("0.820"); got != 0.82 {
+		t.Fatalf(`parseFloat("0.820") = %v`, got)
+	}
+	if got := parseFloat(""); got != 0 {
+		t.Fatalf(`parseFloat("") = %v, want 0`, got)
+	}
+}

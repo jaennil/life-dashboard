@@ -329,8 +329,13 @@ func daysSinceEpoch(t time.Time) int {
 }
 
 type fsFoodEntry struct {
-	FoodEntryID            string `json:"food_entry_id"`
-	FoodEntryName          string `json:"food_entry_name"`
+	FoodEntryID   string `json:"food_entry_id"`
+	FoodEntryName string `json:"food_entry_name"`
+	// FoodID and ServingID are what make an entry reproducible: they are the
+	// arguments food_entry.create needs, and the only way a dictated meal can be
+	// resolved to something writable.
+	FoodID                 string `json:"food_id"`
+	ServingID              string `json:"serving_id"`
 	MealID                 string `json:"meal_id"`
 	Meal                   string `json:"meal"`
 	NumberOfUnits          string `json:"number_of_units"`
@@ -664,12 +669,44 @@ func (c *FatSecretConnector) storeEntries(ctx context.Context, userID string, da
 			"iron":                parseFloat(e.Iron),
 		})
 		c.db.Exec(ctx, `
-			INSERT INTO nutrition_items (daily_id, meal_type, food_name, serving_description, calories, macros)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, dailyID, mealName, e.FoodEntryName, serving, parseFloat(e.Calories), macros)
+			INSERT INTO nutrition_items (
+				daily_id, meal_type, food_name, serving_description, calories, macros,
+				food_id, serving_id, number_of_units
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, 0))
+		`, dailyID, mealName, e.FoodEntryName, serving, parseFloat(e.Calories), macros,
+			e.FoodID, e.ServingID, parseFloat(e.NumberOfUnits))
+	}
+
+	// Every synced day widens the catalogue for free. The history endpoints only
+	// return the top twenty foods per meal, so without this the long tail of what
+	// was actually eaten would stay unreachable to a dictated phrase.
+	for _, e := range entries {
+		if err := c.rememberDiaryFood(ctx, userID, e); err != nil {
+			c.logger.Warn().Err(err).Str("food_id", e.FoodID).Msg("remember diary food")
+		}
 	}
 
 	c.logger.Info().Str("date", date.Format("2006-01-02")).
 		Float64("calories", totalCal).Int("items", len(entries)).Msg("synced day")
 	return nil
+}
+
+// rememberDiaryFood adds a food seen in the diary to the catalogue.
+//
+// The diary spells a food as one string - "Snickers Сникерс Супер" - while the
+// history endpoints split the brand out and carry a frequency rank. So an
+// existing row is never overwritten here: a diary sighting only refreshes
+// last_seen_at, and the richer record wins.
+func (c *FatSecretConnector) rememberDiaryFood(ctx context.Context, userID string, e fsFoodEntry) error {
+	if e.FoodID == "" || strings.TrimSpace(e.FoodEntryName) == "" {
+		return nil
+	}
+
+	_, err := c.db.Exec(ctx, `
+		INSERT INTO fatsecret_foods (user_id, food_id, food_name, source, meals, last_seen_at)
+		VALUES ($1, $2, $3, 'diary', ARRAY[]::text[], NOW())
+		ON CONFLICT (user_id, food_id) DO UPDATE SET last_seen_at = NOW()
+	`, userID, e.FoodID, e.FoodEntryName)
+	return err
 }
