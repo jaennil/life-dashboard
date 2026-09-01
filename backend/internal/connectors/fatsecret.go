@@ -249,7 +249,11 @@ func (c *FatSecretConnector) getStoredTokens(ctx context.Context, userID string)
 
 func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 	trigger := GetSyncTrigger(ctx)
-	syncDates := fatSecretSyncDates(trigger, time.Now())
+	pending, err := c.daysMissingFoodIDs(ctx, userID, 1)
+	if err != nil {
+		c.logger.Warn().Err(err).Msg("check backfill queue; assuming empty")
+	}
+	syncDates := fatSecretSyncDates(trigger, time.Now(), len(pending) > 0)
 
 	c.logger.Info().
 		Str("user_id", userID).
@@ -328,7 +332,15 @@ func fatSecretSyncDays(trigger SyncTrigger) int {
 	return nutritionSyncDays
 }
 
-func fatSecretSyncDates(trigger SyncTrigger, now time.Time) []time.Time {
+// fatSecretSyncDates picks the days one run reads.
+//
+// The account answers about three requests per run before the API starts
+// stalling, so the list is a budget, not a wish list. The hot window takes two
+// of them. The third normally goes to a rotating history day - but while the
+// backfill still has days to repair, the backfill IS the history refresh, and it
+// takes that request instead. Without this the rotation kept winning the third
+// slot and the backfill advanced zero days, run after run.
+func fatSecretSyncDates(trigger SyncTrigger, now time.Time, backfillPending bool) []time.Time {
 	today := calendarDate(now)
 	dates := make([]time.Time, 0, fatSecretSyncDays(trigger))
 	for i := 0; i < fatSecretScheduledSyncDays; i++ {
@@ -339,6 +351,10 @@ func fatSecretSyncDates(trigger SyncTrigger, now time.Time) []time.Time {
 		for i := fatSecretScheduledSyncDays; i < nutritionSyncDays; i++ {
 			dates = append(dates, today.AddDate(0, 0, -i))
 		}
+		return dates
+	}
+
+	if backfillPending {
 		return dates
 	}
 

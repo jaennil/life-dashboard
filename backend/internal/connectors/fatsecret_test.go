@@ -57,7 +57,7 @@ func TestFatSecretSyncDays(t *testing.T) {
 
 func TestFatSecretScheduledSyncDates(t *testing.T) {
 	now := time.Date(2026, time.August, 4, 0, 10, 0, 0, time.FixedZone("MSK", 3*60*60))
-	dates := fatSecretSyncDates(SyncTriggerScheduled, now)
+	dates := fatSecretSyncDates(SyncTriggerScheduled, now, false)
 
 	if len(dates) != fatSecretScheduledSyncDays+1 {
 		t.Fatalf("expected %d dates, got %d", fatSecretScheduledSyncDays+1, len(dates))
@@ -77,8 +77,8 @@ func TestFatSecretScheduledSyncDates(t *testing.T) {
 
 func TestFatSecretScheduledHistoryRotates(t *testing.T) {
 	now := time.Date(2026, time.August, 4, 0, 10, 0, 0, time.UTC)
-	first := fatSecretSyncDates(SyncTriggerScheduled, now)
-	second := fatSecretSyncDates(SyncTriggerScheduled, now.Add(fatSecretHistorySlot))
+	first := fatSecretSyncDates(SyncTriggerScheduled, now, false)
+	second := fatSecretSyncDates(SyncTriggerScheduled, now.Add(fatSecretHistorySlot), false)
 
 	if first[len(first)-1].Equal(second[len(second)-1]) {
 		t.Fatal("expected historical date to rotate between sync slots")
@@ -87,7 +87,7 @@ func TestFatSecretScheduledHistoryRotates(t *testing.T) {
 
 func TestFatSecretManualSyncDates(t *testing.T) {
 	now := time.Date(2026, time.August, 4, 23, 50, 0, 0, time.FixedZone("MSK", 3*60*60))
-	dates := fatSecretSyncDates(SyncTriggerManual, now)
+	dates := fatSecretSyncDates(SyncTriggerManual, now, false)
 
 	if len(dates) != nutritionSyncDays {
 		t.Fatalf("expected %d dates, got %d", nutritionSyncDays, len(dates))
@@ -107,4 +107,32 @@ type fatSecretTestError struct {
 
 func (e *fatSecretTestError) Error() string {
 	return e.message
+}
+
+func TestPendingBackfillTakesTheHistorySlot(t *testing.T) {
+	now := time.Date(2026, 9, 2, 0, 3, 0, 0, time.UTC)
+
+	// Idle: the hot window plus one rotating history day.
+	idle := fatSecretSyncDates(SyncTriggerScheduled, now, false)
+	if len(idle) != fatSecretScheduledSyncDays+1 {
+		t.Fatalf("idle run reads %d days, want %d", len(idle), fatSecretScheduledSyncDays+1)
+	}
+
+	// Backfill pending: the rotation yields its request; the account only answers
+	// about three per run and the backfill is what needs the third.
+	busy := fatSecretSyncDates(SyncTriggerScheduled, now, true)
+	if len(busy) != fatSecretScheduledSyncDays {
+		t.Fatalf("run with pending backfill reads %d days, want %d", len(busy), fatSecretScheduledSyncDays)
+	}
+	for i, d := range busy {
+		if want := calendarDate(now).AddDate(0, 0, -i); !d.Equal(want) {
+			t.Fatalf("day %d = %s, want %s", i, d, want)
+		}
+	}
+
+	// A manual run is a deliberate full read and is not budgeted.
+	manual := fatSecretSyncDates(SyncTriggerManual, now, true)
+	if len(manual) != nutritionSyncDays {
+		t.Fatalf("manual run reads %d days, want %d", len(manual), nutritionSyncDays)
+	}
 }
