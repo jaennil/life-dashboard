@@ -69,6 +69,22 @@ func oauth1Nonce() string {
 }
 
 // oauth1Sign builds HMAC-SHA1 signature for OAuth 1.0
+// oauth1Escape percent-encodes for an OAuth 1.0a signature base string, which
+// requires RFC 3986 and not form encoding.
+//
+// url.QueryEscape writes a space as "+" and escapes "~", both of which OAuth
+// forbids. Every call this connector made until now carried only method names,
+// numbers and dates, so the difference never showed. The first value with a space
+// in it - a Russian food name written into the diary - came back as
+// "fatsecret error 8: Invalid signature", because the server rebuilds the base
+// string from the decoded parameters and gets "%20" where we signed "+".
+func oauth1Escape(value string) string {
+	escaped := url.QueryEscape(value)
+	escaped = strings.ReplaceAll(escaped, "+", "%20")
+	escaped = strings.ReplaceAll(escaped, "%7E", "~")
+	return escaped
+}
+
 func (c *FatSecretConnector) oauth1Sign(method, baseURL string, params url.Values, tokenSecret string) string {
 	keys := make([]string, 0, len(params))
 	for k := range params {
@@ -78,13 +94,13 @@ func (c *FatSecretConnector) oauth1Sign(method, baseURL string, params url.Value
 
 	pairs := make([]string, 0, len(params))
 	for _, k := range keys {
-		pairs = append(pairs, url.QueryEscape(k)+"="+url.QueryEscape(params.Get(k)))
+		pairs = append(pairs, oauth1Escape(k)+"="+oauth1Escape(params.Get(k)))
 	}
 	paramStr := strings.Join(pairs, "&")
 
-	baseStr := strings.ToUpper(method) + "&" + url.QueryEscape(baseURL) + "&" + url.QueryEscape(paramStr)
+	baseStr := strings.ToUpper(method) + "&" + oauth1Escape(baseURL) + "&" + oauth1Escape(paramStr)
 
-	sigKey := url.QueryEscape(c.consumerSecret) + "&" + url.QueryEscape(tokenSecret)
+	sigKey := oauth1Escape(c.consumerSecret) + "&" + oauth1Escape(tokenSecret)
 	mac := hmac.New(sha1.New, []byte(sigKey))
 	mac.Write([]byte(baseStr))
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
