@@ -16,7 +16,7 @@ resources:
 images:
 - name: backend
   newName: ghcr.io/jaennil/life-dashboard/backend
-  newTag: ec80ac670ba22ccb2f6e51597467f6c7ee13d819
+  newTag: 7bf7c02951f88eff44e3f2eafcff4f5a44f794f9
 - name: frontend
   newName: ghcr.io/jaennil/life-dashboard/frontend
-  newTag: ec80ac670ba22ccb2f6e51597467f6c7ee13d819
+  newTag: 7bf7c02951f88eff44e3f2eafcff4f5a44f794f9
