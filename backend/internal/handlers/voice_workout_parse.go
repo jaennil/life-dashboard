@@ -137,6 +137,7 @@ func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, draft []voicePar
 	sb.WriteString("Если domain не workout, верни только domain, а exercises оставь пустым массивом.\n")
 	if workoutOpen {
 		sb.WriteString("Сейчас у пользователя открыта тренировка. Короткая фраза с числами почти наверняка workout: \"ещё 8\" или \"12 по 30\" - это подходы.\n")
+		sb.WriteString("Если во фразе есть вес, повторения или что-то похожее на название упражнения - это workout, даже если распознавание исказило слова до бессмыслицы. Тогда положи исходную формулировку в unmatched, но domain оставь workout: это честнее, чем объявить надиктованный подход заметкой.\n")
 	}
 	sb.WriteString("\nПравила разбора тренировки:\n")
 	sb.WriteString("- template_id обязан быть скопирован из списка упражнений ниже. Не придумывай новые id.\n")

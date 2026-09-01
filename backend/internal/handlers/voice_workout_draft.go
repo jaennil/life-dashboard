@@ -71,7 +71,14 @@ func validateParsedExercises(parsed []voiceParsedExercise, candidates []voiceExe
 			sets = append(sets, cleaned)
 		}
 		if len(sets) == 0 {
-			rejected = append(rejected, describeRejectedExercise(exercise, "не понял подходы"))
+			// "Сгибание на бицепс с гантели 16 кг" names a weight and no reps, and
+			// the exercise was rejected as "не понял подходы" - which reads as a
+			// parsing failure when the phrase simply never said how many.
+			reason := "не понял подходы"
+			if !mentionsAnyCount(exercise.Sets) {
+				reason = "не назвал повторения"
+			}
+			rejected = append(rejected, describeRejectedExercise(exercise, reason))
 			continue
 		}
 		// Losing some sets while keeping others has to be said out loud. Silently
@@ -272,4 +279,15 @@ func numericText(raw json.RawMessage) string {
 		return strings.TrimSpace(text)
 	}
 	return trimmed
+}
+
+// mentionsAnyCount reports whether the model heard any countable quantity at all.
+// It separates "the phrase did not say how many" from "the numbers made no sense".
+func mentionsAnyCount(sets []voiceParsedSet) bool {
+	for _, set := range sets {
+		if set.Reps != nil || set.DurationSeconds != nil {
+			return true
+		}
+	}
+	return false
 }

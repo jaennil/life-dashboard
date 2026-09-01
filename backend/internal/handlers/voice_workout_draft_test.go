@@ -328,3 +328,38 @@ func TestDecodeParseResultSurvivesOneBadField(t *testing.T) {
 		t.Fatalf("second set lost reps: %v", kept[0].Sets[1].Reps)
 	}
 }
+
+func TestValidateSaysWhenRepsWereNeverSpoken(t *testing.T) {
+	// Real phrase: "Сгибание на бицепс с гантели 16 кг" - a weight and no count.
+	// Reporting that as "не понял подходы" blames the parser for something the
+	// phrase never contained.
+	parsed := []voiceParsedExercise{
+		{TemplateID: "422B08F1", Title: "Lateral Raise (Dumbbell)", Sets: []voiceParsedSet{
+			{Type: "normal", WeightKg: vKg(16)},
+		}},
+	}
+
+	kept, rejected := validateParsedExercises(parsed, voiceTestCandidates)
+
+	if len(kept) != 0 {
+		t.Fatalf("kept a set with no count: %+v", kept)
+	}
+	if len(rejected) != 1 || !strings.Contains(rejected[0], "не назвал повторения") {
+		t.Fatalf("rejected = %v", rejected)
+	}
+}
+
+func TestValidateStillBlamesItselfForNonsenseNumbers(t *testing.T) {
+	// Here the count was spoken, it is just implausible - that is a parsing
+	// problem, and the message has to stay the one that says so.
+	parsed := []voiceParsedExercise{
+		{TemplateID: "422B08F1", Title: "Lateral Raise (Dumbbell)", Sets: []voiceParsedSet{
+			{Type: "normal", Reps: vInt(9000), WeightKg: vKg(16)},
+		}},
+	}
+
+	_, rejected := validateParsedExercises(parsed, voiceTestCandidates)
+	if len(rejected) != 1 || !strings.Contains(rejected[0], "не понял подходы") {
+		t.Fatalf("rejected = %v", rejected)
+	}
+}
