@@ -71,6 +71,8 @@ type voiceWorkoutResponse struct {
 	Unmatched  []string `json:"unmatched,omitempty"`
 	Title      string   `json:"title,omitempty"`
 	ParseError string   `json:"parse_error,omitempty"`
+	Domain     string   `json:"domain,omitempty"`
+	Message    string   `json:"message,omitempty"`
 }
 
 // ReceiveText accepts one dictated phrase. It appends to the open session,
@@ -109,15 +111,59 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Archived before anything interprets it and before the domain is known, so a
+	// misclassified or not-yet-supported phrase still survives verbatim.
+	if err := h.archivePhrase(r.Context(), userID, text); err != nil {
+		h.logger.Warn().Err(err).Str("user_id", userID).Msg("archive phrase")
+	}
+
 	finish := envelope.Finish || looksLikeWorkoutFinish(text)
 	now := time.Now()
 
-	sessionID, err := h.openOrResumeSession(r.Context(), userID, now)
+	openSessionID, workoutOpen, err := h.findOpenSession(r.Context(), userID, now)
 	if err != nil {
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("open voice session")
-		http.Error(w, "cannot open session", http.StatusInternalServerError)
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("find open session")
+		http.Error(w, "cannot read session", http.StatusInternalServerError)
 		return
 	}
+
+	response := voiceWorkoutResponse{Status: "ok", Heard: text}
+
+	spoken := stripFinishPhrase(text)
+	interpreted := voiceInterpretation{Domain: voiceDomainWorkout}
+	if spoken != "" {
+		// A phrase that is nothing but the finish command needs no upstream call,
+		// and while a workout is open the finish itself is unambiguous.
+		interpreted = h.classify(r.Context(), userID, spoken, openSessionID, workoutOpen, &response)
+	}
+	response.Domain = interpreted.Domain
+
+	if interpreted.Domain != voiceDomainWorkout {
+		// Not a workout: no session is opened and none is touched. The reply says
+		// where the phrase was routed so a misclassification is visible at once.
+		if reply, known := voiceDomainReplies[interpreted.Domain]; known {
+			response.Message = reply
+		} else {
+			response.Message = "Не понял, к чему отнести фразу. Она сохранена."
+		}
+		h.logger.Info().Str("user_id", userID).Str("domain", interpreted.Domain).Msg("voice phrase routed")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	sessionID := openSessionID
+	if !workoutOpen {
+		if sessionID, err = h.createSession(r.Context(), userID, now); err != nil {
+			h.logger.Error().Err(err).Str("user_id", userID).Msg("create session")
+			http.Error(w, "cannot open session", http.StatusInternalServerError)
+			return
+		}
+	} else if err := h.touchSession(r.Context(), sessionID, now); err != nil {
+		h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("touch session")
+	}
+	response.SessionID = sessionID
+	response.Finished = finish
 
 	if err := h.appendUtterance(r.Context(), sessionID, text, finish, now); err != nil {
 		h.logger.Error().Err(err).Str("session_id", sessionID).Msg("append utterance")
@@ -125,17 +171,8 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	response := voiceWorkoutResponse{
-		Status:    "ok",
-		SessionID: sessionID,
-		Finished:  finish,
-		Heard:     text,
-	}
-
-	// A phrase that is nothing but the finish command carries no exercises, so it
-	// is not worth an upstream call.
-	if remainder := stripFinishPhrase(text); remainder != "" {
-		h.interpret(r.Context(), userID, sessionID, remainder, &response)
+	if interpreted.Parsed != nil {
+		h.applyParsed(r.Context(), sessionID, interpreted, &response)
 	}
 
 	if envelope.DurationMinutes > 0 {
@@ -168,9 +205,11 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(response)
 }
 
-// openOrResumeSession returns the user's open session, closing a stale one first
-// so an abandoned workout cannot absorb phrases from the next one.
-func (h *VoiceWorkoutHandler) openOrResumeSession(ctx context.Context, userID string, now time.Time) (string, error) {
+// findOpenSession returns the user's open workout session if there is a live one,
+// closing a stale one on the way. It deliberately does not create anything: the
+// domain of the phrase is not known yet, and a phrase about food must not open a
+// workout.
+func (h *VoiceWorkoutHandler) findOpenSession(ctx context.Context, userID string, now time.Time) (string, bool, error) {
 	var sessionID string
 	var lastUtteranceAt time.Time
 
@@ -181,31 +220,39 @@ func (h *VoiceWorkoutHandler) openOrResumeSession(ctx context.Context, userID st
 
 	switch {
 	case err == nil && now.Sub(lastUtteranceAt) <= voiceWorkoutIdleTimeout:
-		if _, err := h.db.Exec(ctx, `
-			UPDATE voice_workout_sessions SET last_utterance_at = $2, updated_at = NOW()
-			WHERE id = $1
-		`, sessionID, now); err != nil {
-			return "", err
-		}
-		return sessionID, nil
+		return sessionID, true, nil
 	case err == nil:
 		// A stale session is closed without a title: it was abandoned rather
 		// than finished, and naming it would imply otherwise.
 		if err := h.finishSession(ctx, sessionID, lastUtteranceAt, ""); err != nil {
-			return "", err
+			return "", false, err
 		}
-	case !errors.Is(err, pgx.ErrNoRows):
-		return "", err
+		return "", false, nil
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", false, nil
+	default:
+		return "", false, err
 	}
+}
 
-	if err := h.db.QueryRow(ctx, `
+// touchSession records that a phrase arrived, which is what the idle close
+// measures against.
+func (h *VoiceWorkoutHandler) touchSession(ctx context.Context, sessionID string, now time.Time) error {
+	_, err := h.db.Exec(ctx, `
+		UPDATE voice_workout_sessions SET last_utterance_at = $2, updated_at = NOW()
+		WHERE id = $1
+	`, sessionID, now)
+	return err
+}
+
+func (h *VoiceWorkoutHandler) createSession(ctx context.Context, userID string, now time.Time) (string, error) {
+	var sessionID string
+	err := h.db.QueryRow(ctx, `
 		INSERT INTO voice_workout_sessions (user_id, started_at, last_utterance_at)
 		VALUES ($1, $2, $2)
 		RETURNING id
-	`, userID, now).Scan(&sessionID); err != nil {
-		return "", err
-	}
-	return sessionID, nil
+	`, userID, now).Scan(&sessionID)
+	return sessionID, err
 }
 
 func (h *VoiceWorkoutHandler) appendUtterance(ctx context.Context, sessionID, text string, isFinish bool, now time.Time) error {

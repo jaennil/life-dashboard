@@ -412,6 +412,10 @@ func main() {
 	screenTimeWebhook := handlers.NewScreenTimeWebhook(pool, log.Logger)
 	r.Post("/api/v1/webhook/screentime", screenTimeWebhook.ReceiveData)
 
+	// One entry point for everything dictated: the handler routes by domain. The
+	// old path stays an alias so a Shortcut already configured on a phone keeps
+	// working - re-editing shortcuts by hand is exactly the friction this avoids.
+	r.Post("/api/v1/webhook/voice", voiceSessions.ReceiveText)
 	r.Post("/api/v1/webhook/voice-workout", voiceSessions.ReceiveText)
 
 	srv := &http.Server{

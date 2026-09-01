@@ -49,11 +49,22 @@ type voiceParsedExercise struct {
 	Sets       []voiceParsedSet `json:"sets"`
 }
 
-// voiceParseResult is what the model must return. Unmatched carries the phrases
-// it could not resolve, which is reported back rather than guessed at.
+// voiceParseResult is what the model must return. Domain and the workout parse
+// come back from the same call: classifying first and parsing second would double
+// the wait of someone standing at a machine. Unmatched carries what could not be
+// resolved, which is reported back rather than guessed at.
 type voiceParseResult struct {
+	Domain    string                `json:"domain"`
 	Exercises []voiceParsedExercise `json:"exercises"`
 	Unmatched []string              `json:"unmatched"`
+}
+
+// voiceInterpretation is the router's verdict on a phrase. Parsed stays nil when
+// nothing usable came back, which is what tells the caller not to touch the draft.
+type voiceInterpretation struct {
+	Domain    string
+	Parsed    []voiceParsedExercise
+	Unmatched []string
 }
 
 // loadCandidates builds the exercise shortlist: everything the account has
@@ -113,12 +124,21 @@ func (h *VoiceWorkoutHandler) loadCandidates(ctx context.Context, userID string)
 // Every rule here comes from a real phrasing rather than from imagination, and
 // the hard constraint is that a template_id must be copied from the list: an
 // invented id would be rejected by Hevy, or worse, accepted as another exercise.
-func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, draft []voiceParsedExercise) string {
+func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, draft []voiceParsedExercise, workoutOpen bool) string {
 	var sb strings.Builder
-	sb.WriteString("Ты разбираешь надиктованную вслух запись силовой тренировки на русском языке.\n")
+	sb.WriteString("Ты разбираешь фразу, надиктованную вслух по-русски в дневник пользователя.\n")
 	sb.WriteString("Верни только JSON, без markdown и без пояснений, в формате:\n")
-	sb.WriteString(`{"exercises":[{"template_id":"...","title":"...","sets":[{"type":"normal","reps":5,"weight_kg":13.5}]}],"unmatched":["..."]}`)
-	sb.WriteString("\n\nПравила разбора:\n")
+	sb.WriteString(`{"domain":"workout","exercises":[{"template_id":"...","title":"...","sets":[{"type":"normal","reps":5,"weight_kg":13.5}]}],"unmatched":["..."]}`)
+	sb.WriteString("\n\nСначала определи domain - о чём фраза:\n")
+	sb.WriteString("- workout: упражнения, подходы, повторения, веса.\n")
+	sb.WriteString("- food: съеденное, продукты, граммы, калории.\n")
+	sb.WriteString("- weight: собственный вес пользователя.\n")
+	sb.WriteString("- note: всё остальное, мысли и заметки.\n")
+	sb.WriteString("Если domain не workout, верни только domain, а exercises оставь пустым массивом.\n")
+	if workoutOpen {
+		sb.WriteString("Сейчас у пользователя открыта тренировка. Короткая фраза с числами почти наверняка workout: \"ещё 8\" или \"12 по 30\" - это подходы.\n")
+	}
+	sb.WriteString("\nПравила разбора тренировки:\n")
 	sb.WriteString("- template_id обязан быть скопирован из списка упражнений ниже. Не придумывай новые id.\n")
 	sb.WriteString("- Если упражнение не удалось сопоставить со списком, не угадывай: положи исходную формулировку в unmatched.\n")
 	sb.WriteString("- В unmatched попадают только неопознанные упражнения. Уточнения техники - хват, наклон, темп - не упражнения: учти их при выборе варианта и не выноси в unmatched.\n")
@@ -152,7 +172,7 @@ func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, draft []voicePar
 }
 
 // parsePhrase asks the model to turn one phrase into exercises and sets.
-func (h *VoiceWorkoutHandler) parsePhrase(ctx context.Context, userID, text string, draft []voiceParsedExercise) (voiceParseResult, []voiceExerciseCandidate, error) {
+func (h *VoiceWorkoutHandler) parsePhrase(ctx context.Context, userID, text string, draft []voiceParsedExercise, workoutOpen bool) (voiceParseResult, []voiceExerciseCandidate, error) {
 	var result voiceParseResult
 
 	candidates, err := h.loadCandidates(ctx, userID)
@@ -164,7 +184,7 @@ func (h *VoiceWorkoutHandler) parsePhrase(ctx context.Context, userID, text stri
 	}
 
 	messages := []ChatMessage{
-		{Role: "system", Content: buildVoiceParsePrompt(candidates, draft)},
+		{Role: "system", Content: buildVoiceParsePrompt(candidates, draft, workoutOpen)},
 		{Role: "user", Content: text},
 	}
 
@@ -227,45 +247,66 @@ func stripFinishPhrase(text string) string {
 	return strings.Trim(strings.Join(strings.Fields(remainder), " "), " ,.;:!?-и")
 }
 
-// interpret parses one phrase, folds it into the session draft and fills the
-// response. Failures here are recorded and reported but never fatal: the phrase
-// is already archived, so a bad parse costs an interpretation, not the data.
-func (h *VoiceWorkoutHandler) interpret(ctx context.Context, userID, sessionID, text string, response *voiceWorkoutResponse) {
+// classify runs the single upstream call that both routes the phrase and parses
+// it when it is about training. Failures are recorded and reported but never
+// fatal: the phrase is already archived, so a bad parse costs an interpretation,
+// not the data.
+func (h *VoiceWorkoutHandler) classify(ctx context.Context, userID, text, sessionID string, workoutOpen bool, response *voiceWorkoutResponse) voiceInterpretation {
 	if h.ai == nil {
 		response.ParseError = "ai upstream is not configured"
-		return
+		return voiceInterpretation{Domain: resolveVoiceDomain("", workoutOpen)}
+	}
+
+	var draft []voiceParsedExercise
+	if sessionID != "" {
+		loaded, err := h.loadDraft(ctx, sessionID)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("load draft")
+		} else {
+			draft = loaded
+		}
+	}
+
+	parsed, candidates, err := h.parsePhrase(ctx, userID, text, draft, workoutOpen)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("parse phrase")
+		response.ParseError = err.Error()
+		return voiceInterpretation{Domain: resolveVoiceDomain("", workoutOpen)}
+	}
+
+	domain := resolveVoiceDomain(parsed.Domain, workoutOpen)
+	if domain != voiceDomainWorkout {
+		return voiceInterpretation{Domain: domain}
+	}
+
+	kept, rejected := validateParsedExercises(parsed.Exercises, candidates)
+	return voiceInterpretation{
+		Domain:    domain,
+		Parsed:    kept,
+		Unmatched: append(append([]string{}, parsed.Unmatched...), rejected...),
+	}
+}
+
+// applyParsed folds an interpretation into the session draft and fills in what
+// the phone will show.
+func (h *VoiceWorkoutHandler) applyParsed(ctx context.Context, sessionID string, interpreted voiceInterpretation, response *voiceWorkoutResponse) {
+	if err := h.storeUtteranceParse(ctx, sessionID, interpreted.Parsed, strings.Join(interpreted.Unmatched, "; ")); err != nil {
+		h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("store utterance parse")
 	}
 
 	draft, err := h.loadDraft(ctx, sessionID)
 	if err != nil {
-		h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("load draft")
+		h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("reload draft")
 	}
 
-	parsed, candidates, err := h.parsePhrase(ctx, userID, text, draft)
-	if err != nil {
-		h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("parse phrase")
-		response.ParseError = err.Error()
-		if storeErr := h.storeUtteranceParse(ctx, sessionID, nil, err.Error()); storeErr != nil {
-			h.logger.Warn().Err(storeErr).Msg("store parse error")
-		}
-		return
-	}
-
-	kept, rejected := validateParsedExercises(parsed.Exercises, candidates)
-	unmatched := append(append([]string{}, parsed.Unmatched...), rejected...)
-
-	if err := h.storeUtteranceParse(ctx, sessionID, kept, strings.Join(unmatched, "; ")); err != nil {
-		h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("store utterance parse")
-	}
-
-	merged := mergeVoiceDraft(draft, kept)
+	merged := mergeVoiceDraft(draft, interpreted.Parsed)
 	if err := h.saveDraft(ctx, sessionID, merged); err != nil {
 		h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("save draft")
 	}
 
-	response.Understood = summarizeVoiceDraft(kept)
+	response.Understood = summarizeVoiceDraft(interpreted.Parsed)
 	response.Workout = summarizeVoiceDraft(merged)
-	response.Unmatched = unmatched
+	response.Unmatched = interpreted.Unmatched
 }
 
 func (h *VoiceWorkoutHandler) loadDraft(ctx context.Context, sessionID string) ([]voiceParsedExercise, error) {
