@@ -3,6 +3,7 @@ package connectors
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 // Captured from the live API. The point of the test is the field names: the
@@ -79,5 +80,20 @@ func TestRoutinePageSizeStaysBelowTheTruncationThreshold(t *testing.T) {
 	// Workouts and events are unaffected and should keep their larger pages.
 	if hevyPageSize <= hevyRoutinePageSize {
 		t.Fatalf("workout page size %d was reduced along with routines", hevyPageSize)
+	}
+}
+
+func TestTemplatePageSizeStaysSmall(t *testing.T) {
+	// Measured against the live endpoint: 100 per page returned 8 KB and then
+	// stalled until the client gave up, failing the whole sync. Ten is about 2 KB.
+	// The threshold moved between two probes hours apart, so this is a ceiling on
+	// optimism rather than a tuned value.
+	if hevyTemplatePageSize > 20 {
+		t.Fatalf("template page size = %d, large enough to stall", hevyTemplatePageSize)
+	}
+	// And the refresh has to stay off the hourly path, since a full walk is now
+	// dozens of requests.
+	if hevyTemplateMaxAge < 12*time.Hour {
+		t.Fatalf("template max age = %s, too eager for a catalogue that rarely changes", hevyTemplateMaxAge)
 	}
 }

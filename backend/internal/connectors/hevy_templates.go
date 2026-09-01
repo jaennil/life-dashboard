@@ -4,12 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
-// Templates page at up to 100 per request, unlike workouts and routines which
-// cap at 10, so the whole catalogue of roughly 460 entries costs five calls
-// instead of forty-six.
-const hevyTemplatePageSize = 100
+// hevyTemplatePageSize is small for the same reason the routine page size is: the
+// endpoint stops mid-body once a response grows past a few kilobytes, answering
+// 200 and then stalling until the client gives up. A hundred per page worked on
+// the first try this morning and truncated at 8 KB hours later, so the threshold
+// is not fixed and the only safe size is a small one. Ten templates is about 2 KB.
+const hevyTemplatePageSize = 10
+
+// hevyTemplateMaxAge keeps the catalogue off the hourly path. It only changes
+// when a custom exercise is added, and at ten per page a full refresh is
+// forty-six requests - worth spending once a day, not once an hour.
+const hevyTemplateMaxAge = 24 * time.Hour
 
 type hevyExerciseTemplatesResponse struct {
 	Page      int                    `json:"page"`
@@ -34,6 +42,15 @@ type hevyExerciseTemplate struct {
 // still be referenced by workouts already logged against it, and losing the row
 // would leave that history unresolvable.
 func (h *HevyConnector) syncExerciseTemplates(ctx context.Context, userID, apiKey string) error {
+	fresh, err := h.templatesAreFresh(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("check template age: %w", err)
+	}
+	if fresh {
+		h.logger.Debug().Msg("exercise templates are fresh, skipping")
+		return nil
+	}
+
 	page := 1
 	total := 0
 
@@ -61,6 +78,17 @@ func (h *HevyConnector) syncExerciseTemplates(ctx context.Context, userID, apiKe
 
 	h.logger.Info().Int("total", total).Msg("exercise templates sync complete")
 	return nil
+}
+
+// templatesAreFresh reports whether the catalogue was refreshed recently enough
+// to skip. An empty catalogue is never fresh.
+func (h *HevyConnector) templatesAreFresh(ctx context.Context, userID string) (bool, error) {
+	var fresh bool
+	err := h.db.QueryRow(ctx, `
+		SELECT COALESCE(MAX(updated_at) > NOW() - $1::interval, false)
+		FROM hevy_exercise_templates
+	`, hevyTemplateMaxAge.String()).Scan(&fresh)
+	return fresh, err
 }
 
 func (h *HevyConnector) fetchExerciseTemplatesPage(ctx context.Context, apiKey string, page int) (*hevyExerciseTemplatesResponse, error) {
