@@ -356,8 +356,14 @@ type fsFoodEntry struct {
 	// FoodID and ServingID are what make an entry reproducible: they are the
 	// arguments food_entry.create needs, and the only way a dictated meal can be
 	// resolved to something writable.
-	FoodID                 string `json:"food_id"`
-	ServingID              string `json:"serving_id"`
+	FoodID    string `json:"food_id"`
+	ServingID string `json:"serving_id"`
+	// FoodEntryDescription is how the provider spells the portion, e.g.
+	// "2 x 100 g". measurement_description, which this connector used to format
+	// the serving from, is not a field food_entries.get returns at all - so every
+	// serving was stored as a bare unit count with an empty suffix ("2 "), which
+	// left nothing to convert a spoken "200 грамм" against.
+	FoodEntryDescription   string `json:"food_entry_description"`
 	MealID                 string `json:"meal_id"`
 	Meal                   string `json:"meal"`
 	NumberOfUnits          string `json:"number_of_units"`
@@ -672,7 +678,13 @@ func (c *FatSecretConnector) storeEntries(ctx context.Context, userID string, da
 
 	for _, e := range entries {
 		mealName := normalizeFatSecretMealType(e.Meal, e.MealID)
-		serving := fmt.Sprintf("%.0f %s", parseFloat(e.NumberOfUnits), e.MeasurementDescription)
+		serving := strings.TrimSpace(e.FoodEntryDescription)
+		if serving == "" {
+			// Older payloads and any future omission fall back to the unit count,
+			// which at least says how much was logged.
+			serving = fmt.Sprintf("%.0f %s", parseFloat(e.NumberOfUnits), e.MeasurementDescription)
+			serving = strings.TrimSpace(serving)
+		}
 		macros, _ := json.Marshal(map[string]float64{
 			"protein":             parseFloat(e.Protein),
 			"carbs":               parseFloat(e.Carbohydrate),

@@ -26,10 +26,11 @@ const (
 // has to come from the diary too. ServingDescription is what lets a spoken "200
 // грамм" be turned into a number of servings.
 type voiceFoodCandidate struct {
-	FoodID             string   `json:"food_id"`
-	ServingID          string   `json:"serving_id"`
-	Name               string   `json:"name"`
-	ServingDescription string   `json:"serving,omitempty"`
+	FoodID             string `json:"food_id"`
+	ServingID          string `json:"serving_id"`
+	Name               string `json:"name"`
+	ServingDescription string `json:"serving,omitempty"`
+	// CaloriesPerServing is derived: the diary stores the total for the entry.
 	CaloriesPerServing *float64 `json:"kcal_per_serving,omitempty"`
 	UsualUnits         *float64 `json:"usual_units,omitempty"`
 	// Rank is how habitual the food is, from the most-eaten lists. Lower is more
@@ -70,7 +71,14 @@ func (h *VoiceWorkoutHandler) loadFoodCandidates(ctx context.Context, userID str
 			WHERE d.user_id = $1 AND i.food_id IS NOT NULL AND i.serving_id IS NOT NULL
 		)
 		SELECT logged.food_id, logged.serving_id, logged.food_name,
-		       COALESCE(logged.serving_description, ''), logged.calories,
+		       COALESCE(logged.serving_description, ''),
+		       -- nutrition_items.calories is the total of the entry, not of one
+		       -- serving, so a two-serving entry of 108 kcal has to come back as 54
+		       -- per serving. Reporting the total as per-serving doubled every
+		       -- number the reply showed.
+		       CASE WHEN logged.number_of_units > 0
+		            THEN ROUND(logged.calories / logged.number_of_units, 1)
+		            ELSE logged.calories END,
 		       logged.number_of_units, COALESCE(c.most_eaten_rank, 0),
 		       COALESCE(c.meals, ARRAY[]::text[]), logged.times
 		FROM logged

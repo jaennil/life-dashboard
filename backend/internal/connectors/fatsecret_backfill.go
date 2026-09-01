@@ -72,7 +72,15 @@ func (c *FatSecretConnector) daysMissingFoodIDs(ctx context.Context, userID stri
 		SELECT d.date
 		FROM nutrition_daily d
 		JOIN nutrition_items i ON i.daily_id = d.id
-		WHERE d.user_id = $1 AND i.food_id IS NULL
+		WHERE d.user_id = $1
+		  AND (
+		      i.food_id IS NULL
+		      -- Servings stored before the description field was read carry a bare
+		      -- number and no words, which is useless for converting a spoken
+		      -- amount. Re-walking those days fixes them in place.
+		      OR i.serving_description IS NULL
+		      OR i.serving_description !~ '[A-Za-zА-Яа-я]'
+		  )
 		GROUP BY d.date
 		ORDER BY d.date
 		LIMIT $2
