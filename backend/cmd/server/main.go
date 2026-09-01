@@ -226,7 +226,7 @@ func main() {
 	// The lazy close in the webhook only fires when the next phrase arrives, so
 	// this sweep is what actually bounds a dictated session that was never
 	// finished out loud.
-	voiceSessions := handlers.NewVoiceWorkout(pool, aiHandler, hevy, cfg.AI.ParseModel, cfg.AI.ParseReasoningEffort, log.Logger)
+	voiceSessions := handlers.NewVoiceWorkout(pool, aiHandler, hevy, fatSecretConn, cfg.AI.ParseModel, cfg.AI.ParseReasoningEffort, log.Logger)
 	if err := sched.AddJob("0 */10 * * * *", "voice_workout_idle_close", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()

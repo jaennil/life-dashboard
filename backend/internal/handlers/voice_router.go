@@ -27,7 +27,6 @@ var voiceKnownDomains = map[string]bool{
 // voiceDomainReplies explain a domain that is recognized but not yet wired up.
 // The phrase is archived either way, so nothing spoken is lost.
 var voiceDomainReplies = map[string]string{
-	voiceDomainFood:   "Похоже на еду. Запись в FatSecret пока не подключена, фраза сохранена.",
 	voiceDomainNote:   "Похоже на заметку. Дневник пока не подключён, фраза сохранена.",
 	voiceDomainWeight: "Похоже на вес. Он и так приходит с весов, фраза сохранена.",
 }
@@ -114,6 +113,9 @@ func composeVoiceDisplay(response voiceWorkoutResponse) string {
 		parts = append(parts, response.Message)
 	}
 
+	if response.Food != "" {
+		parts = append(parts, response.Food)
+	}
 	if response.Workout != "" {
 		parts = append(parts, response.Workout)
 	}

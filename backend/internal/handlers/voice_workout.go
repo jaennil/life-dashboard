@@ -40,15 +40,18 @@ type VoiceWorkoutHandler struct {
 	// hevy writes the finished workout. Nil keeps everything else working and
 	// simply leaves the draft in the database, which is how this ran while the
 	// parse was still being proven.
-	hevy   workoutWriter
+	hevy workoutWriter
+	// food writes dictated meals straight to the FatSecret diary.
+	food   foodWriter
 	logger zerolog.Logger
 }
 
-func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, hevy workoutWriter, parseModel, parseEffort string, logger zerolog.Logger) *VoiceWorkoutHandler {
+func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, hevy workoutWriter, food foodWriter, parseModel, parseEffort string, logger zerolog.Logger) *VoiceWorkoutHandler {
 	return &VoiceWorkoutHandler{
 		db:          db,
 		ai:          ai,
 		hevy:        hevy,
+		food:        food,
 		parseModel:  parseModel,
 		parseEffort: parseEffort,
 		logger:      logger.With().Str("handler", "voice_workout").Logger(),
@@ -81,6 +84,7 @@ type voiceWorkoutResponse struct {
 	Title         string   `json:"title,omitempty"`
 	ParseError    string   `json:"parse_error,omitempty"`
 	Domain        string   `json:"domain,omitempty"`
+	Food          string   `json:"food,omitempty"`
 	HevyWorkoutID string   `json:"hevy_workout_id,omitempty"`
 	PushError     string   `json:"push_error,omitempty"`
 	Message       string   `json:"message,omitempty"`
@@ -171,10 +175,15 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 	if interpreted.Domain != voiceDomainWorkout {
 		// Not a workout: no session is opened and none is touched. The reply says
 		// where the phrase was routed so a misclassification is visible at once.
-		if reply, known := voiceDomainReplies[interpreted.Domain]; known {
-			response.Message = reply
-		} else {
-			response.Message = "Не понял, к чему отнести фразу. Она сохранена."
+		switch {
+		case interpreted.Domain == voiceDomainFood:
+			h.applyFood(ctx, userID, eventID, interpreted, &response)
+		default:
+			if reply, known := voiceDomainReplies[interpreted.Domain]; known {
+				response.Message = reply
+			} else {
+				response.Message = "Не понял, к чему отнести фразу. Она сохранена."
+			}
 		}
 		response.Display = composeVoiceDisplay(response)
 		h.logger.Info().Str("user_id", userID).Str("domain", interpreted.Domain).Msg("voice phrase routed")

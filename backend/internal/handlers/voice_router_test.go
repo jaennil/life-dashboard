@@ -40,14 +40,18 @@ func TestResolveVoiceDomainStaysUnknownWithoutContext(t *testing.T) {
 
 func TestUnimplementedDomainsHaveAReply(t *testing.T) {
 	// A recognized-but-unwired domain must say so rather than fall through
-	// silently, otherwise a dictated meal looks accepted.
-	for _, domain := range []string{voiceDomainFood, voiceDomainNote, voiceDomainWeight} {
+	// silently, otherwise a dictated note looks accepted.
+	for _, domain := range []string{voiceDomainNote, voiceDomainWeight} {
 		if voiceDomainReplies[domain] == "" {
 			t.Errorf("domain %q has no reply", domain)
 		}
 	}
-	if voiceDomainReplies[voiceDomainWorkout] != "" {
-		t.Error("workout is implemented and must not carry a not-supported reply")
+	// Workout and food are implemented: they report what they actually did, and a
+	// canned "not supported" line would contradict the write that just happened.
+	for _, domain := range []string{voiceDomainWorkout, voiceDomainFood} {
+		if voiceDomainReplies[domain] != "" {
+			t.Errorf("implemented domain %q still carries a not-supported reply", domain)
+		}
 	}
 }
 
@@ -74,13 +78,28 @@ func TestComposeVoiceDisplayShowsWorkoutAndFinish(t *testing.T) {
 
 func TestComposeVoiceDisplayShowsRoutingMessage(t *testing.T) {
 	got := composeVoiceDisplay(voiceWorkoutResponse{
-		Heard:   "съел 200 грамм творога",
-		Domain:  voiceDomainFood,
-		Message: voiceDomainReplies[voiceDomainFood],
+		Heard:   "надо купить кроссовки",
+		Domain:  voiceDomainNote,
+		Message: voiceDomainReplies[voiceDomainNote],
 	})
 
-	if !strings.Contains(got, "FatSecret") {
+	if !strings.Contains(got, "Дневник пока не подключён") {
 		t.Fatalf("display = %q", got)
+	}
+}
+
+func TestComposeVoiceDisplayShowsWhatWasEaten(t *testing.T) {
+	got := composeVoiceDisplay(voiceWorkoutResponse{
+		Heard:   "молоко 200 грамм",
+		Domain:  voiceDomainFood,
+		Message: "Записал в дневник.",
+		Food:    "Молоко 3,2%: 2 × 100 г, 120 ккал [завтрак]",
+	})
+
+	for _, want := range []string{"Услышал: молоко 200 грамм", "Записал в дневник.", "120 ккал [завтрак]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("display missing %q:\n%s", want, got)
+		}
 	}
 }
 

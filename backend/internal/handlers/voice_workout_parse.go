@@ -56,6 +56,7 @@ type voiceParsedExercise struct {
 type voiceParseResult struct {
 	Domain    string                `json:"domain"`
 	Exercises []voiceParsedExercise `json:"exercises"`
+	Entries   []voiceParsedEntry    `json:"entries"`
 	Unmatched []string              `json:"unmatched"`
 }
 
@@ -64,6 +65,8 @@ type voiceParseResult struct {
 type voiceInterpretation struct {
 	Domain    string
 	Parsed    []voiceParsedExercise
+	Entries   []voiceParsedEntry
+	Foods     []voiceFoodCandidate
 	Unmatched []string
 }
 
@@ -124,17 +127,19 @@ func (h *VoiceWorkoutHandler) loadCandidates(ctx context.Context, userID string)
 // Every rule here comes from a real phrasing rather than from imagination, and
 // the hard constraint is that a template_id must be copied from the list: an
 // invented id would be rejected by Hevy, or worse, accepted as another exercise.
-func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, draft []voiceParsedExercise, workoutOpen bool) string {
+func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoodCandidate, draft []voiceParsedExercise, workoutOpen bool) string {
 	var sb strings.Builder
 	sb.WriteString("Ты разбираешь фразу, надиктованную вслух по-русски в дневник пользователя.\n")
 	sb.WriteString("Верни только JSON, без markdown и без пояснений, в формате:\n")
-	sb.WriteString(`{"domain":"workout","exercises":[{"template_id":"...","title":"...","sets":[{"type":"normal","reps":5,"weight_kg":13.5}]}],"unmatched":["..."]}`)
+	sb.WriteString(`{"domain":"workout","exercises":[{"template_id":"...","title":"...","sets":[{"type":"normal","reps":5,"weight_kg":13.5}]}],"entries":[],"unmatched":["..."]}`)
+	sb.WriteString("\nДля еды формат такой:\n")
+	sb.WriteString(`{"domain":"food","exercises":[],"entries":[{"food_id":"...","serving_id":"...","name":"...","units":2,"meal":"breakfast"}],"unmatched":["..."]}`)
 	sb.WriteString("\n\nСначала определи domain - о чём фраза:\n")
 	sb.WriteString("- workout: упражнения, подходы, повторения, веса.\n")
 	sb.WriteString("- food: съеденное, продукты, граммы, калории.\n")
 	sb.WriteString("- weight: собственный вес пользователя.\n")
 	sb.WriteString("- note: всё остальное, мысли и заметки.\n")
-	sb.WriteString("Если domain не workout, верни только domain, а exercises оставь пустым массивом.\n")
+	sb.WriteString("Если domain не workout и не food, верни только domain, а оба массива оставь пустыми.\n")
 	if workoutOpen {
 		sb.WriteString("Сейчас у пользователя открыта тренировка. Короткая фраза с числами почти наверняка workout: \"ещё 8\" или \"12 по 30\" - это подходы.\n")
 		sb.WriteString("Если во фразе есть вес, повторения или что-то похожее на название упражнения - это workout, даже если распознавание исказило слова до бессмыслицы. Тогда положи исходную формулировку в unmatched, но domain оставь workout: это честнее, чем объявить надиктованный подход заметкой.\n")
@@ -163,9 +168,20 @@ func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, draft []voicePar
 		}
 	}
 
+	sb.WriteString("\nПравила разбора еды:\n")
+	sb.WriteString("- food_id и serving_id обязаны быть скопированы одной парой из списка продуктов ниже. Не придумывай и не смешивай пары от разных продуктов.\n")
+	sb.WriteString("- Продукта нет в списке - не подбирай похожий, положи формулировку в unmatched.\n")
+	sb.WriteString("- units это количество порций, а не граммы. Если порция \"100 г\", то \"200 грамм\" это units = 2, а \"полторы порции\" это 1.5.\n")
+	sb.WriteString("- Количество не названо - не указывай units, подставится обычное количество пользователя.\n")
+	sb.WriteString("- meal указывай только если пользователь назвал приём пищи словами (завтрак, обед, ужин, перекус). Иначе оставь пустым: он определится по времени суток.\n")
+	sb.WriteString("- Несколько продуктов в одной фразе - несколько записей в entries.\n")
+
 	sb.WriteString("\nДоступные упражнения (times_logged - как часто пользователь их делает, это лучший критерий при неоднозначности):\n")
-	encoded, err := json.Marshal(candidates)
-	if err == nil {
+	if encoded, err := json.Marshal(candidates); err == nil {
+		sb.Write(encoded)
+	}
+	sb.WriteString("\n\nДоступные продукты (rank - чем меньше, тем чаще пользователь это ест; usual_units - его обычное количество):\n")
+	if encoded, err := json.Marshal(foods); err == nil {
 		sb.Write(encoded)
 	}
 	sb.WriteString("\n")
@@ -173,19 +189,27 @@ func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, draft []voicePar
 }
 
 // parsePhrase asks the model to turn one phrase into exercises and sets.
-func (h *VoiceWorkoutHandler) parsePhrase(ctx context.Context, userID, text string, draft []voiceParsedExercise, workoutOpen bool) (voiceParseResult, []voiceExerciseCandidate, error) {
+func (h *VoiceWorkoutHandler) parsePhrase(ctx context.Context, userID, text string, draft []voiceParsedExercise, workoutOpen bool) (voiceParseResult, []voiceExerciseCandidate, []voiceFoodCandidate, error) {
 	var result voiceParseResult
 
 	candidates, err := h.loadCandidates(ctx, userID)
 	if err != nil {
-		return result, nil, err
+		return result, nil, nil, err
 	}
 	if len(candidates) == 0 {
-		return result, nil, fmt.Errorf("no exercise candidates: sync Hevy first")
+		return result, nil, nil, fmt.Errorf("no exercise candidates: sync Hevy first")
+	}
+
+	// Both catalogues travel in the one call. Classifying first and parsing second
+	// would double the wait of someone standing at a machine, and the extra input
+	// costs a fraction of a kopeck on the parse model.
+	foods, err := h.loadFoodCandidates(ctx, userID)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load food candidates")
 	}
 
 	messages := []ChatMessage{
-		{Role: "system", Content: buildVoiceParsePrompt(candidates, draft, workoutOpen)},
+		{Role: "system", Content: buildVoiceParsePrompt(candidates, foods, draft, workoutOpen)},
 		{Role: "user", Content: text},
 	}
 
@@ -194,14 +218,14 @@ func (h *VoiceWorkoutHandler) parsePhrase(ctx context.Context, userID, text stri
 	// fast one, and 43 seconds standing at a machine is not usable.
 	answer, err := h.ai.CompleteWithModel(ctx, "voice_workout_parse", messages, h.parseModel, h.parseEffort)
 	if err != nil {
-		return result, candidates, err
+		return result, candidates, foods, err
 	}
 
 	parsed, err := decodeVoiceParseResult(answer)
 	if err != nil {
-		return result, candidates, err
+		return result, candidates, foods, err
 	}
-	return parsed, candidates, nil
+	return parsed, candidates, foods, nil
 }
 
 // decodeVoiceParseResult unwraps the model's answer. Models fence JSON in
@@ -268,7 +292,7 @@ func (h *VoiceWorkoutHandler) classify(ctx context.Context, userID, text, sessio
 		}
 	}
 
-	parsed, candidates, err := h.parsePhrase(ctx, userID, text, draft, workoutOpen)
+	parsed, candidates, foods, err := h.parsePhrase(ctx, userID, text, draft, workoutOpen)
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("parse phrase")
 		response.ParseError = err.Error()
@@ -276,6 +300,14 @@ func (h *VoiceWorkoutHandler) classify(ctx context.Context, userID, text, sessio
 	}
 
 	domain := resolveVoiceDomain(parsed.Domain, workoutOpen)
+	if domain == voiceDomainFood {
+		return voiceInterpretation{
+			Domain:    domain,
+			Entries:   parsed.Entries,
+			Foods:     foods,
+			Unmatched: parsed.Unmatched,
+		}
+	}
 	if domain != voiceDomainWorkout {
 		return voiceInterpretation{Domain: domain}
 	}
