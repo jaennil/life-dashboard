@@ -355,12 +355,9 @@ func fatSecretSyncDays(trigger SyncTrigger) int {
 
 // fatSecretSyncDates picks the days one run reads.
 //
-// The account answers about three requests per run before the API starts
-// stalling, so the list is a budget, not a wish list. The hot window takes two
-// of them. The third normally goes to a rotating history day - but while the
-// backfill still has days to repair, the backfill IS the history refresh, and it
-// takes that request instead. Without this the rotation kept winning the third
-// slot and the backfill advanced zero days, run after run.
+// The hot window keeps today and yesterday fresh. A rotating history day is
+// normally added as well, but while the targeted backfill has days to repair it
+// already serves that purpose, so the redundant rotation yields its slot.
 func fatSecretSyncDates(trigger SyncTrigger, now time.Time, backfillPending bool) []time.Time {
 	today := calendarDate(now)
 	dates := make([]time.Time, 0, fatSecretSyncDays(trigger))

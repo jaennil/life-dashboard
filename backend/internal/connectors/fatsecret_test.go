@@ -118,8 +118,8 @@ func TestPendingBackfillTakesTheHistorySlot(t *testing.T) {
 		t.Fatalf("idle run reads %d days, want %d", len(idle), fatSecretScheduledSyncDays+1)
 	}
 
-	// Backfill pending: the rotation yields its request; the account only answers
-	// about three per run and the backfill is what needs the third.
+	// Backfill pending: the redundant rotating history day yields to the targeted
+	// repair pass.
 	busy := fatSecretSyncDates(SyncTriggerScheduled, now, true)
 	if len(busy) != fatSecretScheduledSyncDays {
 		t.Fatalf("run with pending backfill reads %d days, want %d", len(busy), fatSecretScheduledSyncDays)

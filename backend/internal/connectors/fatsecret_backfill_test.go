@@ -6,18 +6,16 @@ import (
 	"testing"
 )
 
-func TestBackfillPacingIsSlowerThanABurst(t *testing.T) {
-	// Guards the reason the constants exist: walking days back to back is what
-	// earned the throttle, so the pause has to be real, and one run has to stay
-	// small enough that the whole history takes several runs.
+func TestBackfillBatchBalancesSpeedAndSafety(t *testing.T) {
+	// Thirty days reduces a multi-day repair to a few scheduled runs without
+	// turning one transient API failure into a restart of the entire history.
+	if fatSecretBackfillDaysPerRun != 30 {
+		t.Fatalf("days per run = %d, want accelerated batch of 30", fatSecretBackfillDaysPerRun)
+	}
 	if fatSecretBackfillPause <= 0 {
 		t.Fatal("backfill has no pause between requests")
 	}
-	if fatSecretBackfillDaysPerRun <= 0 || fatSecretBackfillDaysPerRun > 30 {
-		t.Fatalf("days per run = %d, want a small bounded batch", fatSecretBackfillDaysPerRun)
-	}
-	// A run must not itself become a burst: ten days spaced by 400ms is four
-	// seconds of traffic, not fifty-seven requests as fast as the network allows.
+	// A full run remains paced instead of sending all requests back to back.
 	if total := fatSecretBackfillPause * (fatSecretBackfillDaysPerRun - 1); total < 2_000_000_000 {
 		t.Fatalf("a full run spreads over %s, which is still a burst", total)
 	}
@@ -28,9 +26,8 @@ func TestIsFatSecretThrottledCatchesBothShapes(t *testing.T) {
 	if !isFatSecretThrottled(errors.New("api error: User is performing too many actions: please try again later")) {
 		t.Fatal("error 12 not recognized as throttling")
 	}
-	// Observed shape: the server stops answering and the request dies on the
-	// client timeout. Missing this kept the backfill burning thirty seconds a day
-	// without ever advancing.
+	// A timeout is also a stop signal for the resumable batch. It can be a stale
+	// connection or provider trouble, but continuing would only multiply delays.
 	for _, message := range []string{
 		`api request: Get "https://platform.fatsecret.com/rest/server.api?...": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`,
 		"context deadline exceeded",
@@ -56,9 +53,8 @@ func TestIsFatSecretThrottledCatchesBothShapes(t *testing.T) {
 }
 
 func TestScheduledWindowLeavesRoomForTheBackfill(t *testing.T) {
-	// The account answers roughly two requests per run before it starts stalling.
-	// A hot window wider than that consumed the whole allowance and the backfill
-	// never advanced a single day, run after run.
+	// Keep the recurring hot window small because the backfill separately repairs
+	// older history and the third regular request would duplicate that work.
 	if fatSecretScheduledSyncDays > 3 {
 		t.Fatalf("scheduled window = %d days, too wide to leave the backfill anything",
 			fatSecretScheduledSyncDays)

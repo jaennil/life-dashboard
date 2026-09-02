@@ -10,25 +10,23 @@ import (
 )
 
 const (
-	// fatSecretBackfillDaysPerRun bounds how much history one sync re-walks. The
-	// point is to finish on its own over a few runs rather than in one burst: the
-	// account has a generous daily budget - around 5000 calls - but throttles on
-	// rapid bursts, which is what error 12 is.
-	fatSecretBackfillDaysPerRun = 5
-	// fatSecretBackfillPause spaces the requests out. Walking 57 days back to back
-	// is what earned "User is performing too many actions" in the first place, and
-	// the API publishes no Retry-After to aim at, so the only defence is not to
-	// burst.
+	// fatSecretBackfillDaysPerRun bounds how much history one sync re-walks. With
+	// stale keep-alive connections fixed, consecutive requests complete reliably;
+	// 30 days finishes the current repair quickly while keeping each run bounded
+	// and resumable if FatSecret returns error 12.
+	fatSecretBackfillDaysPerRun = 30
+	// fatSecretBackfillPause keeps the larger batch measured. FatSecret publishes
+	// no Retry-After or rate-limit headers, so retain spacing and stop on its error
+	// 12 rather than sending the whole history as a burst.
 	fatSecretBackfillPause = time.Second
 )
 
 // isFatSecretThrottled recognizes both shapes the throttle takes.
 //
-// Documented: error 12, "User is performing too many actions". Observed: the
-// server accepts the connection and never answers, so the request dies on the
-// client timeout instead. The second form is the dangerous one - it does not look
-// like a rate limit, so the run kept walking and spent thirty seconds per day
-// waiting for nothing, ten days in a row, never advancing.
+// Documented: error 12, "User is performing too many actions". A timeout is not
+// necessarily throttling (stale keep-alive connections produced the same
+// symptom), but it is still a reason to stop this resumable batch instead of
+// spending another thirty seconds on every remaining day.
 func isFatSecretThrottled(err error) bool {
 	if err == nil {
 		return false
