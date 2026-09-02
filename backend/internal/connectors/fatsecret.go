@@ -60,10 +60,31 @@ func NewFatSecret(consumerKey, consumerSecret, redirectURI string, db *pgxpool.P
 		consumerSecret: consumerSecret,
 		redirectURI:    redirectURI,
 		db:             db,
-		client:         &http.Client{Timeout: 30 * time.Second},
+		client:         newFatSecretClient(),
 		logger:         logger.With().Str("connector", "fatsecret").Logger(),
 		requestSecrets: make(map[string]requestTokenState),
 	}
+}
+
+// newFatSecretClient builds the HTTP client with keep-alive turned off.
+//
+// With a pooled connection the sync stalled on the third or fourth request of a
+// run - "context deadline exceeded while awaiting headers" - and did so run after
+// run. Every diagnosis of a rate limit was wrong: the exact dates that timed out
+// in production answered in half a second when probed by hand, and eight requests
+// fired back to back all succeeded. The one thing the failing path did that the
+// working one did not was reuse a connection from the pool. Something between the
+// node and FatSecret's ALB drops an idle keep-alive connection without telling
+// the client, and the next request rides the dead socket until it times out. A
+// fresh connection per request is exactly what the manual probes did, so it is
+// what this does. Proxy settings are still honoured, which for FatSecret means
+// NO_PROXY sends it out directly.
+func newFatSecretClient() *http.Client {
+	transport := &http.Transport{
+		Proxy:             http.ProxyFromEnvironment,
+		DisableKeepAlives: true,
+	}
+	return &http.Client{Timeout: 30 * time.Second, Transport: transport}
 }
 
 func (c *FatSecretConnector) Name() string { return "fatsecret" }
