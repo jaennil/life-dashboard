@@ -203,78 +203,89 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	tomorrowStart := todayStart.AddDate(0, 0, 1)
 	nextWeekStart := todayStart.AddDate(0, 0, 8)
 	staleBefore := todayStart.AddDate(0, 0, -14)
-	staleCondition := productivityStaleConditionExpr(2, 5)
 	dateRange := parseQueryDateRange(r, todayStart, todayStart.AddDate(0, 0, 6))
+
+	// Placeholders are numbered as their values are appended, because each
+	// filter builds a different statement and Postgres refuses to prepare one
+	// that leaves a parameter unreferenced. Passing the same seven arguments to
+	// every variant failed every request with "expected 3 arguments, got 7".
+	args := []any{userID}
+	addArg := func(value any) int {
+		args = append(args, value)
+		return len(args)
+	}
+	todayArg := addArg(todayStart)
+	tomorrowArg := addArg(tomorrowStart)
 
 	baseWhere := `
 		WHERE user_id = $1
 			AND is_active = TRUE
 	`
-	orderBy := `
+	orderBy := fmt.Sprintf(`
 		ORDER BY
 			CASE
-				WHEN (due_at IS NOT NULL AND due_at < $2) OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $3::date) THEN 0
-				WHEN (due_at IS NOT NULL AND due_at >= $2 AND due_at < $3) OR (due_at IS NULL AND due_date = $2::date) THEN 1
+				WHEN (due_at IS NOT NULL AND due_at < $%[1]d) OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $%[2]d::date) THEN 0
+				WHEN (due_at IS NOT NULL AND due_at >= $%[1]d AND due_at < $%[2]d) OR (due_at IS NULL AND due_date = $%[1]d::date) THEN 1
 				WHEN COALESCE(due_at::date, due_date) IS NOT NULL THEN 2
 				ELSE 3
 			END,
 			COALESCE(due_at, due_date::timestamptz, added_at, created_at) ASC,
 			priority DESC,
 			content ASC
-	`
+	`, todayArg, tomorrowArg)
 
 	switch filter {
 	case "overdue":
 		if dateRange.HasExplicit {
-			baseWhere += `
-				AND COALESCE(due_at::date, due_date) < $6::date
-			`
+			baseWhere += fmt.Sprintf(`
+				AND COALESCE(due_at::date, due_date) < $%d::date
+			`, addArg(dateRange.Start))
 		} else {
-			baseWhere += `
+			baseWhere += fmt.Sprintf(`
 				AND (
-					(due_at IS NOT NULL AND due_at < $2)
-					OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $3::date)
+					(due_at IS NOT NULL AND due_at < $%[1]d)
+					OR (due_at IS NULL AND due_date IS NOT NULL AND due_date < $%[2]d::date)
 				)
-			`
+			`, todayArg, tomorrowArg)
 		}
 	case "today":
 		if dateRange.HasExplicit {
-			baseWhere += `
-				AND COALESCE(due_at::date, due_date) >= $6::date
-				AND COALESCE(due_at::date, due_date) < $7::date
-			`
+			baseWhere += fmt.Sprintf(`
+				AND COALESCE(due_at::date, due_date) >= $%d::date
+				AND COALESCE(due_at::date, due_date) < $%d::date
+			`, addArg(dateRange.Start), addArg(dateRange.EndExclusive))
 		} else {
-			baseWhere += `
+			baseWhere += fmt.Sprintf(`
 				AND (
-					(due_at IS NOT NULL AND due_at >= $2 AND due_at < $3)
-					OR (due_at IS NULL AND due_date = $2::date)
+					(due_at IS NOT NULL AND due_at >= $%[1]d AND due_at < $%[2]d)
+					OR (due_at IS NULL AND due_date = $%[1]d::date)
 				)
-			`
+			`, todayArg, tomorrowArg)
 		}
 	case "upcoming":
 		if dateRange.HasExplicit {
-			baseWhere += `
-				AND COALESCE(due_at::date, due_date) >= $6::date
-				AND COALESCE(due_at::date, due_date) < $7::date
-			`
+			baseWhere += fmt.Sprintf(`
+				AND COALESCE(due_at::date, due_date) >= $%d::date
+				AND COALESCE(due_at::date, due_date) < $%d::date
+			`, addArg(dateRange.Start), addArg(dateRange.EndExclusive))
 		} else {
-			baseWhere += `
+			baseWhere += fmt.Sprintf(`
 				AND (
-					(due_at IS NOT NULL AND due_at >= $3 AND due_at < $4)
-					OR (due_at IS NULL AND due_date >= $3::date AND due_date < $4::date)
+					(due_at IS NOT NULL AND due_at >= $%[1]d AND due_at < $%[2]d)
+					OR (due_at IS NULL AND due_date >= $%[1]d::date AND due_date < $%[2]d::date)
 				)
-			`
+			`, tomorrowArg, addArg(nextWeekStart))
 		}
 	case "stale":
 		baseWhere += `
-			AND ` + staleCondition + `
+			AND ` + productivityStaleConditionExpr(todayArg, addArg(staleBefore)) + `
 		`
 	case "all":
 		if dateRange.HasExplicit {
-			baseWhere += `
-				AND COALESCE(due_at::date, due_date) >= $6::date
-				AND COALESCE(due_at::date, due_date) < $7::date
-			`
+			baseWhere += fmt.Sprintf(`
+				AND COALESCE(due_at::date, due_date) >= $%d::date
+				AND COALESCE(due_at::date, due_date) < $%d::date
+			`, addArg(dateRange.Start), addArg(dateRange.EndExclusive))
 		}
 	default:
 		http.Error(w, "unknown filter", http.StatusBadRequest)
@@ -299,7 +310,7 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 		FROM tasks
 	`+baseWhere+orderBy+`
 		LIMIT 100
-	`, userID, todayStart, tomorrowStart, nextWeekStart, staleBefore, dateRange.Start, dateRange.EndExclusive)
+	`, args...)
 	if err != nil {
 		h.logger.Error().Err(err).Str("filter", filter).Msg("query productivity tasks")
 		http.Error(w, "internal error", http.StatusInternalServerError)
