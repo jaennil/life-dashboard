@@ -31,7 +31,8 @@ type voiceExerciseCandidate struct {
 	// model because frequency is the best tie-breaker available: between "Pull
 	// Up" logged eleven times and a near-identical variant never used, the
 	// former is almost always what was meant.
-	Times int `json:"times_logged"`
+	Times    int              `json:"times_logged"`
+	LastSets []voiceParsedSet `json:"-"`
 }
 
 // voiceParsedSet mirrors one Hevy set. Pointers distinguish "not spoken" from
@@ -120,7 +121,58 @@ func (h *VoiceWorkoutHandler) loadCandidates(ctx context.Context, userID string)
 		}
 		candidates = append(candidates, c)
 	}
-	return candidates, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := h.loadCandidateLastSets(ctx, userID, candidates); err != nil {
+		return nil, fmt.Errorf("load last exercise sets: %w", err)
+	}
+	return candidates, nil
+}
+
+// loadCandidateLastSets attaches the sets from the most recent workout that
+// contains each exercise. They are deterministic fallback values for a phrase
+// such as "два подхода жима как обычно" when weight or reps are omitted.
+func (h *VoiceWorkoutHandler) loadCandidateLastSets(ctx context.Context, userID string, candidates []voiceExerciseCandidate) error {
+	rows, err := h.db.Query(ctx, `
+		WITH ranked AS (
+			SELECT lower(ws.exercise_name) AS exercise_key,
+			       COALESCE(ws.set_type, 'normal') AS set_type,
+			       ws.reps, ws.weight_kg::double precision, ws.duration_seconds,
+			       ws.set_index,
+			       DENSE_RANK() OVER (
+				   PARTITION BY lower(ws.exercise_name)
+				   ORDER BY w.started_at DESC, w.id DESC
+			       ) AS workout_rank
+			FROM workout_sets ws
+			JOIN workouts w ON w.id = ws.workout_id
+			WHERE w.user_id = $1
+		)
+		SELECT exercise_key, set_type, reps, weight_kg, duration_seconds
+		FROM ranked
+		WHERE workout_rank = 1
+		ORDER BY exercise_key, set_index
+	`, userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	byTitle := make(map[string]*voiceExerciseCandidate, len(candidates))
+	for i := range candidates {
+		byTitle[strings.ToLower(candidates[i].Title)] = &candidates[i]
+	}
+	for rows.Next() {
+		var key string
+		var set voiceParsedSet
+		if err := rows.Scan(&key, &set.Type, &set.Reps, &set.WeightKg, &set.DurationSeconds); err != nil {
+			return err
+		}
+		if candidate := byTitle[key]; candidate != nil {
+			candidate.LastSets = append(candidate.LastSets, set)
+		}
+	}
+	return rows.Err()
 }
 
 // buildVoiceParsePrompt states the rules the dictated phrasing actually needs.
@@ -160,6 +212,7 @@ func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoo
 	sb.WriteString("  reps_only и bodyweight_assisted - только reps, weight_kg не указывай;\n")
 	sb.WriteString("  duration - duration_seconds вместо reps.\n")
 	sb.WriteString("- Не додумывай веса и повторения, которых не было в речи.\n")
+	sb.WriteString("- Если упражнение распознано, но вес или повторения не названы (например, сказано \"как обычно\"), всё равно верни упражнение и нужное количество подходов, оставив неназванные поля пустыми. Backend подставит их из последней тренировки. Не клади такую фразу в unmatched только из-за отсутствующих чисел.\n")
 
 	if len(draft) > 0 {
 		sb.WriteString("\nВ этой тренировке уже записано (не дублируй, только добавляй новое из фразы):\n")
@@ -313,7 +366,8 @@ func (h *VoiceWorkoutHandler) classify(ctx context.Context, userID, text, sessio
 		return voiceInterpretation{Domain: domain}
 	}
 
-	kept, rejected := validateParsedExercises(parsed.Exercises, candidates)
+	withHistory := fillMissingSetMetrics(parsed.Exercises, candidates)
+	kept, rejected := validateParsedExercises(withHistory, candidates)
 	return voiceInterpretation{
 		Domain:    domain,
 		Parsed:    kept,

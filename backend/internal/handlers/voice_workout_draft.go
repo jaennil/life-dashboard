@@ -38,6 +38,59 @@ var (
 	}
 )
 
+// fillMissingSetMetrics uses the latest workout only for values the user did
+// not say. Explicit values always win. Set positions are matched in order; if
+// the new phrase names more sets than the previous workout had, its last set is
+// the least surprising fallback for the remainder.
+func fillMissingSetMetrics(parsed []voiceParsedExercise, candidates []voiceExerciseCandidate) []voiceParsedExercise {
+	byID := make(map[string]voiceExerciseCandidate, len(candidates))
+	for _, candidate := range candidates {
+		byID[candidate.TemplateID] = candidate
+	}
+
+	for exerciseIndex := range parsed {
+		exercise := &parsed[exerciseIndex]
+		candidate, known := byID[exercise.TemplateID]
+		if !known || len(candidate.LastSets) == 0 {
+			continue
+		}
+		if len(exercise.Sets) == 0 {
+			exercise.Sets = []voiceParsedSet{{Type: "normal"}}
+		}
+		for setIndex := range exercise.Sets {
+			previousIndex := setIndex
+			if previousIndex >= len(candidate.LastSets) {
+				previousIndex = len(candidate.LastSets) - 1
+			}
+			set := &exercise.Sets[setIndex]
+			previous := candidate.LastSets[previousIndex]
+			if voiceRepsTypes[candidate.Type] && set.Reps == nil {
+				set.Reps = cloneInt(previous.Reps)
+			}
+			if voiceWeightTypes[candidate.Type] && set.WeightKg == nil {
+				set.WeightKg = cloneFloat(previous.WeightKg)
+			}
+		}
+	}
+	return parsed
+}
+
+func cloneInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func cloneFloat(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
 // validateParsedExercises keeps only what can actually be written to Hevy and
 // reports everything it dropped.
 //

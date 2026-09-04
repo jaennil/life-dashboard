@@ -69,6 +69,52 @@ func TestValidateKeepsWeightForWeightedBodyweightExercise(t *testing.T) {
 	}
 }
 
+func TestFillMissingSetMetricsUsesLatestWorkout(t *testing.T) {
+	candidates := []voiceExerciseCandidate{{
+		TemplateID: "422B08F1", Title: "Lateral Raise (Dumbbell)", Type: "weight_reps",
+		LastSets: []voiceParsedSet{
+			{Type: "normal", Reps: vInt(12), WeightKg: vKg(13.5)},
+			{Type: "normal", Reps: vInt(10), WeightKg: vKg(13.5)},
+		},
+	}}
+	parsed := []voiceParsedExercise{{
+		TemplateID: "422B08F1",
+		Sets: []voiceParsedSet{
+			{Type: "normal", Reps: vInt(15)},
+			{Type: "normal"},
+			{Type: "normal"},
+		},
+	}}
+
+	got := fillMissingSetMetrics(parsed, candidates)
+	sets := got[0].Sets
+	if *sets[0].Reps != 15 || *sets[0].WeightKg != 13.5 {
+		t.Fatalf("explicit reps or inherited weight is wrong: %+v", sets[0])
+	}
+	if *sets[1].Reps != 10 || *sets[1].WeightKg != 13.5 {
+		t.Fatalf("second set did not inherit by position: %+v", sets[1])
+	}
+	if *sets[2].Reps != 10 || *sets[2].WeightKg != 13.5 {
+		t.Fatalf("extra set did not inherit the final previous set: %+v", sets[2])
+	}
+}
+
+func TestFillMissingSetMetricsCreatesDefaultSet(t *testing.T) {
+	candidates := []voiceExerciseCandidate{{
+		TemplateID: "1B2B1E7C", Title: "Pull Up", Type: "reps_only",
+		LastSets: []voiceParsedSet{{Type: "normal", Reps: vInt(8), WeightKg: vKg(20)}},
+	}}
+	parsed := []voiceParsedExercise{{TemplateID: "1B2B1E7C"}}
+
+	got := fillMissingSetMetrics(parsed, candidates)
+	if len(got[0].Sets) != 1 || got[0].Sets[0].Reps == nil || *got[0].Sets[0].Reps != 8 {
+		t.Fatalf("default set did not inherit reps: %+v", got)
+	}
+	if got[0].Sets[0].WeightKg != nil {
+		t.Fatalf("reps-only exercise inherited weight: %+v", got[0].Sets[0])
+	}
+}
+
 func TestValidateRejectsMisheardWeight(t *testing.T) {
 	// 13.5 heard as 1350: the bound is what stops it entering the history.
 	parsed := []voiceParsedExercise{
