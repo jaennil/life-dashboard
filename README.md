@@ -2,7 +2,7 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000025`. JSON payloads,
+The diagram reflects migrations `000001` through `000028`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability.
 
 ```mermaid
@@ -527,7 +527,7 @@ OAuth credentials stored per integration and user.
 | `source` | `varchar(50)` | OAuth provider; part of the composite primary key. |
 | `user_id` | `uuid` | Credential owner; references `users.id` and completes the primary key. |
 | `access_token` | `text` | Provider access token. |
-| `refresh_token` | `text` | Provider refresh token. |
+| `refresh_token` | `text` | Provider refresh token, or the integration's second credential: a Notion database id, a Xiaomi or Zepp login, the instance URL of a self-hosted Vikunja. |
 | `expires_at` | `timestamptz` | Access-token expiration time. |
 | `athlete_id` | `bigint`, nullable | Provider-specific athlete or external user identifier. |
 | `updated_at` | `timestamptz`, nullable | Last token update time. |
@@ -1025,7 +1025,9 @@ User overrides for classifying recurring financial obligations.
 
 #### `habits`
 
-Habit definitions synchronized primarily from Habitify.
+Habit definitions synchronized primarily from Habitify. Recurring tasks from
+Todoist and Vikunja are mirrored here as well, so a repeating task shows up as a
+habit with its completion history.
 
 | Column | Type | Description |
 | --- | --- | --- |
@@ -1077,7 +1079,7 @@ Current task state across every task provider, including active and recently com
 | `parent_external_id` | `varchar(255)`, nullable | Provider parent-task identifier; no database FK is enforced. |
 | `project_external_id` | `varchar(255)`, nullable | Provider project identifier. |
 | `project_name` | `varchar(255)`, nullable | Project display name. |
-| `section_external_id` | `varchar(255)`, nullable | Provider section identifier; Vikunja reports the kanban bucket here. |
+| `section_external_id` | `varchar(255)`, nullable | Provider section identifier; Todoist only, Vikunja keeps its whole project path in `project_name` instead. |
 | `section_name` | `varchar(255)`, nullable | Section display name. |
 | `content` | `text` | Task title. |
 | `description` | `text`, nullable | Task description. |
