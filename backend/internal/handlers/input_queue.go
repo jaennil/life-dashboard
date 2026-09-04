@@ -22,7 +22,9 @@ const (
 	inputNotificationLease = time.Minute
 )
 
-var inputJobBackoff = [...]time.Duration{15 * time.Second, time.Minute, 5 * time.Minute}
+// A provider outage usually outlives a few seconds. Retry sparsely instead of
+// sending the same expensive parse back into the same unhealthy route.
+var inputJobBackoff = [...]time.Duration{time.Hour, 3 * time.Hour}
 
 type inputJobAccepted struct {
 	JobID   string `json:"job_id"`
