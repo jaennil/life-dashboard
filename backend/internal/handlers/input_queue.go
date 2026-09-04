@@ -16,6 +16,9 @@ const (
 	inputJobMaxAttempts = 3
 	inputJobLease       = 7 * time.Minute
 	inputJobPoll        = 2 * time.Second
+	// The extraction model normally answers in seconds. Waiting five minutes for
+	// a connection that has stopped producing bytes only delays the useful retry.
+	inputJobAttemptBudget = 90 * time.Second
 )
 
 var inputJobBackoff = [...]time.Duration{15 * time.Second, time.Minute, 5 * time.Minute}
@@ -148,7 +151,7 @@ func (h *VoiceWorkoutHandler) processNextInputJob(workerCtx context.Context) boo
 		return false
 	}
 
-	ctx, cancel := context.WithTimeout(workerCtx, voiceWorkoutWorkBudget)
+	ctx, cancel := context.WithTimeout(workerCtx, inputJobAttemptBudget)
 	response, processErr := h.processText(ctx, job.UserID, job.RawEventID, voiceWorkoutEnvelope{
 		Text: job.Text, Finish: job.Finish, DurationMinutes: job.DurationMinutes,
 	}, job.Typed)

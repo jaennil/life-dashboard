@@ -21,10 +21,6 @@ const (
 	// voiceWorkoutMaxBody is generous for dictated text but still bounded: the
 	// body is one spoken phrase, not a file.
 	voiceWorkoutMaxBody = 64 << 10
-	// voiceWorkoutWorkBudget bounds the detached work. It has to cover a parse
-	// plus the title generation on finish, and still end rather than leak if the
-	// upstream hangs.
-	voiceWorkoutWorkBudget = 5 * time.Minute
 	// voiceWorkoutIdleTimeout closes a session that stopped receiving phrases.
 	// Without it a forgotten session would swallow tomorrow's first phrase into
 	// yesterday's workout.

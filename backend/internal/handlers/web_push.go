@@ -144,6 +144,8 @@ func (p *webPushSender) sendInputResult(ctx context.Context, userID, jobID, disp
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			p.logger.Warn().Int("status", response.StatusCode).Msg("push service rejected notification")
+			continue
 		}
+		p.logger.Info().Int("status", response.StatusCode).Str("job_id", jobID).Msg("notification sent")
 	}
 }
