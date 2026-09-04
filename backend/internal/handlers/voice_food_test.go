@@ -10,11 +10,28 @@ func kg(v float64) *float64 { return &v }
 
 var foodTestCandidates = []voiceFoodCandidate{
 	{FoodID: "6754762", ServingID: "1", Name: "Молоко 3,2%", ServingDescription: "100 г",
-		CaloriesPerServing: kg(60), UsualUnits: kg(2), Rank: 1, Meals: []string{"breakfast"}},
+		ServingGrams: kg(100), CaloriesPerServing: kg(60), UsualUnits: kg(2), Rank: 1, Meals: []string{"breakfast"}},
 	{FoodID: "52853433", ServingID: "2", Name: "Банан", ServingDescription: "1 шт",
 		CaloriesPerServing: kg(95), UsualUnits: kg(1), Rank: 2},
 	{FoodID: "86855602", ServingID: "3", Name: "Snickers Сникерс Супер", ServingDescription: "1 батончик",
 		CaloriesPerServing: kg(395), UsualUnits: kg(2)},
+}
+
+func TestInferVoiceServingFromRegionalDescriptions(t *testing.T) {
+	for _, test := range []struct {
+		description string
+		units       float64
+		grams       float64
+	}{
+		{"0.7 :custom:70 g Мастер Пироговъ Венский Конвертик", 0.7, 100},
+		{"1.2 :custom:1.2s x 100г, 120 g Ашан Маффин", 1.2, 100},
+		{"2 :custom:2s x 1 батончик (80 g) Snickers", 2, 80},
+	} {
+		units, grams := inferVoiceServing(test.description)
+		if units != test.units || grams != test.grams {
+			t.Errorf("inferVoiceServing(%q) = %v, %v; want %v, %v", test.description, units, grams, test.units, test.grams)
+		}
+	}
 }
 
 func TestMealFollowsTheClock(t *testing.T) {
@@ -89,6 +106,32 @@ func TestValidateEntriesFallsBackToTheUsualQuantity(t *testing.T) {
 	}
 }
 
+func TestValidateEntriesConvertsExplicitGrams(t *testing.T) {
+	parsed := []voiceParsedEntry{{FoodID: "6754762", ServingID: "1", Grams: kg(70)}}
+
+	kept, rejected := validateParsedEntries(parsed, foodTestCandidates, time.Now())
+
+	if len(rejected) != 0 {
+		t.Fatalf("unexpected rejections: %v", rejected)
+	}
+	if len(kept) != 1 || kept[0].Units == nil || *kept[0].Units != 0.7 {
+		t.Fatalf("kept = %+v, want 0.7 units", kept)
+	}
+	if kept[0].Grams == nil || *kept[0].Grams != 70 {
+		t.Fatalf("grams were not preserved: %+v", kept[0])
+	}
+}
+
+func TestValidateEntriesRejectsGramsForUnitServing(t *testing.T) {
+	parsed := []voiceParsedEntry{{FoodID: "52853433", ServingID: "2", Grams: kg(70)}}
+
+	kept, rejected := validateParsedEntries(parsed, foodTestCandidates, time.Now())
+
+	if len(kept) != 0 || len(rejected) != 1 || !strings.Contains(rejected[0], "перевести граммы") {
+		t.Fatalf("kept = %+v, rejected = %v", kept, rejected)
+	}
+}
+
 func TestValidateEntriesRejectsAMisheardQuantity(t *testing.T) {
 	parsed := []voiceParsedEntry{{FoodID: "52853433", ServingID: "2", Units: kg(300)}}
 
@@ -116,5 +159,16 @@ func TestSummarizeFoodEntriesShowsCaloriesAndMeal(t *testing.T) {
 		if !strings.Contains(summary, want) {
 			t.Fatalf("summary missing %q:\n%s", want, summary)
 		}
+	}
+}
+
+func TestSummarizeFoodEntriesShowsExplicitGrams(t *testing.T) {
+	entries := []voiceParsedEntry{
+		{FoodID: "6754762", ServingID: "1", Name: "Молоко 3,2%", Units: kg(0.7), Grams: kg(70), Meal: mealBreakfast},
+	}
+
+	summary := summarizeFoodEntries(entries, foodTestCandidates)
+	if !strings.Contains(summary, "70 г, 42 ккал") {
+		t.Fatalf("summary = %q", summary)
 	}
 }

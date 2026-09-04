@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,10 +28,11 @@ const (
 // has to come from the diary too. ServingDescription is what lets a spoken "200
 // грамм" be turned into a number of servings.
 type voiceFoodCandidate struct {
-	FoodID             string `json:"food_id"`
-	ServingID          string `json:"serving_id"`
-	Name               string `json:"name"`
-	ServingDescription string `json:"serving,omitempty"`
+	FoodID             string   `json:"food_id"`
+	ServingID          string   `json:"serving_id"`
+	Name               string   `json:"name"`
+	ServingDescription string   `json:"serving,omitempty"`
+	ServingGrams       *float64 `json:"serving_grams,omitempty"`
 	// CaloriesPerServing is derived: the diary stores the total for the entry.
 	CaloriesPerServing *float64 `json:"kcal_per_serving,omitempty"`
 	UsualUnits         *float64 `json:"usual_units,omitempty"`
@@ -46,7 +49,52 @@ type voiceParsedEntry struct {
 	ServingID string   `json:"serving_id"`
 	Name      string   `json:"name"`
 	Units     *float64 `json:"units"`
+	Grams     *float64 `json:"grams"`
 	Meal      string   `json:"meal"`
+}
+
+var (
+	voiceLeadingUnitsPattern = regexp.MustCompile(`^\s*([0-9]+[.,]?[0-9]*)`)
+	voiceTimesGramsPattern   = regexp.MustCompile(`(?i)[xх×]\s*([0-9]+[.,]?[0-9]*)s?\s*[gг]`)
+	voiceParenGramsPattern   = regexp.MustCompile(`(?i)\(\s*([0-9]+[.,]?[0-9]*)s?\s*[gг]\s*\)`)
+	voiceGramsPattern        = regexp.MustCompile(`(?i)([0-9]+[.,]?[0-9]*)s?\s*[gг]`)
+)
+
+// inferVoiceServing recovers provider units and the weight of one unit from
+// regional descriptions such as "0.7 :custom:70 g" and
+// "1.2 :custom:1.2s x 100г, 120 g". The separate number_of_units field is
+// absent or rounded in those FatSecret responses.
+func inferVoiceServing(description string) (float64, float64) {
+	parse := func(match []string) float64 {
+		if len(match) < 2 {
+			return 0
+		}
+		value, _ := strconv.ParseFloat(strings.ReplaceAll(match[1], ",", "."), 64)
+		return value
+	}
+
+	timesMatch := voiceTimesGramsPattern.FindStringSubmatch(description)
+	custom := strings.Contains(description, ":custom:")
+	units := 0.0
+	if custom || len(timesMatch) > 0 {
+		units = parse(voiceLeadingUnitsPattern.FindStringSubmatch(description))
+	}
+
+	if grams := parse(timesMatch); grams > 0 {
+		return units, grams
+	}
+	if grams := parse(voiceParenGramsPattern.FindStringSubmatch(description)); grams > 0 {
+		return units, grams
+	}
+
+	gramsMatches := voiceGramsPattern.FindAllStringSubmatch(description, -1)
+	if custom && units > 0 && len(gramsMatches) > 0 {
+		totalGrams := parse(gramsMatches[len(gramsMatches)-1])
+		if perUnit := totalGrams / units; perUnit > 0 {
+			return units, perUnit
+		}
+	}
+	return units, 0
 }
 
 // loadFoodCandidates builds the shortlist from the diary: every food the account
@@ -72,13 +120,10 @@ func (h *VoiceWorkoutHandler) loadFoodCandidates(ctx context.Context, userID str
 		)
 		SELECT logged.food_id, logged.serving_id, logged.food_name,
 		       COALESCE(logged.serving_description, ''),
-		       -- nutrition_items.calories is the total of the entry, not of one
-		       -- serving, so a two-serving entry of 108 kcal has to come back as 54
-		       -- per serving. Reporting the total as per-serving doubled every
-		       -- number the reply showed.
-		       CASE WHEN logged.number_of_units > 0
-		            THEN ROUND(logged.calories / logged.number_of_units, 1)
-		            ELSE logged.calories END,
+		       -- Keep the entry total. Some regional responses omit or round
+		       -- number_of_units, so Go first recovers its lossless value from the
+		       -- provider description and only then derives calories per serving.
+		       logged.calories,
 		       logged.number_of_units, COALESCE(c.most_eaten_rank, 0),
 		       COALESCE(c.meals, ARRAY[]::text[]), logged.times
 		FROM logged
@@ -95,12 +140,27 @@ func (h *VoiceWorkoutHandler) loadFoodCandidates(ctx context.Context, userID str
 	candidates := make([]voiceFoodCandidate, 0, voiceFoodCandidateLimit)
 	for rows.Next() {
 		var (
-			c     voiceFoodCandidate
-			times int
+			c             voiceFoodCandidate
+			totalCalories *float64
+			times         int
 		)
 		if err := rows.Scan(&c.FoodID, &c.ServingID, &c.Name, &c.ServingDescription,
-			&c.CaloriesPerServing, &c.UsualUnits, &c.Rank, &c.Meals, &times); err != nil {
+			&totalCalories, &c.UsualUnits, &c.Rank, &c.Meals, &times); err != nil {
 			return nil, fmt.Errorf("scan food candidate: %w", err)
+		}
+		units, servingGrams := inferVoiceServing(c.ServingDescription)
+		if units > 0 {
+			c.UsualUnits = &units
+		}
+		if servingGrams > 0 {
+			c.ServingGrams = &servingGrams
+		}
+		if totalCalories != nil {
+			perServing := *totalCalories
+			if c.UsualUnits != nil && *c.UsualUnits > 0 {
+				perServing /= *c.UsualUnits
+			}
+			c.CaloriesPerServing = &perServing
 		}
 		candidates = append(candidates, c)
 	}
@@ -180,6 +240,14 @@ func validateParsedEntries(parsed []voiceParsedEntry, candidates []voiceFoodCand
 		}
 
 		units := entry.Units
+		if entry.Grams != nil {
+			if *entry.Grams <= 0 || *entry.Grams > voiceMaxFoodGrams || candidate.ServingGrams == nil || *candidate.ServingGrams <= 0 {
+				rejected = append(rejected, candidate.Name+" (не смог перевести граммы в порцию)")
+				continue
+			}
+			converted := *entry.Grams / *candidate.ServingGrams
+			units = &converted
+		}
 		if units == nil || *units <= 0 {
 			// The quantity was not spoken: the amount logged last time is a better
 			// guess than refusing the entry, and it is what the person eats anyway.
@@ -196,6 +264,7 @@ func validateParsedEntries(parsed []voiceParsedEntry, candidates []voiceFoodCand
 			ServingID: candidate.ServingID,
 			Name:      candidate.Name,
 			Units:     &value,
+			Grams:     entry.Grams,
 			Meal:      resolveMeal(entry.Meal, at),
 		})
 	}
@@ -205,6 +274,8 @@ func validateParsedEntries(parsed []voiceParsedEntry, candidates []voiceFoodCand
 // voiceMaxFoodUnits catches a misheard quantity: fifty servings of anything is a
 // recognition error, not a meal.
 const voiceMaxFoodUnits = 50
+
+const voiceMaxFoodGrams = 10000
 
 // summarizeFoodEntries renders what was logged, with the calories, so a wrong
 // match is visible immediately.
@@ -220,9 +291,13 @@ func summarizeFoodEntries(entries []voiceParsedEntry, candidates []voiceFoodCand
 	for _, entry := range entries {
 		line := entry.Name
 		if entry.Units != nil {
-			line += fmt.Sprintf(": %s", formatUnits(*entry.Units))
-			if serving := servings[entry.FoodID+"/"+entry.ServingID]; serving != "" {
-				line += " × " + strings.TrimSpace(serving)
+			if entry.Grams != nil {
+				line += fmt.Sprintf(": %s г", formatUnits(*entry.Grams))
+			} else {
+				line += fmt.Sprintf(": %s", formatUnits(*entry.Units))
+				if serving := servings[entry.FoodID+"/"+entry.ServingID]; serving != "" {
+					line += " × " + strings.TrimSpace(serving)
+				}
 			}
 			if kcal := calories[entry.FoodID+"/"+entry.ServingID]; kcal != nil {
 				line += fmt.Sprintf(", %.0f ккал", *kcal**entry.Units)
