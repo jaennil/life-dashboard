@@ -18,7 +18,8 @@ const (
 	inputJobPoll        = 2 * time.Second
 	// The extraction model normally answers in seconds. Waiting five minutes for
 	// a connection that has stopped producing bytes only delays the useful retry.
-	inputJobAttemptBudget = 90 * time.Second
+	inputJobAttemptBudget  = 90 * time.Second
+	inputNotificationLease = time.Minute
 )
 
 var inputJobBackoff = [...]time.Duration{15 * time.Second, time.Minute, 5 * time.Minute}
@@ -38,6 +39,13 @@ type inputJob struct {
 	DurationMinutes int
 	Typed           bool
 	Attempts        int
+}
+
+type inputNotificationJob struct {
+	ID       string
+	UserID   string
+	Attempts int
+	Result   voiceWorkoutResponse
 }
 
 type inputJobView struct {
@@ -131,6 +139,8 @@ func (h *VoiceWorkoutHandler) StartInputWorker(ctx context.Context) {
 		for {
 			for h.processNextInputJob(ctx) {
 			}
+			for h.processNextInputNotification(ctx) {
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -162,7 +172,6 @@ func (h *VoiceWorkoutHandler) processNextInputJob(workerCtx context.Context) boo
 			h.logger.Error().Err(err).Str("job_id", job.ID).Msg("complete input job")
 			return true
 		}
-		h.push.sendInputResult(workerCtx, job.UserID, job.ID, response.Display, true)
 		return true
 	}
 
@@ -183,8 +192,81 @@ func (h *VoiceWorkoutHandler) processNextInputJob(workerCtx context.Context) boo
 		h.logger.Error().Err(err).Str("job_id", job.ID).Msg("fail input job")
 		return true
 	}
-	h.push.sendInputResult(workerCtx, job.UserID, job.ID, response.Display, false)
 	return true
+}
+
+func (h *VoiceWorkoutHandler) processNextInputNotification(ctx context.Context) bool {
+	job, err := h.claimInputNotification(ctx)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false
+	}
+	if err != nil {
+		h.logger.Error().Err(err).Msg("claim input notification")
+		return false
+	}
+
+	success := job.Result.Status != "failed"
+	if err := h.push.sendInputResult(ctx, job.UserID, job.ID, job.Result.Display, success); err != nil {
+		delay := time.Duration(job.Attempts) * time.Minute
+		if delay > time.Hour {
+			delay = time.Hour
+		}
+		if updateErr := h.retryInputNotification(ctx, job.ID, err.Error(), delay); updateErr != nil {
+			h.logger.Error().Err(updateErr).Str("job_id", job.ID).Msg("retry input notification")
+		}
+		return true
+	}
+	if _, err := h.db.Exec(ctx, `
+		UPDATE input_jobs
+		SET notification_status = 'sent', notification_sent_at = NOW(),
+		    notification_error = NULL, updated_at = NOW()
+		WHERE id = $1
+	`, job.ID); err != nil {
+		h.logger.Error().Err(err).Str("job_id", job.ID).Msg("complete input notification")
+	}
+	return true
+}
+
+func (h *VoiceWorkoutHandler) claimInputNotification(ctx context.Context) (inputNotificationJob, error) {
+	var job inputNotificationJob
+	var raw []byte
+	err := h.db.QueryRow(ctx, `
+		WITH candidate AS (
+			SELECT id FROM input_jobs
+			WHERE status IN ('succeeded', 'failed')
+			  AND notification_status IN ('pending', 'sending')
+			  AND notification_available_at <= NOW()
+			ORDER BY completed_at, id
+			FOR UPDATE SKIP LOCKED
+			LIMIT 1
+		)
+		UPDATE input_jobs j
+		SET notification_status = 'sending',
+		    notification_attempts = notification_attempts + 1,
+		    notification_available_at = NOW() + $1::interval,
+		    updated_at = NOW()
+		FROM candidate
+		WHERE j.id = candidate.id
+		RETURNING j.id, j.user_id, j.notification_attempts, j.result
+	`, inputNotificationLease.String()).Scan(&job.ID, &job.UserID, &job.Attempts, &raw)
+	if err != nil {
+		return job, err
+	}
+	if err := json.Unmarshal(raw, &job.Result); err != nil {
+		return job, err
+	}
+	return job, nil
+}
+
+func (h *VoiceWorkoutHandler) retryInputNotification(ctx context.Context, jobID, message string, delay time.Duration) error {
+	_, err := h.db.Exec(ctx, `
+		UPDATE input_jobs
+		SET notification_status = 'pending',
+		    notification_available_at = NOW() + $2::interval,
+		    notification_error = $3, updated_at = NOW()
+		WHERE id = $1
+	`, jobID, delay.String(), message)
+	return err
 }
 
 func (h *VoiceWorkoutHandler) claimInputJob(ctx context.Context) (inputJob, error) {

@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -34,6 +36,10 @@ type webPushSubscriptionRequest struct {
 }
 
 func newWebPushSender(db *pgxpool.Pool, options WebPushOptions, logger zerolog.Logger) *webPushSender {
+	// webpush-go adds mailto: itself unless the subscriber is an HTTPS URL. If
+	// the already-valid prefix is passed through, Apple rejects the resulting
+	// mailto:mailto: subject with 403 BadJwtToken.
+	options.Subscriber = strings.TrimPrefix(options.Subscriber, "mailto:")
 	return &webPushSender{db: db, options: options, logger: logger.With().Str("component", "web_push").Logger()}
 }
 
@@ -95,9 +101,9 @@ func (p *webPushSender) enabled() bool {
 	return p != nil && p.options.PublicKey != "" && p.options.PrivateKey != ""
 }
 
-func (p *webPushSender) sendInputResult(ctx context.Context, userID, jobID, display string, success bool) {
+func (p *webPushSender) sendInputResult(ctx context.Context, userID, jobID, display string, success bool) error {
 	if !p.enabled() {
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -109,7 +115,7 @@ func (p *webPushSender) sendInputResult(ctx context.Context, userID, jobID, disp
 		"title": title, "body": display, "url": "/input", "tag": "input-job-" + jobID,
 	})
 	if err != nil {
-		return
+		return err
 	}
 
 	rows, err := p.db.Query(ctx, `
@@ -117,14 +123,17 @@ func (p *webPushSender) sendInputResult(ctx context.Context, userID, jobID, disp
 	`, userID)
 	if err != nil {
 		p.logger.Warn().Err(err).Msg("load subscriptions")
-		return
+		return err
 	}
 	defer rows.Close()
 
+	var lastError error
+	var delivered bool
 	for rows.Next() {
 		var subscription webpush.Subscription
 		if err := rows.Scan(&subscription.Endpoint, &subscription.Keys.P256dh, &subscription.Keys.Auth); err != nil {
 			p.logger.Warn().Err(err).Msg("scan subscription")
+			lastError = err
 			continue
 		}
 		response, err := webpush.SendNotificationWithContext(ctx, payload, &subscription, &webpush.Options{
@@ -133,8 +142,10 @@ func (p *webPushSender) sendInputResult(ctx context.Context, userID, jobID, disp
 		})
 		if err != nil {
 			p.logger.Warn().Err(err).Msg("send notification")
+			lastError = err
 			continue
 		}
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
 		_ = response.Body.Close()
 		if response.StatusCode == http.StatusGone || response.StatusCode == http.StatusNotFound {
 			if _, err := p.db.Exec(ctx, `DELETE FROM web_push_subscriptions WHERE endpoint = $1`, subscription.Endpoint); err != nil {
@@ -143,9 +154,15 @@ func (p *webPushSender) sendInputResult(ctx context.Context, userID, jobID, disp
 			continue
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			p.logger.Warn().Int("status", response.StatusCode).Msg("push service rejected notification")
+			lastError = fmt.Errorf("push service returned %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+			p.logger.Warn().Err(lastError).Msg("push service rejected notification")
 			continue
 		}
+		delivered = true
 		p.logger.Info().Int("status", response.StatusCode).Str("job_id", jobID).Msg("notification sent")
 	}
+	if !delivered {
+		return lastError
+	}
+	return nil
 }
