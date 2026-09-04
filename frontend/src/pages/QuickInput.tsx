@@ -224,7 +224,7 @@ export function QuickInput() {
                         </time>
                       </div>
                       <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
-                        {job.result?.display ?? jobStatusText(job)}
+                        {job.result ? resultWithoutTranscript(job.result.display) : jobStatusText(job)}
                       </p>
                     </div>
                   </div>
@@ -253,6 +253,17 @@ function jobStatusText(job: InputJob) {
   if (job.status === 'processing') return `Обрабатывается${job.attempts > 1 ? `, попытка ${job.attempts}` : ''}…`
   if (job.status === 'failed') return job.last_error || 'Не удалось обработать.'
   return job.attempts > 0 ? 'Ожидает повторной попытки…' : 'Ожидает обработки…'
+}
+
+function resultWithoutTranscript(display: string) {
+  const newline = display.indexOf('\n')
+  if (newline < 0) return display
+
+  const firstLine = display.slice(0, newline)
+  if (firstLine.startsWith('Услышал: ') || firstLine.startsWith('Введено: ')) {
+    return display.slice(newline + 1)
+  }
+  return display
 }
 
 function urlBase64ToUint8Array(value: string) {

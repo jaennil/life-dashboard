@@ -257,6 +257,19 @@ func TestDecodeParseResultHandlesLeadingProse(t *testing.T) {
 	}
 }
 
+func TestVoicePromptRequiresCompletePhraseCoverage(t *testing.T) {
+	prompt := buildVoiceParsePrompt(voiceTestCandidates, nil, nil, false)
+	for _, rule := range []string{
+		"Каждое упоминание обязано быть представлено ровно один раз",
+		"на бицепс делал как обычно",
+		"times_logged",
+	} {
+		if !strings.Contains(prompt, rule) {
+			t.Fatalf("prompt does not contain coverage rule %q", rule)
+		}
+	}
+}
+
 func TestValidateReportsPartiallyDroppedSets(t *testing.T) {
 	// What deepseek-v4-flash actually produced for "11 раз, 2 подхода": the
 	// second set came back with reps 0. Dropping it quietly would log one set
