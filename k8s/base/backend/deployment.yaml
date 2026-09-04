@@ -84,6 +84,8 @@ spec:
             # is what makes the difference matter.
             - name: AI_PARSE_MODEL
               value: deepseek-v4-flash
+            - name: AI_PARSE_REASONING_EFFORT
+              value: low
 
           envFrom:
             - secretRef:
