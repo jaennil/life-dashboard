@@ -1,4 +1,4 @@
-import { useCallback, useState, type ElementType } from 'react'
+import { useCallback, useEffect, useState, type ElementType } from 'react'
 import {
   AlertTriangle,
   CalendarClock,
@@ -30,6 +30,8 @@ import {
   type ProductivityHabitInput,
   type ProductivityTask,
   type ProductivityTaskFilter,
+  type ProductivityTaskSourceTotals,
+  type VikunjaProject,
 } from '@/lib/api'
 import { cn, syncCaptionForSources } from '@/lib/utils'
 
@@ -42,6 +44,36 @@ const FILTERS: Array<{ key: ProductivityTaskFilter; label: string }> = [
   { key: 'stale', label: 'Висят давно' },
   { key: 'all', label: 'Все активные' },
 ]
+
+// Tasks arrive from both providers into one list, so every row says where it
+// came from: only Vikunja tasks can be closed from here, Todoist is read-only.
+const TASK_SOURCES: Record<string, { label: string; badge: string }> = {
+  todoist: { label: 'Todoist', badge: 'border-rose-500/30 text-rose-300' },
+  vikunja: { label: 'Vikunja', badge: 'border-cyan-500/30 text-cyan-300' },
+}
+
+const TASK_PRIORITIES: Array<{ value: number; label: string }> = [
+  { value: 0, label: 'без приоритета' },
+  { value: 1, label: 'p1 низкий' },
+  { value: 2, label: 'p2 средний' },
+  { value: 3, label: 'p3 высокий' },
+  { value: 4, label: 'p4 срочно' },
+]
+
+function taskSourceLabel(source: string) {
+  return TASK_SOURCES[source]?.label ?? source
+}
+
+// summaryBySourceCaption keeps the headline number merged across providers and
+// spells the split out underneath, so a provider that stopped syncing shows up
+// as its own zero instead of quietly shrinking the total.
+function summaryBySourceCaption(bySource: ProductivityTaskSourceTotals[] | undefined, recurringTotal: number) {
+  const parts = (bySource ?? [])
+    .filter(entry => entry.active_total > 0)
+    .map(entry => `${taskSourceLabel(entry.source)} ${entry.active_total}`)
+  parts.push(`${recurringTotal} recurring`)
+  return parts.join(' · ')
+}
 
 const ROUTINES: Array<{ key: HabitRoutine; label: string; icon: ElementType; accent: string }> = [
   { key: 'morning', label: 'Утро', icon: Sun, accent: 'text-amber-300' },
@@ -245,6 +277,12 @@ export function Productivity() {
   const [filter, setFilter] = useState<ProductivityTaskFilter>('overdue')
   const [editingHabitID, setEditingHabitID] = useState<string | null>(null)
   const [showHabitComposer, setShowHabitComposer] = useState(false)
+  const [showTaskComposer, setShowTaskComposer] = useState(false)
+  const [taskForm, setTaskForm] = useState({ title: '', due_at: '', project_id: 0, priority: 0 })
+  const [taskSaving, setTaskSaving] = useState(false)
+  const [taskError, setTaskError] = useState('')
+  const [vikunjaProjects, setVikunjaProjects] = useState<VikunjaProject[]>([])
+  const [completingTaskID, setCompletingTaskID] = useState<string | null>(null)
   const [habitForm, setHabitForm] = useState<ProductivityHabitInput>({
     name: '',
     routine: 'morning',
@@ -268,11 +306,67 @@ export function Productivity() {
   const { syncing, syncSources } = usePageSync(reloadProductivity)
 
   const todoistIntegration = integrations.find(integration => integration.name === 'todoist')
-  const syncCaption = todoistIntegration ? syncCaptionForSources([todoistIntegration]) : undefined
+  const vikunjaIntegration = integrations.find(integration => integration.name === 'vikunja')
+  const taskIntegrations = [todoistIntegration, vikunjaIntegration].filter(Boolean) as NonNullable<typeof todoistIntegration>[]
+  const enabledTaskIntegrations = taskIntegrations.filter(integration => integration.enabled)
+  const syncCaption = enabledTaskIntegrations.length > 0 ? syncCaptionForSources(enabledTaskIntegrations) : undefined
+  const canCreateTasks = !!vikunjaIntegration?.enabled
 
   async function handleSync() {
-    if (!todoistIntegration?.enabled) return
-    await syncSources('todoist')
+    if (enabledTaskIntegrations.length === 0) return
+    await syncSources(enabledTaskIntegrations.map(integration => integration.name))
+  }
+
+  // The project list only matters once the composer is open, and it costs a
+  // round trip to Vikunja, so it is fetched then rather than on page load.
+  useEffect(() => {
+    if (!showTaskComposer || !canCreateTasks || vikunjaProjects.length > 0) return
+    let cancelled = false
+    api.getVikunjaProjects()
+      .then(projects => {
+        if (cancelled) return
+        setVikunjaProjects(projects)
+        const preferred = projects.find(project => project.is_default) ?? projects[0]
+        if (preferred) setTaskForm(current => (current.project_id ? current : { ...current, project_id: preferred.id }))
+      })
+      .catch(error => {
+        if (!cancelled) setTaskError(error instanceof Error ? error.message : 'Не удалось получить проекты Vikunja')
+      })
+    return () => { cancelled = true }
+  }, [showTaskComposer, canCreateTasks, vikunjaProjects.length])
+
+  async function handleCreateTask() {
+    const title = taskForm.title.trim()
+    if (!title) return
+    setTaskSaving(true)
+    setTaskError('')
+    try {
+      await api.createProductivityTask({
+        title,
+        project_id: taskForm.project_id || undefined,
+        priority: taskForm.priority || undefined,
+        due_at: taskForm.due_at ? new Date(taskForm.due_at).toISOString() : undefined,
+      })
+      setTaskForm(current => ({ ...current, title: '', due_at: '', priority: 0 }))
+      await reloadProductivity()
+    } catch (error) {
+      setTaskError(error instanceof Error ? error.message : 'Не удалось создать задачу')
+    } finally {
+      setTaskSaving(false)
+    }
+  }
+
+  async function handleCompleteTask(task: ProductivityTask) {
+    setCompletingTaskID(task.id)
+    setTaskError('')
+    try {
+      await api.completeProductivityTask(task.id)
+      await reloadProductivity()
+    } catch (error) {
+      setTaskError(error instanceof Error ? error.message : 'Не удалось закрыть задачу')
+    } finally {
+      setCompletingTaskID(null)
+    }
   }
 
   async function handleSaveHabit() {
@@ -345,18 +439,19 @@ export function Productivity() {
       <PageHeader
         eyebrow="Productivity"
         title="Productivity"
-        description="Todoist отвечает за задачи, а встроенные рутины закрывают ежедневный уход и привычки без лишнего шума на экране."
+        description="Todoist и Vikunja отвечают за задачи, новые задачи уходят в Vikunja, а встроенные рутины закрывают ежедневный уход и привычки без лишнего шума на экране."
         badges={[
           { label: todoistIntegration?.enabled ? 'Todoist подключён' : 'Todoist не подключён', tone: todoistIntegration?.enabled ? 'success' : 'warning' },
+          { label: vikunjaIntegration?.enabled ? 'Vikunja подключён' : 'Vikunja не подключён', tone: vikunjaIntegration?.enabled ? 'success' : 'warning' },
           ...(habitsData ? [{ label: `${habitsData.summary.total} локальных привычек`, tone: 'primary' as const }] : []),
           ...(summary ? [{ label: `${summary.active_total} активных задач`, tone: 'muted' as const }] : []),
         ]}
         actions={(
           <PageSyncButton
-            label="Синхронизировать Todoist"
+            label="Синхронизировать задачи"
             syncCaption={syncCaption}
             syncing={syncing}
-            disabled={!todoistIntegration?.enabled}
+            disabled={enabledTaskIntegrations.length === 0}
             onClick={handleSync}
           />
         )}
@@ -572,7 +667,7 @@ export function Productivity() {
         <StatCard
           title="Активные"
           value={loading || !summary ? '—' : String(summary.active_total)}
-          sub={loading || !summary ? 'Todoist' : `${summary.recurring_total} recurring`}
+          sub={loading || !summary ? 'Todoist и Vikunja' : summaryBySourceCaption(summary.by_source, summary.recurring_total)}
           icon={ListTodo}
           color="bg-blue-500"
         />
@@ -623,6 +718,78 @@ export function Productivity() {
         </div>
 
         <div className="rounded-2xl border bg-card/90 p-5 shadow-sm flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">
+              Задачи
+              <InfoTooltip text="Список сводит задачи всех подключённых провайдеров. Создавать и закрывать можно задачи Vikunja: у Todoist подключение только на чтение." />
+            </h2>
+            {canCreateTasks ? (
+              <button
+                type="button"
+                onClick={() => setShowTaskComposer(current => !current)}
+                className="rounded-xl border bg-background/70 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                {showTaskComposer ? 'Скрыть форму' : 'Новая задача'}
+              </button>
+            ) : null}
+          </div>
+
+          {showTaskComposer && canCreateTasks ? (
+            <div className="flex flex-col gap-3 rounded-2xl border bg-background/40 p-4">
+              <input
+                type="text"
+                value={taskForm.title}
+                onChange={(event) => setTaskForm(current => ({ ...current, title: event.target.value }))}
+                placeholder="Что нужно сделать"
+                className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+              />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <StyledSelect
+                  value={taskForm.project_id}
+                  onChange={(event) => setTaskForm(current => ({ ...current, project_id: Number(event.target.value) }))}
+                  aria-label="Проект Vikunja"
+                >
+                  {vikunjaProjects.length === 0 ? <option value={0}>Проект по умолчанию</option> : null}
+                  {vikunjaProjects.map(project => (
+                    <option key={project.id} value={project.id}>
+                      {(project.path || project.title) + (project.archived ? ' (архив)' : '')}
+                    </option>
+                  ))}
+                </StyledSelect>
+                <input
+                  type="datetime-local"
+                  value={taskForm.due_at}
+                  onChange={(event) => setTaskForm(current => ({ ...current, due_at: event.target.value }))}
+                  aria-label="Дедлайн"
+                  className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+                />
+                <StyledSelect
+                  value={taskForm.priority}
+                  onChange={(event) => setTaskForm(current => ({ ...current, priority: Number(event.target.value) }))}
+                  aria-label="Приоритет"
+                >
+                  {TASK_PRIORITIES.map(priority => (
+                    <option key={priority.value} value={priority.value}>{priority.label}</option>
+                  ))}
+                </StyledSelect>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={taskSaving || !taskForm.title.trim()}
+                  onClick={handleCreateTask}
+                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+                >
+                  <Plus className="h-4 w-4" />
+                  {taskSaving ? 'Создаю...' : 'Создать в Vikunja'}
+                </button>
+                <span className="text-xs text-muted-foreground">Задача уйдёт в Vikunja и вернётся в этот список после синхронизации.</span>
+              </div>
+            </div>
+          ) : null}
+
+          {taskError ? <p className="text-xs text-rose-400">{taskError}</p> : null}
+
           <div className="flex flex-wrap items-center gap-2">
             {FILTERS.map(item => (
               <button
@@ -656,6 +823,9 @@ export function Productivity() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-medium text-foreground break-words">{task.content}</p>
+                        <span className={cn('rounded-full border px-2 py-0.5 text-[10px]', TASK_SOURCES[task.source]?.badge ?? 'border-border text-muted-foreground')}>
+                          {taskSourceLabel(task.source)}
+                        </span>
                         {task.is_recurring && (
                           <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 px-2 py-0.5 text-[10px] text-emerald-400">
                             <Repeat2 className="w-3 h-3" />
@@ -672,9 +842,23 @@ export function Productivity() {
                         <p className="mt-2 text-xs text-muted-foreground line-clamp-2">{task.description}</p>
                       )}
                     </div>
-                    <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10px]', priorityBadge(task.priority))}>
-                      p{task.priority}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className={cn('rounded-full border px-2 py-0.5 text-[10px]', priorityBadge(task.priority))}>
+                        p{task.priority}
+                      </span>
+                      {task.source === 'vikunja' ? (
+                        <button
+                          type="button"
+                          disabled={completingTaskID === task.id}
+                          onClick={() => handleCompleteTask(task)}
+                          title="Закрыть задачу в Vikunja"
+                          className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-emerald-500/40 hover:text-emerald-300 disabled:opacity-50"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          {completingTaskID === task.id ? 'Закрываю...' : 'Закрыть'}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

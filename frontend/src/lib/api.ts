@@ -452,10 +452,18 @@ export interface ProductivitySummary {
   completed_today_total: number
   completed_7_days_total: number
   upcoming_load: ProductivityDayBucket[]
+  by_source: ProductivityTaskSourceTotals[]
+}
+
+export interface ProductivityTaskSourceTotals {
+  source: string
+  active_total: number
+  completed_total: number
 }
 
 export interface ProductivityTask {
   id: string
+  source: string
   external_id: string
   content: string
   description: string
@@ -472,6 +480,33 @@ export interface ProductivityTask {
 }
 
 export type ProductivityTaskFilter = 'all' | 'overdue' | 'today' | 'upcoming' | 'stale'
+
+export interface VikunjaProject {
+  id: number
+  title: string
+  path: string
+  archived: boolean
+  is_default: boolean
+}
+
+export interface VikunjaTaskRef {
+  external_id: string
+  title: string
+  project_id: number
+  project_name: string
+  due_at: string | null
+  done: boolean
+  completed_at: string | null
+  url: string
+}
+
+export interface CreateTaskInput {
+  title: string
+  description?: string
+  project_id?: number
+  due_at?: string
+  priority?: number
+}
 
 export interface ProductivityHabitsSummary {
   total: number
@@ -572,6 +607,11 @@ export const api = {
     deleteNoContent(`/productivity/habits/${id}`),
   setProductivityHabitStatus: (id: string, status: 'completed' | 'none' | 'skipped' | 'failed', date?: string) =>
     postNoContent(`/productivity/habits/${id}/status`, { status, date }),
+  createProductivityTask: (input: CreateTaskInput) =>
+    postJSON<VikunjaTaskRef>('/productivity/tasks', input),
+  completeProductivityTask: (id: string) =>
+    postJSON<VikunjaTaskRef>(`/productivity/tasks/${id}/complete`),
+  getVikunjaProjects: () => get<VikunjaProject[]>('/productivity/vikunja/projects'),
   getSpendingByCategory: (from?: string, to?: string) => {
     const p = new URLSearchParams()
     if (from) p.set('from', from)

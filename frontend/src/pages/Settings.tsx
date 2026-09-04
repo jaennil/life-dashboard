@@ -34,6 +34,11 @@ const TOKEN_INTEGRATIONS: Record<string, { placeholder: string; help: React.Reac
     placeholder: 'Personal API token от Todoist',
     help: <>Fallback без OAuth: откройте Todoist → Settings → Integrations → Developer и скопируйте personal API token. Подробности есть в <a href="https://developer.todoist.com/api/v1/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">официальной API документации</a>.</>,
   },
+  vikunja: {
+    placeholder: 'API-токен Vikunja (tk_...)',
+    help: <>Откройте Vikunja → Settings → API Tokens и создайте токен с правами Tasks (Read All, Create, Update), Projects (Read All) и User (Read One) - без них синхронизация и создание задач не работают. Адрес инстанса тот же, что в браузере.</>,
+    extraField: { key: 'base_url', placeholder: 'Адрес инстанса (https://vikunja.example.com)' },
+  },
   notion: {
     placeholder: 'Notion Integration Token (ntn_...)',
     help: <>1. Создайте <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Internal Integration</a> в Notion. 2. Скопируйте токен. 3. Откройте базу данных дневника в Notion → «...» → Connections → добавьте интеграцию. 4. Скопируйте ID базы данных из URL (32 символа после последнего /).</>,
@@ -52,6 +57,7 @@ const ICONS: Record<string, string> = {
   apple_health: '❤️',
   habitify: '✅',
   todoist: '☑️',
+  vikunja: '🦙',
   zenmoney: '💰',
   myfitnesspal: '🥗',
   google_calendar: '📅',
@@ -66,7 +72,8 @@ function fmtCount(n: number, name: string) {
     hevy:     ['тренировка', 'тренировки', 'тренировок'],
     apple_health: ['запись здоровья', 'записи здоровья', 'записей здоровья'],
     habitify: ['привычка', 'привычки', 'привычек'],
-    todoist: ['привычка', 'привычки', 'привычек'],
+    todoist: ['задача', 'задачи', 'задач'],
+    vikunja: ['задача', 'задачи', 'задач'],
     zenmoney: ['транзакция', 'транзакции', 'транзакций'],
     xiaomi_scale: ['измерение', 'измерения', 'измерений'],
   }
