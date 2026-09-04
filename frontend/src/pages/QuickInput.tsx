@@ -12,6 +12,7 @@ const EXAMPLES = [
 const DOMAIN_LABELS: Record<string, string> = {
   food: 'Питание',
   workout: 'Тренировка',
+  task: 'Задача',
   note: 'Заметка',
   weight: 'Вес',
   unknown: 'Не определено',

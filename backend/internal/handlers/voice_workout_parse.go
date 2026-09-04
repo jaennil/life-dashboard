@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -58,7 +59,17 @@ type voiceParseResult struct {
 	Domain    string                `json:"domain"`
 	Exercises []voiceParsedExercise `json:"exercises"`
 	Entries   []voiceParsedEntry    `json:"entries"`
+	Task      *voiceParsedTask      `json:"task"`
 	Unmatched []string              `json:"unmatched"`
+}
+
+// voiceParsedTask is a task dictated into the dashboard. The deadline comes back
+// already resolved to a timestamp: "в пятницу" can only be turned into a date
+// against the moment the phrase was said, which the prompt carries.
+type voiceParsedTask struct {
+	Title    string `json:"title"`
+	DueAt    string `json:"due_at"`
+	Priority int    `json:"priority"`
 }
 
 // voiceInterpretation is the router's verdict on a phrase. Parsed stays nil when
@@ -68,6 +79,7 @@ type voiceInterpretation struct {
 	Parsed    []voiceParsedExercise
 	Entries   []voiceParsedEntry
 	Foods     []voiceFoodCandidate
+	Task      *voiceParsedTask
 	Unmatched []string
 }
 
@@ -179,19 +191,28 @@ func (h *VoiceWorkoutHandler) loadCandidateLastSets(ctx context.Context, userID 
 // Every rule here comes from a real phrasing rather than from imagination, and
 // the hard constraint is that a template_id must be copied from the list: an
 // invented id would be rejected by Hevy, or worse, accepted as another exercise.
-func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoodCandidate, draft []voiceParsedExercise, workoutOpen bool) string {
+func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoodCandidate, draft []voiceParsedExercise, workoutOpen bool, now time.Time) string {
 	var sb strings.Builder
 	sb.WriteString("Ты разбираешь фразу, надиктованную вслух по-русски в дневник пользователя.\n")
 	sb.WriteString("Верни только JSON, без markdown и без пояснений, в формате:\n")
 	sb.WriteString(`{"domain":"workout","exercises":[{"template_id":"...","title":"...","sets":[{"type":"normal","reps":5,"weight_kg":13.5}]}],"entries":[],"unmatched":["..."]}`)
 	sb.WriteString("\nДля еды формат такой:\n")
 	sb.WriteString(`{"domain":"food","exercises":[],"entries":[{"food_id":"...","serving_id":"...","name":"...","grams":70,"meal":"breakfast"}],"unmatched":["..."]}`)
+	sb.WriteString("\nДля задачи формат такой:\n")
+	sb.WriteString(`{"domain":"task","exercises":[],"entries":[],"task":{"title":"забрать запчасти","due_at":"2026-09-05T12:00:00+03:00","priority":0},"unmatched":[]}`)
 	sb.WriteString("\n\nСначала определи domain - о чём фраза:\n")
 	sb.WriteString("- workout: упражнения, подходы, повторения, веса.\n")
 	sb.WriteString("- food: съеденное, продукты, граммы, калории.\n")
+	sb.WriteString("- task: то, что надо сделать: поручение себе, дело, напоминание, покупка.\n")
 	sb.WriteString("- weight: собственный вес пользователя.\n")
 	sb.WriteString("- note: всё остальное, мысли и заметки.\n")
-	sb.WriteString("Если domain не workout и не food, верни только domain, а оба массива оставь пустыми.\n")
+	sb.WriteString("Если domain не workout, не food и не task, верни только domain, а массивы оставь пустыми.\n")
+	sb.WriteString("\nПравила разбора задачи:\n")
+	sb.WriteString("- title - это само дело в инфинитиве, без слов \"надо\", \"не забыть\" и \"напомни\".\n")
+	sb.WriteString(fmt.Sprintf("- Сейчас %s. Относительный срок (\"завтра\", \"в пятницу\", \"через неделю\") переведи в due_at по этому времени и в этом же часовом поясе.\n", now.Format("2006-01-02 15:04 -07:00, Monday")))
+	sb.WriteString("- Если время дня не названо, поставь 12:00. Если срока нет вообще, оставь due_at пустой строкой - выдуманный дедлайн хуже, чем его отсутствие.\n")
+	sb.WriteString("- priority заполняй только когда срочность сказана словами: 1 низкий, 2 средний, 3 высокий, 4 срочно. Иначе 0.\n")
+	sb.WriteString("- Прошедшее дело - это не задача: \"купил хлеб\" не task.\n")
 	if workoutOpen {
 		sb.WriteString("Сейчас у пользователя открыта тренировка. Короткая фраза с числами почти наверняка workout: \"ещё 8\" или \"12 по 30\" - это подходы.\n")
 		sb.WriteString("Если во фразе есть вес, повторения или что-то похожее на название упражнения - это workout, даже если распознавание исказило слова до бессмыслицы. Тогда положи исходную формулировку в unmatched, но domain оставь workout: это честнее, чем объявить надиктованный подход заметкой.\n")
@@ -265,7 +286,7 @@ func (h *VoiceWorkoutHandler) parsePhrase(ctx context.Context, userID, text stri
 	}
 
 	messages := []ChatMessage{
-		{Role: "system", Content: buildVoiceParsePrompt(candidates, foods, draft, workoutOpen)},
+		{Role: "system", Content: buildVoiceParsePrompt(candidates, foods, draft, workoutOpen, time.Now())},
 		{Role: "user", Content: text},
 	}
 
@@ -361,6 +382,13 @@ func (h *VoiceWorkoutHandler) classify(ctx context.Context, userID, text, sessio
 			Domain:    domain,
 			Entries:   parsed.Entries,
 			Foods:     foods,
+			Unmatched: parsed.Unmatched,
+		}
+	}
+	if domain == voiceDomainTask {
+		return voiceInterpretation{
+			Domain:    domain,
+			Task:      parsed.Task,
 			Unmatched: parsed.Unmatched,
 		}
 	}

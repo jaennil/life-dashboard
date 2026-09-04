@@ -230,7 +230,7 @@ func main() {
 	// The lazy close in the webhook only fires when the next phrase arrives, so
 	// this sweep is what actually bounds a dictated session that was never
 	// finished out loud.
-	voiceSessions := handlers.NewVoiceWorkout(pool, aiHandler, hevy, fatSecretConn, cfg.AI.ParseModel, cfg.AI.ParseReasoningEffort, handlers.WebPushOptions{
+	voiceSessions := handlers.NewVoiceWorkout(pool, aiHandler, hevy, fatSecretConn, vikunja, cfg.AI.ParseModel, cfg.AI.ParseReasoningEffort, handlers.WebPushOptions{
 		PublicKey: cfg.WebPush.PublicKey, PrivateKey: cfg.WebPush.PrivateKey, Subscriber: cfg.WebPush.Subscriber,
 	}, log.Logger)
 	inputWorkerCtx, stopInputWorker := context.WithCancel(context.Background())

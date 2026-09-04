@@ -41,18 +41,21 @@ type VoiceWorkoutHandler struct {
 	// parse was still being proven.
 	hevy workoutWriter
 	// food writes dictated meals straight to the FatSecret diary.
-	food   foodWriter
+	food foodWriter
+	// task writes dictated tasks straight to Vikunja.
+	task   taskWriter
 	push   *webPushSender
 	wake   chan struct{}
 	logger zerolog.Logger
 }
 
-func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, hevy workoutWriter, food foodWriter, parseModel, parseEffort string, pushOptions WebPushOptions, logger zerolog.Logger) *VoiceWorkoutHandler {
+func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, hevy workoutWriter, food foodWriter, task taskWriter, parseModel, parseEffort string, pushOptions WebPushOptions, logger zerolog.Logger) *VoiceWorkoutHandler {
 	return &VoiceWorkoutHandler{
 		db:          db,
 		ai:          ai,
 		hevy:        hevy,
 		food:        food,
+		task:        task,
 		parseModel:  parseModel,
 		parseEffort: parseEffort,
 		push:        newWebPushSender(db, pushOptions, logger),
@@ -89,6 +92,7 @@ type voiceWorkoutResponse struct {
 	ParseError    string   `json:"parse_error,omitempty"`
 	Domain        string   `json:"domain,omitempty"`
 	Food          string   `json:"food,omitempty"`
+	Task          string   `json:"task,omitempty"`
 	HevyWorkoutID string   `json:"hevy_workout_id,omitempty"`
 	PushError     string   `json:"push_error,omitempty"`
 	Message       string   `json:"message,omitempty"`
@@ -213,6 +217,8 @@ func (h *VoiceWorkoutHandler) processText(ctx context.Context, userID, eventID s
 		switch {
 		case interpreted.Domain == voiceDomainFood:
 			h.applyFood(ctx, userID, eventID, interpreted, &response)
+		case interpreted.Domain == voiceDomainTask:
+			h.applyTask(ctx, userID, eventID, interpreted, &response)
 		default:
 			if reply, known := voiceDomainReplies[interpreted.Domain]; known {
 				response.Message = reply

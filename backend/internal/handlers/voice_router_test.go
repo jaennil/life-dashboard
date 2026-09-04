@@ -48,7 +48,7 @@ func TestUnimplementedDomainsHaveAReply(t *testing.T) {
 	}
 	// Workout and food are implemented: they report what they actually did, and a
 	// canned "not supported" line would contradict the write that just happened.
-	for _, domain := range []string{voiceDomainWorkout, voiceDomainFood} {
+	for _, domain := range []string{voiceDomainWorkout, voiceDomainFood, voiceDomainTask} {
 		if voiceDomainReplies[domain] != "" {
 			t.Errorf("implemented domain %q still carries a not-supported reply", domain)
 		}

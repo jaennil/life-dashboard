@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func vInt(v int) *int        { return &v }
@@ -258,7 +259,7 @@ func TestDecodeParseResultHandlesLeadingProse(t *testing.T) {
 }
 
 func TestVoicePromptRequiresCompletePhraseCoverage(t *testing.T) {
-	prompt := buildVoiceParsePrompt(voiceTestCandidates, nil, nil, false)
+	prompt := buildVoiceParsePrompt(voiceTestCandidates, nil, nil, false, time.Now())
 	for _, rule := range []string{
 		"Каждое упоминание обязано быть представлено ровно один раз",
 		"на бицепс делал как обычно",

@@ -6,12 +6,13 @@ import (
 	"strings"
 )
 
-// Domains a dictated phrase can belong to. Only workout is implemented; the rest
-// exist so that a phrase about food or a stray thought is recognized as such and
+// Domains a dictated phrase can belong to. Workout, food and task are written
+// through; the rest exist so that a stray thought is recognized as such and
 // answered honestly instead of being forced into a workout.
 const (
 	voiceDomainWorkout = "workout"
 	voiceDomainFood    = "food"
+	voiceDomainTask    = "task"
 	voiceDomainNote    = "note"
 	voiceDomainWeight  = "weight"
 	voiceDomainUnknown = "unknown"
@@ -20,6 +21,7 @@ const (
 var voiceKnownDomains = map[string]bool{
 	voiceDomainWorkout: true,
 	voiceDomainFood:    true,
+	voiceDomainTask:    true,
 	voiceDomainNote:    true,
 	voiceDomainWeight:  true,
 }
@@ -119,6 +121,9 @@ func composeVoiceDisplay(response voiceWorkoutResponse) string {
 
 	if response.Food != "" {
 		parts = append(parts, response.Food)
+	}
+	if response.Task != "" {
+		parts = append(parts, response.Task)
 	}
 	if response.Workout != "" {
 		parts = append(parts, response.Workout)
