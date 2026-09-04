@@ -130,6 +130,14 @@ export async function deleteNoContent(path: string): Promise<void> {
   await request(path, { method: 'DELETE' })
 }
 
+export async function deleteJSON(path: string, body: unknown): Promise<void> {
+  await request(path, {
+    method: 'DELETE',
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+  })
+}
+
 export function dateRangeQuery(params: DateRangeParams = {}) {
   const p = new URLSearchParams()
   if (params.from) p.set('from', params.from)

@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'life-dashboard-v2'
+const CACHE_VERSION = 'life-dashboard-v3'
 const APP_SHELL_CACHE = `app-shell-${CACHE_VERSION}`
 const RUNTIME_CACHE = `runtime-${CACHE_VERSION}`
 const APP_SHELL_FILES = [
@@ -61,6 +61,40 @@ self.addEventListener('fetch', (event) => {
       const cache = await caches.open(RUNTIME_CACHE)
       cache.put(request, response.clone())
       return response
+    })
+  )
+})
+
+self.addEventListener('push', (event) => {
+  let notification = {
+    title: 'Life Dashboard',
+    body: 'Фоновая обработка завершена.',
+    url: '/input',
+    tag: 'input-result',
+  }
+  try {
+    notification = { ...notification, ...event.data.json() }
+  } catch {
+    // Keep the generic notification when a push service delivers no JSON body.
+  }
+
+  event.waitUntil(self.registration.showNotification(notification.title, {
+    body: notification.body,
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: notification.tag,
+    data: { url: notification.url },
+  }))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const target = new URL(event.notification.data?.url || '/input', self.location.origin).href
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((client) => client.url === target)
+      if (existing) return existing.focus()
+      return self.clients.openWindow(target)
     })
   )
 })

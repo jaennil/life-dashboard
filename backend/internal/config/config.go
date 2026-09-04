@@ -13,9 +13,16 @@ type Config struct {
 	AI         AIConfig         `mapstructure:"ai"`
 	Log        LogConfig        `mapstructure:"log"`
 	Sentry     SentryConfig     `mapstructure:"sentry"`
+	WebPush    WebPushConfig    `mapstructure:"web_push"`
 	Connectors ConnectorsConfig `mapstructure:"connectors"`
 	Weather    WeatherConfig    `mapstructure:"weather"`
 	Unleash    UnleashConfig    `mapstructure:"unleash"`
+}
+
+type WebPushConfig struct {
+	PublicKey  string `mapstructure:"public_key"`
+	PrivateKey string `mapstructure:"private_key"`
+	Subscriber string `mapstructure:"subscriber"`
 }
 
 type UnleashConfig struct {
@@ -157,6 +164,10 @@ func Load() (*Config, error) {
 	viper.BindEnv("sentry.environment", "SENTRY_ENVIRONMENT")
 	viper.BindEnv("sentry.release", "SENTRY_RELEASE")
 	viper.BindEnv("sentry.traces_sample_rate", "SENTRY_BACKEND_TRACES_SAMPLE_RATE")
+	viper.BindEnv("web_push.public_key", "WEB_PUSH_PUBLIC_KEY")
+	viper.BindEnv("web_push.private_key", "WEB_PUSH_PRIVATE_KEY")
+	viper.BindEnv("web_push.subscriber", "WEB_PUSH_SUBSCRIBER")
+	viper.SetDefault("web_push.subscriber", "mailto:admin@dubrovskih.ru")
 	viper.BindEnv("connectors.hevy.api_key", "HEVY_API_KEY")
 	viper.BindEnv("connectors.xiaomi.region", "XIAOMI_REGION")
 	viper.BindEnv("connectors.xiaomi.model", "XIAOMI_MODEL")

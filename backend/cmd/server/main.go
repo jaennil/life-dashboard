@@ -226,7 +226,12 @@ func main() {
 	// The lazy close in the webhook only fires when the next phrase arrives, so
 	// this sweep is what actually bounds a dictated session that was never
 	// finished out loud.
-	voiceSessions := handlers.NewVoiceWorkout(pool, aiHandler, hevy, fatSecretConn, cfg.AI.ParseModel, cfg.AI.ParseReasoningEffort, log.Logger)
+	voiceSessions := handlers.NewVoiceWorkout(pool, aiHandler, hevy, fatSecretConn, cfg.AI.ParseModel, cfg.AI.ParseReasoningEffort, handlers.WebPushOptions{
+		PublicKey: cfg.WebPush.PublicKey, PrivateKey: cfg.WebPush.PrivateKey, Subscriber: cfg.WebPush.Subscriber,
+	}, log.Logger)
+	inputWorkerCtx, stopInputWorker := context.WithCancel(context.Background())
+	defer stopInputWorker()
+	voiceSessions.StartInputWorker(inputWorkerCtx)
 	if err := sched.AddJob("0 */10 * * * *", "voice_workout_idle_close", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
@@ -254,7 +259,7 @@ func main() {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
 			if req.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -393,6 +398,11 @@ func main() {
 		r.Post("/api/v1/ai/checkup", aiHandler.Checkup)
 		r.Get("/api/v1/ai/checkup/latest", aiHandler.GetLatestCheckup)
 		r.Post("/api/v1/input", voiceSessions.ReceiveTypedText)
+		r.Get("/api/v1/input/jobs", voiceSessions.ListInputJobs)
+		r.Get("/api/v1/input/jobs/{jobID}", voiceSessions.GetInputJob)
+		r.Get("/api/v1/push/config", voiceSessions.GetPushConfig)
+		r.Post("/api/v1/push/subscriptions", voiceSessions.SavePushSubscription)
+		r.Delete("/api/v1/push/subscriptions", voiceSessions.DeletePushSubscription)
 
 		registerOAuthRoutes(r, authHandler, oauthRouteAvailability{
 			strava:         stravaConn != nil,

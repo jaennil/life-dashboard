@@ -46,10 +46,12 @@ type VoiceWorkoutHandler struct {
 	hevy workoutWriter
 	// food writes dictated meals straight to the FatSecret diary.
 	food   foodWriter
+	push   *webPushSender
+	wake   chan struct{}
 	logger zerolog.Logger
 }
 
-func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, hevy workoutWriter, food foodWriter, parseModel, parseEffort string, logger zerolog.Logger) *VoiceWorkoutHandler {
+func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, hevy workoutWriter, food foodWriter, parseModel, parseEffort string, pushOptions WebPushOptions, logger zerolog.Logger) *VoiceWorkoutHandler {
 	return &VoiceWorkoutHandler{
 		db:          db,
 		ai:          ai,
@@ -57,6 +59,8 @@ func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, hevy workoutWriter, food f
 		food:        food,
 		parseModel:  parseModel,
 		parseEffort: parseEffort,
+		push:        newWebPushSender(db, pushOptions, logger),
+		wake:        make(chan struct{}, 1),
 		logger:      logger.With().Str("handler", "voice_workout").Logger(),
 	}
 }
@@ -102,7 +106,7 @@ type voiceWorkoutResponse struct {
 //
 // POST /api/v1/webhook/voice-workout
 func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request) {
-	body, envelope, ok := readVoiceEnvelope(w, r)
+	_, envelope, ok := readVoiceEnvelope(w, r)
 	if !ok {
 		return
 	}
@@ -120,14 +124,14 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	h.receiveTextForUser(w, r, userID, body, envelope, false)
+	h.enqueueText(w, r, userID, envelope, false)
 }
 
 // ReceiveTypedText accepts text from the authenticated web application. It
 // deliberately shares all routing and write behavior with dictated input while
 // using the signed-in user instead of exposing a webhook API key to the browser.
 func (h *VoiceWorkoutHandler) ReceiveTypedText(w http.ResponseWriter, r *http.Request) {
-	body, envelope, ok := readVoiceEnvelope(w, r)
+	_, envelope, ok := readVoiceEnvelope(w, r)
 	if !ok {
 		return
 	}
@@ -138,7 +142,7 @@ func (h *VoiceWorkoutHandler) ReceiveTypedText(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	h.receiveTextForUser(w, r, userID, body, envelope, true)
+	h.enqueueText(w, r, userID, envelope, true)
 }
 
 func readVoiceEnvelope(w http.ResponseWriter, r *http.Request) ([]byte, voiceWorkoutEnvelope, bool) {
@@ -156,7 +160,7 @@ func readVoiceEnvelope(w http.ResponseWriter, r *http.Request) ([]byte, voiceWor
 	return body, envelope, true
 }
 
-func (h *VoiceWorkoutHandler) receiveTextForUser(w http.ResponseWriter, r *http.Request, userID string, body []byte, envelope voiceWorkoutEnvelope, typed bool) {
+func (h *VoiceWorkoutHandler) processText(ctx context.Context, userID, eventID string, envelope voiceWorkoutEnvelope, typed bool) (voiceWorkoutResponse, error) {
 	text := normalizeVoiceText(envelope.Text)
 	if !voiceHasContent(text) {
 		// Starting dictation and saying nothing is a normal thing to do at a
@@ -165,38 +169,17 @@ func (h *VoiceWorkoutHandler) receiveTextForUser(w http.ResponseWriter, r *http.
 		// and shows a system error dialog instead of our text. Nothing is archived
 		// and no model is called - there is nothing to interpret - but the phone
 		// gets a proper answer.
-		w.Header().Set("Content-Type", "application/json")
 		display := "Ничего не услышал. Повтори."
 		if typed {
 			display = "Нечего отправлять. Введи текст."
 		}
-		json.NewEncoder(w).Encode(voiceWorkoutResponse{
+		return voiceWorkoutResponse{
 			typed:   typed,
 			Status:  "ok",
 			Domain:  voiceDomainUnknown,
 			Heard:   text,
 			Display: display,
-		})
-		return
-	}
-
-	// Everything past this point runs on a context detached from the request.
-	//
-	// Parsing takes seconds, and a person at a machine who sees nothing happen
-	// simply triggers the shortcut again - which cancels the previous request. On
-	// the request context that cancellation threw away the interpretation of a
-	// phrase that had already been accepted and archived: observed live, two
-	// phrases ten seconds apart both lost their parse and their routing verdict.
-	// The phrase is stored either way, so the work has to survive the caller
-	// walking away.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), voiceWorkoutWorkBudget)
-	defer cancel()
-
-	// Archived before anything interprets it and before the domain is known, so a
-	// misclassified or not-yet-supported phrase still survives verbatim.
-	eventID, err := h.archivePhrase(ctx, userID, text, body)
-	if err != nil {
-		h.logger.Warn().Err(err).Str("user_id", userID).Msg("archive phrase")
+		}, nil
 	}
 
 	finish := envelope.Finish || looksLikeWorkoutFinish(text)
@@ -205,8 +188,7 @@ func (h *VoiceWorkoutHandler) receiveTextForUser(w http.ResponseWriter, r *http.
 	openSessionID, workoutOpen, err := h.findOpenSession(ctx, userID, now)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("find open session")
-		http.Error(w, "cannot read session", http.StatusInternalServerError)
-		return
+		return voiceWorkoutResponse{}, err
 	}
 
 	response := voiceWorkoutResponse{typed: typed, Status: "ok", Heard: text}
@@ -219,6 +201,12 @@ func (h *VoiceWorkoutHandler) receiveTextForUser(w http.ResponseWriter, r *http.
 		interpreted = h.classify(ctx, userID, spoken, openSessionID, workoutOpen, &response)
 	}
 	response.Domain = interpreted.Domain
+	// A parser failure is retried by the durable worker. Do not mutate a workout
+	// session on the fallback domain or the retry would append the phrase twice.
+	if response.ParseError != "" {
+		response.Display = composeVoiceDisplay(response)
+		return response, errors.New(response.ParseError)
+	}
 	if err := h.recordPhraseDomain(ctx, eventID, interpreted.Domain); err != nil {
 		h.logger.Warn().Err(err).Str("event_id", eventID).Msg("record phrase domain")
 	}
@@ -238,17 +226,14 @@ func (h *VoiceWorkoutHandler) receiveTextForUser(w http.ResponseWriter, r *http.
 		}
 		response.Display = composeVoiceDisplay(response)
 		h.logger.Info().Str("user_id", userID).Str("domain", interpreted.Domain).Msg("voice phrase routed")
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-		return
+		return response, nil
 	}
 
 	sessionID := openSessionID
 	if !workoutOpen {
 		if sessionID, err = h.createSession(ctx, userID, now); err != nil {
 			h.logger.Error().Err(err).Str("user_id", userID).Msg("create session")
-			http.Error(w, "cannot open session", http.StatusInternalServerError)
-			return
+			return response, err
 		}
 	} else if err := h.touchSession(ctx, sessionID, now); err != nil {
 		h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("touch session")
@@ -258,8 +243,7 @@ func (h *VoiceWorkoutHandler) receiveTextForUser(w http.ResponseWriter, r *http.
 
 	if err := h.appendUtterance(ctx, sessionID, text, finish, now); err != nil {
 		h.logger.Error().Err(err).Str("session_id", sessionID).Msg("append utterance")
-		http.Error(w, "cannot store utterance", http.StatusInternalServerError)
-		return
+		return response, err
 	}
 
 	if interpreted.Parsed != nil {
@@ -276,8 +260,7 @@ func (h *VoiceWorkoutHandler) receiveTextForUser(w http.ResponseWriter, r *http.
 		title := h.generateTitle(ctx, sessionID)
 		if err := h.finishSession(ctx, sessionID, now, title); err != nil {
 			h.logger.Error().Err(err).Str("session_id", sessionID).Msg("finish session")
-			http.Error(w, "cannot finish session", http.StatusInternalServerError)
-			return
+			return response, err
 		}
 		response.Title = title
 		h.pushSession(ctx, userID, sessionID, &response)
@@ -294,8 +277,7 @@ func (h *VoiceWorkoutHandler) receiveTextForUser(w http.ResponseWriter, r *http.
 		Bool("finished", finish).Int("utterances", count).
 		Int("unmatched", len(response.Unmatched)).Msg("voice phrase stored")
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	return response, nil
 }
 
 // findOpenSession returns the user's open workout session if there is a live one,

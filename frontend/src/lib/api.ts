@@ -1,6 +1,7 @@
 import {
   collectionQuery,
   dateRangeQuery,
+  deleteJSON,
   deleteNoContent,
   get,
   patchJSON,
@@ -514,6 +515,7 @@ export interface HealthAPIKeyInfo {
 }
 
 export interface QuickInputResponse {
+	job_id?: string
   status: string
   display: string
   domain?: string
@@ -522,6 +524,22 @@ export interface QuickInputResponse {
   workout?: string
   parse_error?: string
   push_error?: string
+}
+
+export interface InputJob {
+  id: string
+  text: string
+  status: 'queued' | 'processing' | 'succeeded' | 'failed'
+  attempts: number
+  result?: QuickInputResponse
+  last_error?: string
+  created_at: string
+  completed_at?: string
+}
+
+export interface PushConfig {
+  enabled: boolean
+  public_key: string
 }
 
 export const api = {
@@ -635,6 +653,13 @@ export const api = {
     postJSON<HealthAPIKeyInfo>('/health/apikey'),
   submitQuickInput: (text: string) =>
     postJSON<QuickInputResponse>('/input', { text }),
+  getInputJobs: () => get<InputJob[]>('/input/jobs'),
+  getInputJob: (id: string) => get<InputJob>('/input/jobs/' + encodeURIComponent(id)),
+  getPushConfig: () => get<PushConfig>('/push/config'),
+  savePushSubscription: (subscription: PushSubscriptionJSON) =>
+    postNoContent('/push/subscriptions', subscription),
+  deletePushSubscription: (endpoint: string) =>
+    deleteJSON('/push/subscriptions', { endpoint }),
   getWeather: (lat?: number, lon?: number, city?: string) => {
     const params = new URLSearchParams()
     if (lat != null) params.set('lat', String(lat))
