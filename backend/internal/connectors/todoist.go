@@ -32,7 +32,10 @@ const (
 var errTodoistCompletedArchiveUnavailable = errors.New("todoist completed archive unavailable")
 var errTodoistCompletedArchiveTemporaryUnavailable = errors.New("todoist completed archive temporary unavailable")
 
-type todoistDB interface {
+// connectorDB is the slice of pgx a connector needs to write its rows, so the
+// same helpers run against the pool and inside a transaction. Shared by every
+// connector in this package.
+type connectorDB interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
@@ -444,7 +447,7 @@ func (t *TodoistConnector) do(req *http.Request, allowCompletedArchiveUnavailabl
 	return respBody, nil
 }
 
-func (t *TodoistConnector) upsertTask(ctx context.Context, db todoistDB, userID string, task todoistItem, raw []byte, projects map[string]string, sections map[string]todoistSection) error {
+func (t *TodoistConnector) upsertTask(ctx context.Context, db connectorDB, userID string, task todoistItem, raw []byte, projects map[string]string, sections map[string]todoistSection) error {
 	if _, err := db.Exec(ctx, `
 		INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
 		VALUES ('todoist', 'active_task', $1, $2, $3)
@@ -508,7 +511,7 @@ func (t *TodoistConnector) upsertTask(ctx context.Context, db todoistDB, userID 
 	return nil
 }
 
-func (t *TodoistConnector) upsertTaskAsHabit(ctx context.Context, db todoistDB, userID string, task todoistItem, raw []byte, projects map[string]string, sections map[string]todoistSection) (string, error) {
+func (t *TodoistConnector) upsertTaskAsHabit(ctx context.Context, db connectorDB, userID string, task todoistItem, raw []byte, projects map[string]string, sections map[string]todoistSection) (string, error) {
 	if _, err := db.Exec(ctx, `
 		INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
 		VALUES ('todoist', 'task', $1, $2, $3)
@@ -661,7 +664,7 @@ func todoistGoalJSON(task todoistItem) []byte {
 	return data
 }
 
-func (t *TodoistConnector) archiveMissingHabits(ctx context.Context, db todoistDB, userID string, activeIDs []string) error {
+func (t *TodoistConnector) archiveMissingHabits(ctx context.Context, db connectorDB, userID string, activeIDs []string) error {
 	if _, err := db.Exec(ctx, `
 		UPDATE habits
 		SET archived = TRUE
@@ -674,7 +677,7 @@ func (t *TodoistConnector) archiveMissingHabits(ctx context.Context, db todoistD
 	return nil
 }
 
-func (t *TodoistConnector) markInactiveTasks(ctx context.Context, db todoistDB, userID string, activeIDs []string) error {
+func (t *TodoistConnector) markInactiveTasks(ctx context.Context, db connectorDB, userID string, activeIDs []string) error {
 	_, err := db.Exec(ctx, `
 		UPDATE tasks
 		SET is_active = FALSE, updated_at = NOW()
@@ -685,7 +688,7 @@ func (t *TodoistConnector) markInactiveTasks(ctx context.Context, db todoistDB, 
 	return err
 }
 
-func (t *TodoistConnector) upsertCompletionEvents(ctx context.Context, db todoistDB, userID string, events []todoistCompletionEvent, projects map[string]string, sections map[string]todoistSection) error {
+func (t *TodoistConnector) upsertCompletionEvents(ctx context.Context, db connectorDB, userID string, events []todoistCompletionEvent, projects map[string]string, sections map[string]todoistSection) error {
 	for _, event := range events {
 		if _, err := db.Exec(ctx, `
 			INSERT INTO raw_events (source, event_type, external_id, payload, user_id)
@@ -729,7 +732,7 @@ func (t *TodoistConnector) upsertCompletionEvents(ctx context.Context, db todois
 	return nil
 }
 
-func (t *TodoistConnector) clearRecentStatuses(ctx context.Context, db todoistDB, userID string, since time.Time) error {
+func (t *TodoistConnector) clearRecentStatuses(ctx context.Context, db connectorDB, userID string, since time.Time) error {
 	_, err := db.Exec(ctx, `
 		DELETE FROM habit_daily_statuses s
 		USING habits h
@@ -741,7 +744,7 @@ func (t *TodoistConnector) clearRecentStatuses(ctx context.Context, db todoistDB
 	return err
 }
 
-func (t *TodoistConnector) upsertCompletionStatus(ctx context.Context, db todoistDB, userID, habitID string, event todoistCompletionEvent) error {
+func (t *TodoistConnector) upsertCompletionStatus(ctx context.Context, db connectorDB, userID, habitID string, event todoistCompletionEvent) error {
 	_, err := db.Exec(ctx, `
 		INSERT INTO habit_daily_statuses (habit_id, target_date, status, current_value, target_value, unit_type, periodicity, raw_payload)
 		VALUES ($1, $2, 'completed', 1, 1, 'task', 'daily', $3)
@@ -777,7 +780,7 @@ func (t *TodoistConnector) getLastSync(ctx context.Context, userID string) (time
 	return ts, nil
 }
 
-func (t *TodoistConnector) updateLastSync(ctx context.Context, db todoistDB, userID string) error {
+func (t *TodoistConnector) updateLastSync(ctx context.Context, db connectorDB, userID string) error {
 	_, err := db.Exec(ctx, `
 		INSERT INTO sync_state (source, last_synced_at, updated_at, enabled, user_id)
 		VALUES ('todoist', NOW(), NOW(), TRUE, $1)

@@ -92,6 +92,10 @@ func main() {
 		log.Info().Msg("todoist connector enabled (token-only, no OAuth)")
 	}
 
+	vikunja := connectors.NewVikunja(pool, log.Logger)
+	activeConnectors = append(activeConnectors, vikunja)
+	log.Info().Msg("vikunja connector enabled")
+
 	hevy := connectors.NewHevy(pool, log.Logger)
 	activeConnectors = append(activeConnectors, hevy)
 	log.Info().Msg("hevy connector enabled")
@@ -328,6 +332,7 @@ func main() {
 			"apple_health":    true,
 			"habitify":        true,
 			"todoist":         true,
+			"vikunja":         true,
 			"zenmoney":        true,
 			"myfitnesspal":    mfpEnabled,
 			"fatsecret":       fsc.ClientID != "" && fsc.ClientSecret != "",

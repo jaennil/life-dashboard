@@ -158,7 +158,7 @@ func sourceIntervalForActivity(source string, now time.Time, lastActiveAt *time.
 
 func sourceInterval(source string, tier string) (time.Duration, bool) {
 	switch source {
-	case "todoist", "google_calendar":
+	case "todoist", "vikunja", "google_calendar":
 		switch tier {
 		case "hot":
 			return time.Hour, true

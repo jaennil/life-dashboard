@@ -42,7 +42,7 @@ type integrationMeta struct {
 	countQuery  string
 }
 
-var knownIntegrations = []string{"strava", "hevy", "apple_health", "habitify", "todoist", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion", "xiaomi_scale", "ios_screentime", "zepp"}
+var knownIntegrations = []string{"strava", "hevy", "apple_health", "habitify", "todoist", "vikunja", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion", "xiaomi_scale", "ios_screentime", "zepp"}
 
 var personalIntegrations = map[string]bool{
 	"strava":          true,
@@ -50,6 +50,7 @@ var personalIntegrations = map[string]bool{
 	"apple_health":    true,
 	"habitify":        true,
 	"todoist":         true,
+	"vikunja":         true,
 	"zenmoney":        true,
 	"myfitnesspal":    true,
 	"fatsecret":       true,
@@ -63,10 +64,21 @@ var manualTokenIntegrations = map[string]bool{
 	"hevy":         true,
 	"habitify":     true,
 	"todoist":      true,
+	"vikunja":      true,
 	"notion":       true,
 	"zenmoney":     true,
 	"xiaomi_scale": true,
 	"zepp":         true,
+}
+
+// secondCredentialIntegrations need more than a token to work, and keep it in
+// oauth_tokens.refresh_token: a Notion database id, a Xiaomi or Zepp login, the
+// URL of a self-hosted Vikunja. A row without it is not a connected integration.
+var secondCredentialIntegrations = map[string]bool{
+	"notion":       true,
+	"xiaomi_scale": true,
+	"zepp":         true,
+	"vikunja":      true,
 }
 
 var integrationMeta_ = map[string]integrationMeta{
@@ -94,6 +106,11 @@ var integrationMeta_ = map[string]integrationMeta{
 		displayName: "Todoist",
 		description: "Задачи, recurring tasks и productivity-аналитика из Todoist",
 		countQuery:  "SELECT COUNT(*) FROM tasks WHERE source='todoist' AND is_active = TRUE AND user_id = $1",
+	},
+	"vikunja": {
+		displayName: "Vikunja",
+		description: "Задачи и проекты из собственного Vikunja: чтение и создание",
+		countQuery:  "SELECT COUNT(*) FROM tasks WHERE source='vikunja' AND is_active = TRUE AND user_id = $1",
 	},
 	"zenmoney": {
 		displayName: "ZenMoney",
@@ -181,7 +198,7 @@ func (h *IntegrationsHandler) GetIntegrations(w http.ResponseWriter, r *http.Req
 			var source string
 			var refreshToken string
 			if err := tokenRows.Scan(&source, &refreshToken); err == nil {
-				hasCredentials[source] = source != "notion" || refreshToken != ""
+				hasCredentials[source] = !secondCredentialIntegrations[source] || refreshToken != ""
 			}
 		}
 		tokenRows.Close()
@@ -352,6 +369,7 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 		Token      string `json:"token"`
 		DatabaseID string `json:"database_id,omitempty"`
 		AccountID  string `json:"account_id,omitempty"`
+		BaseURL    string `json:"base_url,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Token == "" {
 		http.Error(w, "token is required", http.StatusBadRequest)
@@ -369,6 +387,10 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "account_id is required", http.StatusBadRequest)
 		return
 	}
+	if name == "vikunja" && body.BaseURL == "" {
+		http.Error(w, "base_url is required", http.StatusBadRequest)
+		return
+	}
 
 	ctx := r.Context()
 	userID := ctx.Value(authmw.UserIDKey).(string)
@@ -382,6 +404,9 @@ func (h *IntegrationsHandler) SaveToken(w http.ResponseWriter, r *http.Request) 
 	case "zepp":
 		// token is the Zepp password, account_id the login.
 		refreshToken = body.AccountID
+	case "vikunja":
+		// Self-hosted, so the instance to talk to is part of the credentials.
+		refreshToken = body.BaseURL
 	}
 
 	_, err := h.db.Exec(ctx, `
@@ -440,8 +465,7 @@ func hasStoredCredentials(ctx context.Context, db *pgxpool.Pool, source string, 
 
 	query := `SELECT 1 FROM oauth_tokens WHERE source = $1 AND user_id = $2 LIMIT 1`
 	args := []any{source, userID}
-	// Both of these need their second credential, not just the token.
-	if source == "notion" || source == "xiaomi_scale" || source == "zepp" {
+	if secondCredentialIntegrations[source] {
 		query = `SELECT 1 FROM oauth_tokens WHERE source = $1 AND user_id = $2 AND refresh_token <> '' LIMIT 1`
 	}
 
