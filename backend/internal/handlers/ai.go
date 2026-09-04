@@ -72,9 +72,10 @@ func (h *AIHandler) Complete(ctx context.Context, operation string, messages []C
 	return h.complete(ctx, operation, messages)
 }
 
-// CompleteWithModel is Complete with the model and reasoning effort overridden
-// for this call. Empty values keep the configured defaults, so a caller can pass
-// through whatever it was given without checking it first.
+// CompleteWithModel is Complete with model-specific settings. An explicit model
+// starts with no reasoning effort unless one is supplied: a fast extraction
+// model must not accidentally inherit the main chat model's expensive setting.
+// With no model override, an empty effort keeps all configured defaults.
 func (h *AIHandler) CompleteWithModel(ctx context.Context, operation string, messages []ChatMessage, model, effort string) (string, error) {
 	if model == "" && effort == "" {
 		return h.complete(ctx, operation, messages)
@@ -83,8 +84,9 @@ func (h *AIHandler) CompleteWithModel(ctx context.Context, operation string, mes
 	override := *h
 	if model != "" {
 		override.opts.Model = model
+		override.opts.ReasoningEffort = effort
 	}
-	if effort != "" {
+	if model == "" && effort != "" {
 		override.opts.ReasoningEffort = effort
 	}
 	return override.complete(ctx, operation, messages)

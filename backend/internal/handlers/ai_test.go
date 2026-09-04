@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -494,6 +497,34 @@ func TestUpstreamBodySendsConfiguredReasoningEffort(t *testing.T) {
 	}
 	if payload["stream"] != false {
 		t.Fatalf("stream = %v, want false", payload["stream"])
+	}
+}
+
+func TestModelOverrideDoesNotInheritReasoningEffort(t *testing.T) {
+	var payload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer server.Close()
+
+	h := NewAI(nil, AIOptions{
+		BaseURL:         server.URL,
+		Model:           "reasoning-model",
+		ReasoningEffort: "high",
+	}, nil, nil, zerolog.Nop())
+
+	if _, err := h.CompleteWithModel(context.Background(), "test", nil, "fast-model", ""); err != nil {
+		t.Fatalf("CompleteWithModel: %v", err)
+	}
+	if payload["model"] != "fast-model" {
+		t.Fatalf("model = %v, want fast-model", payload["model"])
+	}
+	if _, present := payload["reasoning_effort"]; present {
+		t.Fatalf("reasoning_effort leaked into model override: %v", payload["reasoning_effort"])
 	}
 }
 
