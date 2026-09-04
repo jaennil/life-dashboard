@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -208,7 +209,7 @@ func (h *VoiceWorkoutHandler) processNextInputNotification(ctx context.Context) 
 	}
 
 	success := job.Result.Status != "failed"
-	if err := h.push.sendInputResult(ctx, job.UserID, job.ID, job.Result.Display, success); err != nil {
+	if err := h.push.sendInputResult(ctx, job.UserID, job.ID, inputNotificationBody(job.Result.Display), success); err != nil {
 		delay := time.Duration(job.Attempts) * time.Minute
 		if delay > time.Hour {
 			delay = time.Hour
@@ -227,6 +228,14 @@ func (h *VoiceWorkoutHandler) processNextInputNotification(ctx context.Context) 
 		h.logger.Error().Err(err).Str("job_id", job.ID).Msg("complete input notification")
 	}
 	return true
+}
+
+func inputNotificationBody(display string) string {
+	first, rest, found := strings.Cut(display, "\n")
+	if found && (strings.HasPrefix(first, "Услышал: ") || strings.HasPrefix(first, "Введено: ")) {
+		return rest
+	}
+	return display
 }
 
 func (h *VoiceWorkoutHandler) claimInputNotification(ctx context.Context) (inputNotificationJob, error) {
