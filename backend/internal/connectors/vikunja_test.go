@@ -158,6 +158,42 @@ func TestVikunjaSyncStart(t *testing.T) {
 	}
 }
 
+func TestVikunjaFetchProjectsSkipsSavedFilters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/projects" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("is_archived"); got != "true" {
+			t.Errorf("expected archived projects to be requested, got %q", got)
+		}
+		w.Header().Set(vikunjaTotalPagesHeader, "1")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"id":1,"title":"Inbox"},{"id":-2,"title":"My Open Tasks"},{"id":4,"title":"citroen","is_archived":true}]`)
+	}))
+	defer server.Close()
+
+	connector := NewVikunja(nil, zerolog.Nop())
+	apiURL, err := vikunjaAPIURL(server.URL)
+	if err != nil {
+		t.Fatalf("api url: %v", err)
+	}
+
+	projects, err := connector.fetchProjects(context.Background(), vikunjaCredentials{apiURL: apiURL, token: "tk_test"})
+	if err != nil {
+		t.Fatalf("fetch projects: %v", err)
+	}
+
+	if len(projects) != 2 {
+		t.Fatalf("expected the saved filter to be dropped, got %d projects", len(projects))
+	}
+	if _, ok := projects[-2]; ok {
+		t.Fatalf("saved filter reached the project map")
+	}
+	if !projects[4].IsArchived {
+		t.Fatalf("expected an archived project to be kept and marked archived")
+	}
+}
+
 func TestVikunjaFetchTasksFollowsPagination(t *testing.T) {
 	var gotFilters []string
 	var gotPages []string

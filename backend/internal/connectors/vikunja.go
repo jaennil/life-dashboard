@@ -299,6 +299,12 @@ func (v *VikunjaConnector) fetchProjects(ctx context.Context, creds vikunjaCrede
 			return nil, fmt.Errorf("decode vikunja projects: %w", err)
 		}
 		for _, project := range batch {
+			// Saved filters are served as projects with a negative id ("My Open
+			// Tasks" and friends). They hold no tasks of their own and refuse a
+			// create, so they must not reach the project picker.
+			if project.ID <= 0 {
+				continue
+			}
 			projects[project.ID] = project
 		}
 
