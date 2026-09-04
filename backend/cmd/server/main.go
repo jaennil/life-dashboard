@@ -395,6 +395,11 @@ func main() {
 		r.Delete("/api/v1/productivity/habits/{habitID}", productivityHandler.DeleteHabit)
 		r.Post("/api/v1/productivity/habits/{habitID}/status", productivityHandler.SetHabitStatus)
 
+		productivityTasksHandler := handlers.NewProductivityTasks(pool, vikunja, log.Logger)
+		r.Post("/api/v1/productivity/tasks", productivityTasksHandler.CreateTask)
+		r.Post("/api/v1/productivity/tasks/{taskID}/complete", productivityTasksHandler.CompleteTask)
+		r.Get("/api/v1/productivity/vikunja/projects", productivityTasksHandler.GetVikunjaProjects)
+
 		r.Get("/api/v1/weather", weatherHandler.GetWeather)
 
 		r.Get("/api/v1/ai/history", aiHandler.GetHistory)

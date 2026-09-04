@@ -3,6 +3,7 @@ package connectors
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,8 +32,16 @@ const (
 	vikunjaUnsetTimePrefix = "0001-01-01"
 )
 
+// ErrVikunjaNotConnected separates "this user has not set Vikunja up" from a
+// call that reached the instance and failed there, so a handler can answer the
+// first with a nudge to Settings instead of a gateway error.
+var ErrVikunjaNotConnected = errors.New("vikunja is not connected")
+
 type vikunjaCredentials struct {
+	// apiURL ends in /api/v1; webURL is the same instance without it, and is
+	// what a task link has to point at.
 	apiURL string
+	webURL string
 	token  string
 }
 
@@ -225,14 +234,18 @@ func (v *VikunjaConnector) loadCredentials(ctx context.Context, userID string) (
 		SELECT access_token, refresh_token FROM oauth_tokens WHERE source = 'vikunja' AND user_id = $1
 	`, userID).Scan(&token, &baseURL)
 	if err != nil || strings.TrimSpace(token) == "" {
-		return vikunjaCredentials{}, fmt.Errorf("no Vikunja credentials — add your instance URL and API token in Settings")
+		return vikunjaCredentials{}, fmt.Errorf("%w: add the instance URL and API token in Settings", ErrVikunjaNotConnected)
 	}
 
 	apiURL, err := vikunjaAPIURL(baseURL)
 	if err != nil {
 		return vikunjaCredentials{}, err
 	}
-	return vikunjaCredentials{apiURL: apiURL, token: strings.TrimSpace(token)}, nil
+	return vikunjaCredentials{
+		apiURL: apiURL,
+		webURL: strings.TrimSuffix(apiURL, "/api/v1"),
+		token:  strings.TrimSpace(token),
+	}, nil
 }
 
 // vikunjaAPIURL turns whatever was pasted into Settings into an API base.
@@ -242,7 +255,7 @@ func (v *VikunjaConnector) loadCredentials(ctx context.Context, userID string) (
 func vikunjaAPIURL(raw string) (string, error) {
 	trimmed := strings.TrimRight(strings.TrimSpace(raw), "/")
 	if trimmed == "" {
-		return "", fmt.Errorf("no Vikunja instance URL — add it in Settings")
+		return "", fmt.Errorf("%w: the instance URL is missing", ErrVikunjaNotConnected)
 	}
 	if !strings.Contains(trimmed, "://") {
 		trimmed = "https://" + trimmed
