@@ -336,9 +336,10 @@ erDiagram
         varchar periodicity
     }
 
-    todoist_tasks {
+    tasks {
         uuid id PK
         uuid user_id FK
+        varchar source
         varchar external_id
         varchar parent_external_id
         varchar project_external_id
@@ -353,9 +354,10 @@ erDiagram
         timestamptz last_completed_at
     }
 
-    todoist_task_completions {
+    task_completions {
         uuid id PK
         uuid user_id FK
+        varchar source
         varchar task_external_id
         timestamptz completed_at
         text content
@@ -464,8 +466,8 @@ erDiagram
     sleep_sessions o|--o{ sleep_stages : contains
     users ||--o{ habits : tracks
     habits ||--o{ habit_daily_statuses : records
-    users ||--o{ todoist_tasks : owns
-    users ||--o{ todoist_task_completions : completes
+    users ||--o{ tasks : owns
+    users ||--o{ task_completions : completes
     users ||--o{ screen_time_daily : summarizes
     users ||--o{ screen_time_app_usage : accumulates
     users ||--o{ journal_entries : writes
@@ -1062,50 +1064,52 @@ Daily progress and completion state for each habit.
 | `raw_payload` | `jsonb`, nullable | Original provider status object. |
 | `created_at` | `timestamptz`, nullable | Local insertion time. |
 
-#### `todoist_tasks`
+#### `tasks`
 
-Current Todoist task state, including active and recently completed tasks.
+Current task state across every task provider, including active and recently completed tasks.
 
 | Column | Type | Description |
 | --- | --- | --- |
 | `id` | `uuid` | Primary key. |
 | `user_id` | `uuid` | Task owner; references `users.id`. |
-| `external_id` | `varchar(255)` | Todoist task identifier, unique per user. |
-| `parent_external_id` | `varchar(255)`, nullable | Todoist parent-task identifier; no database FK is enforced. |
-| `project_external_id` | `varchar(255)`, nullable | Todoist project identifier. |
+| `source` | `varchar(50)` | Task provider: `todoist` or `vikunja`. |
+| `external_id` | `varchar(255)` | Provider task identifier, unique per user and source. |
+| `parent_external_id` | `varchar(255)`, nullable | Provider parent-task identifier; no database FK is enforced. |
+| `project_external_id` | `varchar(255)`, nullable | Provider project identifier. |
 | `project_name` | `varchar(255)`, nullable | Project display name. |
-| `section_external_id` | `varchar(255)`, nullable | Todoist section identifier. |
+| `section_external_id` | `varchar(255)`, nullable | Provider section identifier; Vikunja reports the kanban bucket here. |
 | `section_name` | `varchar(255)`, nullable | Section display name. |
 | `content` | `text` | Task title. |
 | `description` | `text`, nullable | Task description. |
-| `labels` | `text[]` | Todoist labels. |
-| `priority` | `integer`, nullable | Todoist priority value. |
+| `labels` | `text[]` | Provider labels. |
+| `priority` | `integer`, nullable | Priority normalized to the Todoist scale: 1 lowest, 4 urgent. |
 | `is_recurring` | `boolean` | Whether the due rule repeats. |
 | `is_active` | `boolean` | Whether the task remains active. |
-| `added_at` | `timestamptz`, nullable | Time the task was added in Todoist. |
+| `added_at` | `timestamptz`, nullable | Time the task was created in the provider. |
 | `due_at` | `timestamptz`, nullable | Due time when the task has a time-specific deadline. |
 | `due_date` | `date`, nullable | Due calendar date. |
-| `due_string` | `varchar(255)`, nullable | Human-readable Todoist due expression. |
+| `due_string` | `varchar(255)`, nullable | Human-readable due expression from the provider. |
 | `due_timezone` | `varchar(100)`, nullable | Time zone attached to the due time. |
 | `last_completed_at` | `timestamptz`, nullable | Most recent known completion time. |
 | `raw_payload` | `jsonb`, nullable | Original provider task object. |
 | `updated_at` | `timestamptz`, nullable | Last local update time. |
 | `created_at` | `timestamptz`, nullable | Local insertion time. |
 
-#### `todoist_task_completions`
+#### `task_completions`
 
-Immutable Todoist completion events used for productivity history.
+Immutable completion events used for productivity history.
 
 | Column | Type | Description |
 | --- | --- | --- |
 | `id` | `uuid` | Primary key. |
 | `user_id` | `uuid` | Completion owner; references `users.id`. |
-| `task_external_id` | `varchar(255)` | Todoist task identifier. |
-| `completed_at` | `timestamptz` | Completion time; unique together with user and task identifier. |
+| `source` | `varchar(50)` | Task provider: `todoist` or `vikunja`. |
+| `task_external_id` | `varchar(255)` | Provider task identifier. |
+| `completed_at` | `timestamptz` | Completion time; unique together with user, source and task identifier. |
 | `content` | `text`, nullable | Task title captured at completion. |
-| `project_external_id` | `varchar(255)`, nullable | Todoist project identifier captured at completion. |
+| `project_external_id` | `varchar(255)`, nullable | Provider project identifier captured at completion. |
 | `project_name` | `varchar(255)`, nullable | Project name captured at completion. |
-| `section_external_id` | `varchar(255)`, nullable | Todoist section identifier captured at completion. |
+| `section_external_id` | `varchar(255)`, nullable | Provider section identifier captured at completion. |
 | `section_name` | `varchar(255)`, nullable | Section name captured at completion. |
 | `is_recurring` | `boolean` | Whether the completed task recurs. |
 | `raw_payload` | `jsonb`, nullable | Original provider completion object. |

@@ -43,7 +43,7 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 	staleCondition := productivityStaleConditionExpr(3, 6)
 
 	data := AIProductivityOverviewData{
-		Source: "todoist_tasks + todoist_task_completions",
+		Source: "tasks + task_completions",
 	}
 
 	if err := h.db.QueryRow(ctx, fmt.Sprintf(`
@@ -72,7 +72,7 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 			),
 			COUNT(*) FILTER (WHERE is_active = TRUE AND is_recurring = TRUE),
 			COUNT(*) FILTER (WHERE is_active = TRUE AND %s)
-		FROM todoist_tasks
+		FROM tasks
 		WHERE user_id = $1
 	`, staleCondition), userID, now, todayStart, tomorrowStart, nextWeekStart, staleBefore).Scan(
 		&data.Summary.ActiveTotal,
@@ -90,7 +90,7 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 			COUNT(*) FILTER (WHERE completed_at >= $2 AND completed_at < $3),
 			COUNT(*) FILTER (WHERE completed_at >= $4 AND completed_at < $5),
 			COUNT(*) FILTER (WHERE completed_at >= $6 AND completed_at < $5)
-		FROM todoist_task_completions
+		FROM task_completions
 		WHERE user_id = $1
 	`, userID, start, end, todayStart, tomorrowStart, todayStart.AddDate(0, 0, -6)).Scan(
 		&data.CompletedInWindow,
@@ -102,7 +102,7 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 
 	loadRows, err := h.db.Query(ctx, `
 		SELECT COALESCE(due_at::date, due_date) AS day, COUNT(*)
-		FROM todoist_tasks
+		FROM tasks
 		WHERE user_id = $1
 			AND is_active = TRUE
 			AND COALESCE(due_at::date, due_date) >= $2::date
@@ -146,7 +146,7 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 			due_at,
 			due_date::timestamp,
 			last_completed_at
-		FROM todoist_tasks
+		FROM tasks
 		WHERE user_id = $1
 			AND is_active = TRUE
 			AND (
@@ -201,7 +201,7 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 
 	completedRows, err := h.db.Query(ctx, `
 		SELECT completed_at, COALESCE(content, ''), COALESCE(project_name, '')
-		FROM todoist_task_completions
+		FROM task_completions
 		WHERE user_id = $1
 			AND completed_at >= $2
 			AND completed_at < $3
@@ -231,7 +231,7 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 func renderProductivityOverviewText(title string, data AIProductivityOverviewData) string {
 	var sb strings.Builder
 	sb.WriteString(title + "\n")
-	sb.WriteString("Источник: Todoist. Просрочка и план задач считаются только по todoist_tasks, завершения — по todoist_task_completions.\n")
+	sb.WriteString("Источник: Todoist. Просрочка и план задач считаются только по tasks, завершения — по task_completions.\n")
 	sb.WriteString(fmt.Sprintf("Активных задач: %d | overdue: %d | сегодня: %d | ближайшие 7 дней: %d | recurring: %d | давно висят: %d\n",
 		data.Summary.ActiveTotal,
 		data.Summary.OverdueTotal,

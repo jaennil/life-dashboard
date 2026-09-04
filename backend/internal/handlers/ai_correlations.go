@@ -125,7 +125,7 @@ func (h *AIHandler) buildDailySeries(ctx context.Context, userID string, days in
 		),
 		tasks AS (
 			SELECT DATE(completed_at) AS day, COUNT(*) AS done
-			FROM todoist_task_completions
+			FROM task_completions
 			WHERE user_id = $1 AND DATE(completed_at) BETWEEN $2::date AND $3::date
 			GROUP BY 1
 		),

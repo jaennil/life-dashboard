@@ -457,14 +457,14 @@ func (t *TodoistConnector) upsertTask(ctx context.Context, db todoistDB, userID 
 	dueAt, dueDate, dueString, dueTimezone, isRecurring := todoistDueFields(task.Due)
 
 	_, err := db.Exec(ctx, `
-		INSERT INTO todoist_tasks (
-			user_id, external_id, parent_external_id, project_external_id, project_name,
+		INSERT INTO tasks (
+			user_id, source, external_id, parent_external_id, project_external_id, project_name,
 			section_external_id, section_name, content, description, labels, priority,
 			is_recurring, is_active, added_at, due_at, due_date, due_string, due_timezone,
 			raw_payload, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE, $13, $14, $15, $16, $17, $18, NOW())
-		ON CONFLICT (user_id, external_id) DO UPDATE SET
+		VALUES ($1, 'todoist', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE, $13, $14, $15, $16, $17, $18, NOW())
+		ON CONFLICT (user_id, source, external_id) DO UPDATE SET
 			parent_external_id = EXCLUDED.parent_external_id,
 			project_external_id = EXCLUDED.project_external_id,
 			project_name = EXCLUDED.project_name,
@@ -476,7 +476,7 @@ func (t *TodoistConnector) upsertTask(ctx context.Context, db todoistDB, userID 
 			priority = EXCLUDED.priority,
 			is_recurring = EXCLUDED.is_recurring,
 			is_active = TRUE,
-			added_at = COALESCE(EXCLUDED.added_at, todoist_tasks.added_at),
+			added_at = COALESCE(EXCLUDED.added_at, tasks.added_at),
 			due_at = EXCLUDED.due_at,
 			due_date = EXCLUDED.due_date,
 			due_string = EXCLUDED.due_string,
@@ -676,9 +676,10 @@ func (t *TodoistConnector) archiveMissingHabits(ctx context.Context, db todoistD
 
 func (t *TodoistConnector) markInactiveTasks(ctx context.Context, db todoistDB, userID string, activeIDs []string) error {
 	_, err := db.Exec(ctx, `
-		UPDATE todoist_tasks
+		UPDATE tasks
 		SET is_active = FALSE, updated_at = NOW()
 		WHERE user_id = $1
+			AND source = 'todoist'
 			AND NOT (external_id = ANY($2))
 	`, userID, activeIDs)
 	return err
@@ -695,13 +696,13 @@ func (t *TodoistConnector) upsertCompletionEvents(ctx context.Context, db todois
 
 		projectName, sectionName := todoistProjectSectionNames(event.ProjectID, event.SectionID, projects, sections)
 		if _, err := db.Exec(ctx, `
-			INSERT INTO todoist_task_completions (
-				user_id, task_external_id, completed_at, content,
+			INSERT INTO task_completions (
+				user_id, source, task_external_id, completed_at, content,
 				project_external_id, project_name, section_external_id, section_name,
 				is_recurring, raw_payload
 			)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-			ON CONFLICT (user_id, task_external_id, completed_at) DO UPDATE SET
+			VALUES ($1, 'todoist', $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			ON CONFLICT (user_id, source, task_external_id, completed_at) DO UPDATE SET
 				content = EXCLUDED.content,
 				project_external_id = EXCLUDED.project_external_id,
 				project_name = EXCLUDED.project_name,
@@ -716,11 +717,11 @@ func (t *TodoistConnector) upsertCompletionEvents(ctx context.Context, db todois
 		}
 
 		if _, err := db.Exec(ctx, `
-			UPDATE todoist_tasks
+			UPDATE tasks
 			SET last_completed_at = GREATEST(COALESCE(last_completed_at, TIMESTAMPTZ 'epoch'), $3),
 				is_active = CASE WHEN is_recurring THEN TRUE ELSE is_active END,
 				updated_at = NOW()
-			WHERE user_id = $1 AND external_id = $2
+			WHERE user_id = $1 AND source = 'todoist' AND external_id = $2
 		`, userID, event.TaskID, event.CompletedAt); err != nil {
 			return err
 		}

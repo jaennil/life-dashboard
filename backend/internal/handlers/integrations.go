@@ -93,7 +93,7 @@ var integrationMeta_ = map[string]integrationMeta{
 	"todoist": {
 		displayName: "Todoist",
 		description: "Задачи, recurring tasks и productivity-аналитика из Todoist",
-		countQuery:  "SELECT COUNT(*) FROM todoist_tasks WHERE is_active = TRUE AND user_id = $1",
+		countQuery:  "SELECT COUNT(*) FROM tasks WHERE source='todoist' AND is_active = TRUE AND user_id = $1",
 	},
 	"zenmoney": {
 		displayName: "ZenMoney",

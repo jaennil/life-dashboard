@@ -171,7 +171,7 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 						))
 					)
 			)
-		FROM todoist_tasks
+		FROM tasks
 		WHERE user_id = $1
 	`, userID, todayStart, tomorrowStart, productivityRange.HasExplicit, productivityRange.Start, productivityRange.EndExclusive).Scan(
 		&summary.Productivity.ActiveTotal,
@@ -180,7 +180,7 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	)
 	_ = h.db.QueryRow(ctx, `
 		SELECT COUNT(*)
-		FROM todoist_task_completions
+		FROM task_completions
 		WHERE user_id = $1
 			AND completed_at >= $2
 			AND completed_at < $3

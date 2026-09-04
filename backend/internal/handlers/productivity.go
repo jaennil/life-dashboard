@@ -108,7 +108,7 @@ func (h *ProductivityHandler) GetSummary(w http.ResponseWriter, r *http.Request)
 			),
 			COUNT(*) FILTER (WHERE is_active = TRUE AND is_recurring = TRUE),
 			COUNT(*) FILTER (WHERE is_active = TRUE AND %s)
-		FROM todoist_tasks
+		FROM tasks
 		WHERE user_id = $1
 	`, staleCondition), userID, todayStart, tomorrowStart, nextWeekStart, staleBefore, dateRange.HasExplicit, dateRange.Start, dateRange.EndExclusive).Scan(
 		&summary.ActiveTotal,
@@ -123,7 +123,7 @@ func (h *ProductivityHandler) GetSummary(w http.ResponseWriter, r *http.Request)
 		SELECT
 			COUNT(*) FILTER (WHERE completed_at >= $2 AND completed_at < $3),
 			COUNT(*) FILTER (WHERE completed_at >= $4 AND completed_at < $5)
-		FROM todoist_task_completions
+		FROM task_completions
 		WHERE user_id = $1
 	`, userID, dateRange.Start, dateRange.EndExclusive, todayStart.AddDate(0, 0, -6), tomorrowStart).Scan(
 		&summary.CompletedTodayTotal,
@@ -134,7 +134,7 @@ func (h *ProductivityHandler) GetSummary(w http.ResponseWriter, r *http.Request)
 			SELECT
 				COUNT(*) FILTER (WHERE completed_at >= $2 AND completed_at < $3),
 				COUNT(*) FILTER (WHERE completed_at >= $4 AND completed_at < $3)
-			FROM todoist_task_completions
+			FROM task_completions
 			WHERE user_id = $1
 		`, userID, todayStart, tomorrowStart, todayStart.AddDate(0, 0, -6)).Scan(
 			&summary.CompletedTodayTotal,
@@ -146,7 +146,7 @@ func (h *ProductivityHandler) GetSummary(w http.ResponseWriter, r *http.Request)
 		SELECT day::date, COUNT(*)
 		FROM (
 			SELECT COALESCE(due_at::date, due_date) AS day
-			FROM todoist_tasks
+			FROM tasks
 			WHERE user_id = $1
 				AND is_active = TRUE
 				AND COALESCE(due_at::date, due_date) >= $2::date
@@ -279,7 +279,7 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 			due_at,
 			due_date::timestamp,
 			last_completed_at
-		FROM todoist_tasks
+		FROM tasks
 	`+baseWhere+orderBy+`
 		LIMIT 100
 	`, userID, todayStart, tomorrowStart, nextWeekStart, staleBefore, dateRange.Start, dateRange.EndExclusive)
