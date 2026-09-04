@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,15 +24,26 @@ func NewProductivity(db *pgxpool.Pool, logger zerolog.Logger) *ProductivityHandl
 }
 
 type ProductivitySummary struct {
-	ActiveTotal         int                     `json:"active_total"`
-	OverdueTotal        int                     `json:"overdue_total"`
-	DueTodayTotal       int                     `json:"due_today_total"`
-	DueNext7DaysTotal   int                     `json:"due_next_7_days_total"`
-	RecurringTotal      int                     `json:"recurring_total"`
-	StaleTotal          int                     `json:"stale_total"`
-	CompletedTodayTotal int                     `json:"completed_today_total"`
-	Completed7DaysTotal int                     `json:"completed_7_days_total"`
-	UpcomingLoad        []ProductivityDayBucket `json:"upcoming_load"`
+	ActiveTotal         int                        `json:"active_total"`
+	OverdueTotal        int                        `json:"overdue_total"`
+	DueTodayTotal       int                        `json:"due_today_total"`
+	DueNext7DaysTotal   int                        `json:"due_next_7_days_total"`
+	RecurringTotal      int                        `json:"recurring_total"`
+	StaleTotal          int                        `json:"stale_total"`
+	CompletedTodayTotal int                        `json:"completed_today_total"`
+	Completed7DaysTotal int                        `json:"completed_7_days_total"`
+	UpcomingLoad        []ProductivityDayBucket    `json:"upcoming_load"`
+	BySource            []ProductivitySourceTotals `json:"by_source"`
+}
+
+// ProductivitySourceTotals splits the totals by task provider. The headline
+// numbers deliberately stay merged - the point of the page is the whole
+// workload - but a task list that suddenly stops growing should be traceable to
+// the provider that stopped syncing.
+type ProductivitySourceTotals struct {
+	Source         string `json:"source"`
+	ActiveTotal    int    `json:"active_total"`
+	CompletedTotal int    `json:"completed_total"`
 }
 
 type ProductivityDayBucket struct {
@@ -40,6 +53,7 @@ type ProductivityDayBucket struct {
 
 type ProductivityTask struct {
 	ID              string     `json:"id"`
+	Source          string     `json:"source"`
 	ExternalID      string     `json:"external_id"`
 	Content         string     `json:"content"`
 	Description     string     `json:"description"`
@@ -141,6 +155,8 @@ func (h *ProductivityHandler) GetSummary(w http.ResponseWriter, r *http.Request)
 			&summary.Completed7DaysTotal,
 		)
 	}
+
+	summary.BySource = h.taskTotalsBySource(ctx, userID, dateRange.Start, dateRange.EndExclusive)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT day::date, COUNT(*)
@@ -268,6 +284,7 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(ctx, `
 		SELECT
 			id,
+			source,
 			external_id,
 			content,
 			COALESCE(description, ''),
@@ -295,6 +312,7 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 		var task ProductivityTask
 		if err := rows.Scan(
 			&task.ID,
+			&task.Source,
 			&task.ExternalID,
 			&task.Content,
 			&task.Description,
@@ -315,6 +333,68 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tasks)
+}
+
+// taskTotalsBySource counts what each provider currently contributes. A failed
+// lookup returns no rows rather than an error: the page is still useful without
+// the split, and the headline totals come from their own queries.
+func (h *ProductivityHandler) taskTotalsBySource(ctx context.Context, userID string, start, endExclusive time.Time) []ProductivitySourceTotals {
+	totals := map[string]*ProductivitySourceTotals{}
+	order := make([]string, 0, 2)
+
+	get := func(source string) *ProductivitySourceTotals {
+		if existing, ok := totals[source]; ok {
+			return existing
+		}
+		totals[source] = &ProductivitySourceTotals{Source: source}
+		order = append(order, source)
+		return totals[source]
+	}
+
+	rows, err := h.db.Query(ctx, `
+		SELECT source, COUNT(*) FILTER (WHERE is_active = TRUE)
+		FROM tasks
+		WHERE user_id = $1
+		GROUP BY source
+	`, userID)
+	if err == nil {
+		for rows.Next() {
+			var source string
+			var active int
+			if rows.Scan(&source, &active) == nil {
+				get(source).ActiveTotal = active
+			}
+		}
+		rows.Close()
+	} else {
+		h.logger.Warn().Err(err).Msg("count active tasks by source")
+	}
+
+	rows, err = h.db.Query(ctx, `
+		SELECT source, COUNT(*)
+		FROM task_completions
+		WHERE user_id = $1 AND completed_at >= $2 AND completed_at < $3
+		GROUP BY source
+	`, userID, start, endExclusive)
+	if err == nil {
+		for rows.Next() {
+			var source string
+			var completed int
+			if rows.Scan(&source, &completed) == nil {
+				get(source).CompletedTotal = completed
+			}
+		}
+		rows.Close()
+	} else {
+		h.logger.Warn().Err(err).Msg("count task completions by source")
+	}
+
+	sort.Strings(order)
+	result := make([]ProductivitySourceTotals, 0, len(order))
+	for _, source := range order {
+		result = append(result, *totals[source])
+	}
+	return result
 }
 
 func productivityDueState(dueAt, dueDate *time.Time, now, todayStart, tomorrowStart, nextWeekStart time.Time) (bool, string) {

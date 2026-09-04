@@ -231,7 +231,7 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 func renderProductivityOverviewText(title string, data AIProductivityOverviewData) string {
 	var sb strings.Builder
 	sb.WriteString(title + "\n")
-	sb.WriteString("Источник: Todoist. Просрочка и план задач считаются только по tasks, завершения — по task_completions.\n")
+	sb.WriteString("Источники задач: Todoist и Vikunja, они лежат в общих таблицах с колонкой source. Просрочка и план задач считаются по tasks, завершения - по task_completions.\n")
 	sb.WriteString(fmt.Sprintf("Активных задач: %d | overdue: %d | сегодня: %d | ближайшие 7 дней: %d | recurring: %d | давно висят: %d\n",
 		data.Summary.ActiveTotal,
 		data.Summary.OverdueTotal,
