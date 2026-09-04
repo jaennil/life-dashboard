@@ -12,6 +12,7 @@ const Dashboard = lazy(() => import('@/pages/Dashboard').then(module => ({ defau
 const Finance = lazy(() => import('@/pages/Finance').then(module => ({ default: module.Finance })))
 const Fitness = lazy(() => import('@/pages/Fitness').then(module => ({ default: module.Fitness })))
 const Nutrition = lazy(() => import('@/pages/Nutrition').then(module => ({ default: module.Nutrition })))
+const QuickInput = lazy(() => import('@/pages/QuickInput').then(module => ({ default: module.QuickInput })))
 const Productivity = lazy(() => import('@/pages/Productivity').then(module => ({ default: module.Productivity })))
 const AiChat = lazy(() => import('@/pages/AiChat').then(module => ({ default: module.AiChat })))
 const Settings = lazy(() => import('@/pages/Settings').then(module => ({ default: module.Settings })))
@@ -89,6 +90,7 @@ function AppRoutes() {
                   <Route path="/fitness" element={<Fitness />} />
                   <Route path="/productivity" element={<Productivity />} />
                   <Route path="/nutrition" element={<Nutrition />} />
+                  <Route path="/input" element={<QuickInput />} />
                   <Route path="/ai" element={<AiChat />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/raw-data" element={<RawData />} />

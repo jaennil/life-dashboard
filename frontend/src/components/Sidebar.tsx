@@ -15,6 +15,7 @@ import {
   Database,
   MoreHorizontal,
   X,
+  PenLine,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
@@ -22,6 +23,7 @@ import { useAuth } from '@/lib/auth'
 
 const nav = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/input', icon: PenLine, label: 'Ввод' },
   { to: '/finance', icon: Wallet, label: 'Finance' },
   { to: '/fitness', icon: Dumbbell, label: 'Fitness' },
   { to: '/productivity', icon: CheckSquare, label: 'Productivity' },
@@ -30,7 +32,7 @@ const nav = [
   { to: '/raw-data', icon: Database, label: 'Raw Data' },
 ]
 
-const mobilePrimary = nav.filter(item => ['/', '/finance', '/fitness', '/nutrition'].includes(item.to))
+const mobilePrimary = nav.filter(item => ['/', '/input', '/finance', '/fitness', '/nutrition'].includes(item.to))
 const mobileMore = [
   ...nav.filter(item => ['/productivity', '/ai', '/raw-data'].includes(item.to)),
   { to: '/settings', icon: Settings, label: 'Settings' },

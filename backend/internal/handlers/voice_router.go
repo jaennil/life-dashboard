@@ -102,7 +102,11 @@ func (h *VoiceWorkoutHandler) recordPhraseDomain(ctx context.Context, eventID, d
 func composeVoiceDisplay(response voiceWorkoutResponse) string {
 	var parts []string
 	if response.Heard != "" {
-		parts = append(parts, "Услышал: "+response.Heard)
+		label := "Услышал: "
+		if response.typed {
+			label = "Введено: "
+		}
+		parts = append(parts, label+response.Heard)
 	}
 	heardOnly := len(parts)
 

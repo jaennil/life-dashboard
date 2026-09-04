@@ -88,6 +88,19 @@ func TestComposeVoiceDisplayShowsRoutingMessage(t *testing.T) {
 	}
 }
 
+func TestComposeVoiceDisplayLabelsTypedInput(t *testing.T) {
+	got := composeVoiceDisplay(voiceWorkoutResponse{
+		typed:   true,
+		Heard:   "лимонад с витаминами",
+		Domain:  voiceDomainFood,
+		Message: "Записал в дневник.",
+	})
+
+	if !strings.HasPrefix(got, "Введено: лимонад с витаминами\n") {
+		t.Fatalf("typed display has the wrong label: %q", got)
+	}
+}
+
 func TestComposeVoiceDisplayShowsWhatWasEaten(t *testing.T) {
 	got := composeVoiceDisplay(voiceWorkoutResponse{
 		Heard:   "молоко 200 грамм",

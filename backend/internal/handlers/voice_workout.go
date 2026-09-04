@@ -10,6 +10,8 @@ import (
 	"time"
 	"unicode"
 
+	authmw "life-dashboard/internal/middleware"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
@@ -70,6 +72,7 @@ type voiceWorkoutEnvelope struct {
 }
 
 type voiceWorkoutResponse struct {
+	typed      bool
 	Status     string `json:"status"`
 	SessionID  string `json:"session_id"`
 	Utterances int    `json:"utterances"`
@@ -99,15 +102,8 @@ type voiceWorkoutResponse struct {
 //
 // POST /api/v1/webhook/voice-workout
 func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, voiceWorkoutMaxBody))
-	if err != nil {
-		http.Error(w, "cannot read body", http.StatusBadRequest)
-		return
-	}
-
-	var envelope voiceWorkoutEnvelope
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+	body, envelope, ok := readVoiceEnvelope(w, r)
+	if !ok {
 		return
 	}
 
@@ -124,6 +120,43 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	h.receiveTextForUser(w, r, userID, body, envelope, false)
+}
+
+// ReceiveTypedText accepts text from the authenticated web application. It
+// deliberately shares all routing and write behavior with dictated input while
+// using the signed-in user instead of exposing a webhook API key to the browser.
+func (h *VoiceWorkoutHandler) ReceiveTypedText(w http.ResponseWriter, r *http.Request) {
+	body, envelope, ok := readVoiceEnvelope(w, r)
+	if !ok {
+		return
+	}
+
+	userID, ok := r.Context().Value(authmw.UserIDKey).(string)
+	if !ok || userID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	h.receiveTextForUser(w, r, userID, body, envelope, true)
+}
+
+func readVoiceEnvelope(w http.ResponseWriter, r *http.Request) ([]byte, voiceWorkoutEnvelope, bool) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, voiceWorkoutMaxBody))
+	if err != nil {
+		http.Error(w, "cannot read body", http.StatusBadRequest)
+		return nil, voiceWorkoutEnvelope{}, false
+	}
+
+	var envelope voiceWorkoutEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return nil, voiceWorkoutEnvelope{}, false
+	}
+	return body, envelope, true
+}
+
+func (h *VoiceWorkoutHandler) receiveTextForUser(w http.ResponseWriter, r *http.Request, userID string, body []byte, envelope voiceWorkoutEnvelope, typed bool) {
 	text := normalizeVoiceText(envelope.Text)
 	if !voiceHasContent(text) {
 		// Starting dictation and saying nothing is a normal thing to do at a
@@ -133,11 +166,16 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 		// and no model is called - there is nothing to interpret - but the phone
 		// gets a proper answer.
 		w.Header().Set("Content-Type", "application/json")
+		display := "Ничего не услышал. Повтори."
+		if typed {
+			display = "Нечего отправлять. Введи текст."
+		}
 		json.NewEncoder(w).Encode(voiceWorkoutResponse{
+			typed:   typed,
 			Status:  "ok",
 			Domain:  voiceDomainUnknown,
 			Heard:   text,
-			Display: "Ничего не услышал. Повтори.",
+			Display: display,
 		})
 		return
 	}
@@ -171,7 +209,7 @@ func (h *VoiceWorkoutHandler) ReceiveText(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	response := voiceWorkoutResponse{Status: "ok", Heard: text}
+	response := voiceWorkoutResponse{typed: typed, Status: "ok", Heard: text}
 
 	spoken := stripFinishPhrase(text)
 	interpreted := voiceInterpretation{Domain: voiceDomainWorkout}

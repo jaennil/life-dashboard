@@ -392,6 +392,7 @@ func main() {
 		r.Post("/api/v1/ai/chat", aiHandler.Chat)
 		r.Post("/api/v1/ai/checkup", aiHandler.Checkup)
 		r.Get("/api/v1/ai/checkup/latest", aiHandler.GetLatestCheckup)
+		r.Post("/api/v1/input", voiceSessions.ReceiveTypedText)
 
 		registerOAuthRoutes(r, authHandler, oauthRouteAvailability{
 			strava:         stravaConn != nil,

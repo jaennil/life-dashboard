@@ -513,6 +513,17 @@ export interface HealthAPIKeyInfo {
   sleep_count: number
 }
 
+export interface QuickInputResponse {
+  status: string
+  display: string
+  domain?: string
+  finished?: boolean
+  food?: string
+  workout?: string
+  parse_error?: string
+  push_error?: string
+}
+
 export const api = {
   getDashboardSummary: (params: DateRangeParams = {}) => get<DashboardSummary>('/dashboard/summary' + dateRangeQuery(params)),
   getRecentTransactions: (params: DateRangeParams = {}) => get<Transaction[]>('/dashboard/transactions' + dateRangeQuery(params)),
@@ -622,6 +633,8 @@ export const api = {
   getAPIKey: () => get<HealthAPIKeyInfo>('/health/apikey'),
   generateAPIKey: () =>
     postJSON<HealthAPIKeyInfo>('/health/apikey'),
+  submitQuickInput: (text: string) =>
+    postJSON<QuickInputResponse>('/input', { text }),
   getWeather: (lat?: number, lon?: number, city?: string) => {
     const params = new URLSearchParams()
     if (lat != null) params.set('lat', String(lat))
