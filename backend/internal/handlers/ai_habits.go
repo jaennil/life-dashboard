@@ -72,12 +72,13 @@ func (h *AIHandler) loadHabitSources(ctx context.Context, userID string) ([]stri
 		SELECT source
 		FROM habits
 		WHERE user_id = $1
-			AND source IN ('manual', 'habitify', 'todoist')
+			AND source IN ('manual', 'habitify', 'todoist', 'vikunja')
 		GROUP BY source
 		ORDER BY CASE source
 			WHEN 'manual' THEN 1
 			WHEN 'habitify' THEN 2
 			WHEN 'todoist' THEN 3
+			WHEN 'vikunja' THEN 4
 			ELSE 99
 		END
 	`, userID)
@@ -111,6 +112,15 @@ func habitSourceMeta(source string) aiHabitSourceMeta {
 			Intro:               "Источник: recurring tasks из Todoist. Фактом выполнения считаются completion events, а не план из календаря.",
 			NoStatusMessage:     "Нет completion events Todoist за период",
 			MissingStatusCaveat: "Todoist completed archive может быть недоступен на текущем плане, поэтому пропуски и полная история выполнения могут быть видны не полностью.",
+		}
+	case "vikunja":
+		return aiHabitSourceMeta{
+			Title:           "Vikunja",
+			Intro:           "Источник: повторяющиеся задачи Vikunja. Фактом выполнения считаются отметки done_at, а не план из календаря.",
+			NoStatusMessage: "Нет выполнений повторяющихся задач Vikunja за период",
+			// Vikunja keeps only the last done_at per task, so history before the
+			// first sync of a task does not exist and its absence is not a skip.
+			MissingStatusCaveat: "История выполнений Vikunja накапливается только с момента подключения интеграции, поэтому ранние пропуски могут быть не видны.",
 		}
 	default:
 		return aiHabitSourceMeta{
