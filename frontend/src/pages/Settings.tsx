@@ -1,9 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
 import { PageHeader } from '@/components/PageHeader'
 import { cn, formatLastSyncAt } from '@/lib/utils'
-import { api, type HealthAPIKeyInfo, type Integration } from '@/lib/api'
+import { StyledSelect } from '@/components/StyledSelect'
+import {
+  api,
+  type CheckupSchedule,
+  type CheckupSchedulePeriod,
+  type HealthAPIKeyInfo,
+  type Integration,
+  type TelegramStatus,
+} from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 
 const OAUTH_INTEGRATIONS: Record<string, string> = {
@@ -665,6 +673,221 @@ function AppleHealthSection({ onChanged, reloadKey }: { onChanged: () => void; r
   )
 }
 
+const SCHEDULE_LABELS: Record<CheckupSchedulePeriod, string> = {
+  today: 'Каждый день',
+  week: 'Каждую неделю',
+  month: 'Каждый месяц',
+}
+
+const WEEKDAYS = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
+
+function timeValue(schedule: CheckupSchedule) {
+  return `${String(schedule.hour).padStart(2, '0')}:${String(schedule.minute).padStart(2, '0')}`
+}
+
+// Reports are delivered to a chat rather than to a lock screen, so linking the
+// chat and choosing when reports arrive belong in the same card.
+function CheckupDeliverySection() {
+  const [status, setStatus] = useState<TelegramStatus | null>(null)
+  const [schedules, setSchedules] = useState<CheckupSchedule[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [linking, setLinking] = useState(false)
+  const [error, setError] = useState('')
+  const [savedAt, setSavedAt] = useState('')
+
+  const loadStatus = useCallback(async () => {
+    const next = await api.getTelegramStatus()
+    setStatus(next)
+    return next
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    Promise.allSettled([api.getTelegramStatus(), api.getCheckupSchedules()])
+      .then(([statusResult, schedulesResult]) => {
+        if (!active) return
+        if (statusResult.status === 'fulfilled') setStatus(statusResult.value)
+        if (schedulesResult.status === 'fulfilled') setSchedules(schedulesResult.value)
+        if (statusResult.status === 'rejected' || schedulesResult.status === 'rejected') {
+          setError('Не удалось загрузить настройки доставки.')
+        }
+      })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [])
+
+  async function handleLink() {
+    setLinking(true)
+    setError('')
+    try {
+      const link = await api.createTelegramLink()
+      window.open(link.deep_link, '_blank', 'noopener')
+
+      // The chat is bound by the bot, not by this page, so the only way to know
+      // it worked is to watch the status until it flips.
+      const until = Date.now() + 2 * 60 * 1000
+      while (Date.now() < until) {
+        await new Promise(resolve => window.setTimeout(resolve, 3000))
+        const next = await loadStatus()
+        if (next.linked) return
+      }
+      setError('Чат пока не привязан. Нажми Start в боте и попробуй ещё раз.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось начать привязку.')
+    } finally {
+      setLinking(false)
+    }
+  }
+
+  async function handleUnlink() {
+    setError('')
+    try {
+      await api.unlinkTelegram()
+      await loadStatus()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось отвязать чат.')
+    }
+  }
+
+  function patchSchedule(period: CheckupSchedulePeriod, patch: Partial<CheckupSchedule>) {
+    setSchedules(prev => prev.map(item => (item.period === period ? { ...item, ...patch } : item)))
+    setSavedAt('')
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    setError('')
+    try {
+      setSchedules(await api.saveCheckupSchedules(schedules))
+      setSavedAt(new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить расписание.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="rounded-2xl border bg-card/90 p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Checkup в Telegram</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Отчёты собираются в фоне по расписанию и приходят в привязанный чат.
+          </p>
+        </div>
+        {status?.linked ? (
+          <button
+            type="button"
+            onClick={handleUnlink}
+            className="rounded-xl border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/60"
+          >
+            Отвязать
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleLink}
+            disabled={linking || !status?.configured}
+            className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+          >
+            {linking ? 'Жду Start в боте...' : 'Привязать Telegram'}
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="mt-4 h-24 rounded-xl bg-muted/30 animate-pulse" />
+      ) : (
+        <>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {!status?.configured
+              ? 'Бот не настроен на сервере: добавь TELEGRAM_BOT_TOKEN в конфиг бэкенда.'
+              : status.linked
+                ? `Чат привязан${status.chat_title ? ': ' + status.chat_title : ''}.`
+                : `Нажми кнопку, откроется ${status.bot_username ? '@' + status.bot_username : 'бот'} с кодом привязки.`}
+          </p>
+
+          <div className="mt-4 flex flex-col gap-3">
+            {schedules.map(schedule => (
+              <div key={schedule.period} className="flex flex-wrap items-center gap-3 rounded-xl border bg-background/40 px-3 py-3">
+                <label className="inline-flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={schedule.enabled}
+                    onChange={event => patchSchedule(schedule.period, { enabled: event.target.checked })}
+                    className="h-4 w-4 rounded border-border"
+                  />
+                  <span className="w-36">{SCHEDULE_LABELS[schedule.period]}</span>
+                </label>
+
+                <input
+                  type="time"
+                  value={timeValue(schedule)}
+                  onChange={event => {
+                    const [hour, minute] = event.target.value.split(':')
+                    patchSchedule(schedule.period, { hour: Number(hour), minute: Number(minute) })
+                  }}
+                  aria-label={`Время: ${SCHEDULE_LABELS[schedule.period]}`}
+                  className="rounded-lg border bg-card px-2 py-1.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+                />
+
+                {schedule.period === 'week' ? (
+                  <StyledSelect
+                    value={schedule.weekday ?? 0}
+                    onChange={event => patchSchedule(schedule.period, { weekday: Number(event.target.value) })}
+                    aria-label="День недели"
+                  >
+                    {WEEKDAYS.map((label, index) => (
+                      <option key={label} value={index}>{label}</option>
+                    ))}
+                  </StyledSelect>
+                ) : null}
+
+                {schedule.period === 'month' ? (
+                  <StyledSelect
+                    value={schedule.day_of_month ?? 1}
+                    onChange={event => patchSchedule(schedule.period, { day_of_month: Number(event.target.value) })}
+                    aria-label="Число месяца"
+                  >
+                    {Array.from({ length: 28 }, (_, index) => index + 1).map(day => (
+                      <option key={day} value={day}>{day} число</option>
+                    ))}
+                  </StyledSelect>
+                ) : null}
+
+                {schedule.last_run_at ? (
+                  <span className="text-xs text-muted-foreground">
+                    последний запуск {formatLastSyncAt(schedule.last_run_at)}
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || schedules.length === 0}
+              className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+            >
+              {saving ? 'Сохраняю...' : 'Сохранить расписание'}
+            </button>
+            {savedAt ? <span className="text-xs text-muted-foreground">Сохранено в {savedAt}</span> : null}
+            {!status?.linked && schedules.some(schedule => schedule.enabled) ? (
+              <span className="text-xs text-amber-300">Чат не привязан - отчёты будут только в приложении.</span>
+            ) : null}
+          </div>
+        </>
+      )}
+
+      {error ? <p className="mt-3 text-xs text-rose-400">{error}</p> : null}
+    </section>
+  )
+}
+
 export function Settings() {
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [loading, setLoading] = useState(true)
@@ -759,6 +982,8 @@ export function Settings() {
 
         <AppleHealthSection onChanged={load} reloadKey={healthReloadKey} />
       </div>
+
+      <CheckupDeliverySection />
 
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-foreground">Интеграции</h2>

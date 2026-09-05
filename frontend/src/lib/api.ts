@@ -7,6 +7,7 @@ import {
   patchJSON,
   postJSON,
   postNoContent,
+  putJSON,
   type CollectionParams,
   type DateRangeParams,
 } from '@/lib/api-client'
@@ -573,6 +574,32 @@ export interface InputJob {
   completed_at?: string
 }
 
+export interface TelegramStatus {
+  configured: boolean
+  linked: boolean
+  bot_username?: string
+  chat_title?: string
+  linked_at?: string
+}
+
+export interface TelegramLink {
+  code: string
+  deep_link: string
+  expires_at: string
+}
+
+export type CheckupSchedulePeriod = 'today' | 'week' | 'month'
+
+export interface CheckupSchedule {
+  period: CheckupSchedulePeriod
+  enabled: boolean
+  hour: number
+  minute: number
+  weekday?: number
+  day_of_month?: number
+  last_run_at?: string
+}
+
 export interface PushConfig {
   enabled: boolean
   public_key: string
@@ -696,6 +723,12 @@ export const api = {
     postJSON<QuickInputResponse>('/input', { text }),
   getInputJobs: () => get<InputJob[]>('/input/jobs'),
   getInputJob: (id: string) => get<InputJob>('/input/jobs/' + encodeURIComponent(id)),
+  getTelegramStatus: () => get<TelegramStatus>('/telegram'),
+  createTelegramLink: () => postJSON<TelegramLink>('/telegram/link'),
+  unlinkTelegram: () => deleteNoContent('/telegram/link'),
+  getCheckupSchedules: () => get<CheckupSchedule[]>('/ai/checkup/schedules'),
+  saveCheckupSchedules: (schedules: CheckupSchedule[]) =>
+    putJSON<CheckupSchedule[]>('/ai/checkup/schedules', schedules),
   getPushConfig: () => get<PushConfig>('/push/config'),
   savePushSubscription: (subscription: PushSubscriptionJSON) =>
     postNoContent('/push/subscriptions', subscription),

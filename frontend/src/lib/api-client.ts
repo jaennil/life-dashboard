@@ -42,7 +42,7 @@ export function jsonHeaders(headers?: HeadersInit): Headers {
 }
 
 function jsonRequestInit(
-  method: 'POST' | 'PATCH',
+  method: 'POST' | 'PUT' | 'PATCH',
   body: unknown,
   init?: RequestInit,
 ): RequestInit {
@@ -111,6 +111,11 @@ export async function get<T>(path: string): Promise<T> {
 
 export async function postJSON<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
   const res = await request(path, jsonRequestInit('POST', body, init))
+  return parseJSON<T>(res)
+}
+
+export async function putJSON<T>(path: string, body?: unknown): Promise<T> {
+  const res = await request(path, jsonRequestInit('PUT', body))
   return parseJSON<T>(res)
 }
 
