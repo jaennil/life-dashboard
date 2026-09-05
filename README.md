@@ -2,7 +2,7 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000029`. JSON payloads,
+The diagram reflects migrations `000001` through `000030`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability, as
 are the queue tables that carry no history of their own (`input_jobs`,
 `ai_checkup_jobs`, `web_push_subscriptions`).
@@ -1098,6 +1098,25 @@ Current task state across every task provider, including active and recently com
 | `raw_payload` | `jsonb`, nullable | Original provider task object. |
 | `updated_at` | `timestamptz`, nullable | Last local update time. |
 | `created_at` | `timestamptz`, nullable | Local insertion time. |
+
+#### `task_projects`
+
+Local mirror of the provider's project list, kept current by the sync. It is
+what lets a dictated task name a project without a call to the provider.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key. |
+| `user_id` | `uuid` | Project owner; references `users.id`. |
+| `source` | `varchar(50)` | Task provider; currently only `vikunja`. |
+| `external_id` | `varchar(255)` | Provider project identifier, unique per user and source. |
+| `name` | `varchar(255)` | Project title. |
+| `path` | `varchar(1000)` | Full title path including parent projects, as the provider's UI shows it. |
+| `parent_external_id` | `varchar(255)`, nullable | Parent project identifier; no database FK is enforced. |
+| `archived` | `boolean` | Whether the project is archived at the provider. |
+| `is_default` | `boolean` | Whether the provider files a task here when no project is named. |
+| `created_at` | `timestamptz` | Local insertion time. |
+| `updated_at` | `timestamptz` | Last local update time. |
 
 #### `task_completions`
 
