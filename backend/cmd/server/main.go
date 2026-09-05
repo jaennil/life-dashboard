@@ -233,7 +233,7 @@ func main() {
 	// The lazy close in the webhook only fires when the next phrase arrives, so
 	// this sweep is what actually bounds a dictated session that was never
 	// finished out loud.
-	telegramHandler := handlers.NewTelegram(pool, cfg.Telegram.BotToken, log.Logger)
+	telegramHandler := handlers.NewTelegram(pool, cfg.Telegram.BotToken, cfg.Telegram.APIBase, log.Logger)
 	aiHandler.UseTelegram(telegramHandler)
 
 	voiceSessions := handlers.NewVoiceWorkout(pool, aiHandler, hevy, fatSecretConn, vikunja, cfg.AI.ParseModel, cfg.AI.ParseReasoningEffort, pushOptions, log.Logger)

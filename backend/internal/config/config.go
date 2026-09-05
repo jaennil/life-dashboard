@@ -30,6 +30,9 @@ type WebPushConfig struct {
 // token disables every Telegram feature rather than failing at send time.
 type TelegramConfig struct {
 	BotToken string `mapstructure:"bot_token"`
+	// APIBase points the bot at something other than Telegram itself, which is
+	// how the delivery path is exercised locally without a real bot.
+	APIBase string `mapstructure:"api_base"`
 }
 
 type UnleashConfig struct {
@@ -172,6 +175,7 @@ func Load() (*Config, error) {
 	viper.BindEnv("sentry.release", "SENTRY_RELEASE")
 	viper.BindEnv("sentry.traces_sample_rate", "SENTRY_BACKEND_TRACES_SAMPLE_RATE")
 	viper.BindEnv("telegram.bot_token", "TELEGRAM_BOT_TOKEN")
+	viper.BindEnv("telegram.api_base", "TELEGRAM_API_BASE")
 	viper.BindEnv("web_push.public_key", "WEB_PUSH_PUBLIC_KEY")
 	viper.BindEnv("web_push.private_key", "WEB_PUSH_PRIVATE_KEY")
 	viper.BindEnv("web_push.subscriber", "WEB_PUSH_SUBSCRIBER")

@@ -41,9 +41,10 @@ type TelegramHandler struct {
 }
 
 type telegramClient struct {
-	token  string
-	http   *http.Client
-	logger zerolog.Logger
+	baseURL string
+	token   string
+	http    *http.Client
+	logger  zerolog.Logger
 }
 
 type TelegramStatus struct {
@@ -75,14 +76,19 @@ type telegramUpdate struct {
 	} `json:"message"`
 }
 
-func NewTelegram(db *pgxpool.Pool, botToken string, logger zerolog.Logger) *TelegramHandler {
+func NewTelegram(db *pgxpool.Pool, botToken, apiBase string, logger zerolog.Logger) *TelegramHandler {
 	log := logger.With().Str("handler", "telegram").Logger()
+	base := strings.TrimRight(strings.TrimSpace(apiBase), "/")
+	if base == "" {
+		base = telegramAPIBase
+	}
 	return &TelegramHandler{
 		db: db,
 		client: &telegramClient{
-			token:  strings.TrimSpace(botToken),
-			http:   &http.Client{Timeout: telegramRequestTimeout},
-			logger: log,
+			baseURL: base,
+			token:   strings.TrimSpace(botToken),
+			http:    &http.Client{Timeout: telegramRequestTimeout},
+			logger:  log,
 		},
 		logger: log,
 	}
@@ -441,7 +447,7 @@ func (c *telegramClient) call(ctx context.Context, method string, payload map[st
 		body = bytes.NewReader(encoded)
 	}
 
-	endpoint := fmt.Sprintf("%s/bot%s/%s", telegramAPIBase, c.token, method)
+	endpoint := fmt.Sprintf("%s/bot%s/%s", c.baseURL, c.token, method)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		return err

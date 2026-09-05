@@ -2,10 +2,11 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000030`. JSON payloads,
+The diagram reflects migrations `000001` through `000031`. JSON payloads,
 embeddings, and some operational timestamps are omitted for readability, as
-are the queue tables that carry no history of their own (`input_jobs`,
-`ai_checkup_jobs`, `web_push_subscriptions`).
+are the queue and delivery tables that carry no history of their own
+(`input_jobs`, `ai_checkup_jobs`, `web_push_subscriptions`,
+`telegram_link_codes`, `telegram_poll_state`).
 
 ```mermaid
 erDiagram
@@ -1233,6 +1234,36 @@ Ordered user and assistant messages in the AI chat history.
 | `content` | `text` | Message body. |
 | `created_at` | `timestamptz` | Message creation time using the database wall clock. |
 | `message_order` | `bigint` | Global sequence value used for deterministic message ordering. |
+
+#### `checkup_schedules`
+
+When a recurring checkup runs. One row per period per user; the worker that
+generates the report is the same one the button uses.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key. |
+| `user_id` | `uuid` | Schedule owner; references `users.id`. |
+| `period` | `varchar(20)` | Checkup period: `today`, `week` or `month`. |
+| `enabled` | `boolean` | Whether the schedule fires at all. |
+| `hour` | `smallint` | Hour of day in Europe/Moscow, 0-23. |
+| `minute` | `smallint` | Minute of the hour, 0-59. |
+| `weekday` | `smallint`, nullable | Weekly schedules only: 0 is Sunday. |
+| `day_of_month` | `smallint`, nullable | Monthly schedules only, capped at 28 so every month has the day. |
+| `last_run_at` | `timestamptz`, nullable | The scheduled instant most recently served, which is what stops a second run on the next tick. |
+| `created_at` | `timestamptz` | Local insertion time. |
+| `updated_at` | `timestamptz` | Last local update time. |
+
+#### `telegram_accounts`
+
+The chat a user's reports are delivered to. One chat belongs to one account.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `user_id` | `uuid` | Primary key and owner; references `users.id`. |
+| `chat_id` | `bigint` | Telegram chat identifier, unique across accounts. |
+| `username` | `varchar(255)`, nullable | Chat title or username, shown in Settings. |
+| `linked_at` | `timestamptz` | When the chat was bound. |
 
 #### `ai_checkup_reports`
 
