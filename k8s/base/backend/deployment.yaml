@@ -9,8 +9,13 @@ spec:
   # Recreate, not the default RollingUpdate. Two backends must never overlap:
   # the new one applies migrations at startup while the old one is still serving
   # the previous schema, and Telegram rejects a second getUpdates poller with
-  # "terminated by other getUpdates request". The price is a few seconds of
-  # downtime per deploy, which is the right trade for a single-user dashboard.
+  # "terminated by other getUpdates request".
+  #
+  # The price is real: the old pod is gone before the new image is pulled, and
+  # pulling a fresh tag onto the Pi measured at ~3 minutes, so that is the
+  # downtime per deploy rather than the few seconds an already-cached image
+  # would cost. Accepted for a single-user dashboard; switch back to
+  # RollingUpdate with maxUnavailable 0 if that ever stops being true.
   strategy:
     type: Recreate
   selector:
