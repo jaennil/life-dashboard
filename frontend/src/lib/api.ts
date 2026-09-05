@@ -498,6 +498,9 @@ export interface VikunjaTaskRef {
   due_at: string | null
   done: boolean
   completed_at: string | null
+  recurrence?: string
+  labels?: string[]
+  skipped_labels?: string[]
   url: string
 }
 
@@ -507,6 +510,9 @@ export interface CreateTaskInput {
   project_id?: number
   due_at?: string
   priority?: number
+  labels?: string[]
+  repeat_every?: number
+  repeat_unit?: 'day' | 'week' | 'month'
 }
 
 export interface ProductivityHabitsSummary {

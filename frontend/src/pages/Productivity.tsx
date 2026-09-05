@@ -52,6 +52,14 @@ const TASK_SOURCES: Record<string, { label: string; badge: string }> = {
   vikunja: { label: 'Vikunja', badge: 'border-cyan-500/30 text-cyan-300' },
 }
 
+const TASK_REPEATS: Array<{ key: string; label: string; every: number; unit: 'day' | 'week' | 'month' | '' }> = [
+  { key: 'none', label: 'без повтора', every: 0, unit: '' },
+  { key: 'day', label: 'каждый день', every: 1, unit: 'day' },
+  { key: 'week', label: 'каждую неделю', every: 1, unit: 'week' },
+  { key: 'week2', label: 'каждые 2 недели', every: 2, unit: 'week' },
+  { key: 'month', label: 'каждый месяц', every: 1, unit: 'month' },
+]
+
 const TASK_PRIORITIES: Array<{ value: number; label: string }> = [
   { value: 0, label: 'без приоритета' },
   { value: 1, label: 'p1 низкий' },
@@ -278,7 +286,15 @@ export function Productivity() {
   const [editingHabitID, setEditingHabitID] = useState<string | null>(null)
   const [showHabitComposer, setShowHabitComposer] = useState(false)
   const [showTaskComposer, setShowTaskComposer] = useState(false)
-  const [taskForm, setTaskForm] = useState({ title: '', due_at: '', project_id: 0, priority: 0 })
+  const [taskForm, setTaskForm] = useState({
+    title: '',
+    description: '',
+    labels: '',
+    repeat: 'none',
+    due_at: '',
+    project_id: 0,
+    priority: 0,
+  })
   const [taskSaving, setTaskSaving] = useState(false)
   const [taskError, setTaskError] = useState('')
   const [vikunjaProjects, setVikunjaProjects] = useState<VikunjaProject[]>([])
@@ -340,14 +356,24 @@ export function Productivity() {
     if (!title) return
     setTaskSaving(true)
     setTaskError('')
+    const repeat = TASK_REPEATS.find(item => item.key === taskForm.repeat)
+    const labels = taskForm.labels.split(',').map(label => label.trim()).filter(Boolean)
+
     try {
-      await api.createProductivityTask({
+      const created = await api.createProductivityTask({
         title,
+        description: taskForm.description.trim() || undefined,
         project_id: taskForm.project_id || undefined,
         priority: taskForm.priority || undefined,
         due_at: taskForm.due_at ? new Date(taskForm.due_at).toISOString() : undefined,
+        labels: labels.length > 0 ? labels : undefined,
+        repeat_every: repeat && repeat.unit ? repeat.every : undefined,
+        repeat_unit: repeat && repeat.unit ? repeat.unit : undefined,
       })
-      setTaskForm(current => ({ ...current, title: '', due_at: '', priority: 0 }))
+      if (created.skipped_labels && created.skipped_labels.length > 0) {
+        setTaskError(`Метки не проставились: ${created.skipped_labels.join(', ')}`)
+      }
+      setTaskForm(current => ({ ...current, title: '', description: '', labels: '', due_at: '', priority: 0, repeat: 'none' }))
       await reloadProductivity()
     } catch (error) {
       setTaskError(error instanceof Error ? error.message : 'Не удалось создать задачу')
@@ -743,6 +769,13 @@ export function Productivity() {
                 placeholder="Что нужно сделать"
                 className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
               />
+              <input
+                type="text"
+                value={taskForm.description}
+                onChange={(event) => setTaskForm(current => ({ ...current, description: event.target.value }))}
+                placeholder="Описание: адрес, номер, условие - если нужно"
+                className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+              />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <StyledSelect
                   value={taskForm.project_id}
@@ -772,6 +805,24 @@ export function Productivity() {
                     <option key={priority.value} value={priority.value}>{priority.label}</option>
                   ))}
                 </StyledSelect>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <StyledSelect
+                  value={taskForm.repeat}
+                  onChange={(event) => setTaskForm(current => ({ ...current, repeat: String(event.target.value) }))}
+                  aria-label="Повтор"
+                >
+                  {TASK_REPEATS.map(item => (
+                    <option key={item.key} value={item.key}>{item.label}</option>
+                  ))}
+                </StyledSelect>
+                <input
+                  type="text"
+                  value={taskForm.labels}
+                  onChange={(event) => setTaskForm(current => ({ ...current, labels: event.target.value }))}
+                  placeholder="Метки через запятую"
+                  className="w-full rounded-xl border bg-card px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+                />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
