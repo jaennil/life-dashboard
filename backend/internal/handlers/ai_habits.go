@@ -64,12 +64,22 @@ func (h *AIHandler) appendHabitContextInRange(ctx context.Context, sb *strings.B
 }
 
 func (h *AIHandler) loadHabitSources(ctx context.Context, userID string) ([]string, error) {
+	// GROUP BY rather than DISTINCT: Postgres rejects ordering a DISTINCT
+	// select by an expression that is not in the select list, and this query
+	// failed with 42P10 on every call, which silently dropped the whole habit
+	// section from the AI context instead of failing loudly.
 	rows, err := h.db.Query(ctx, `
-		SELECT DISTINCT source
+		SELECT source
 		FROM habits
 		WHERE user_id = $1
 			AND source IN ('manual', 'habitify', 'todoist')
-		ORDER BY CASE source WHEN 'manual' THEN 1 WHEN 'habitify' THEN 2 WHEN 'todoist' THEN 3 ELSE 99 END
+		GROUP BY source
+		ORDER BY CASE source
+			WHEN 'manual' THEN 1
+			WHEN 'habitify' THEN 2
+			WHEN 'todoist' THEN 3
+			ELSE 99
+		END
 	`, userID)
 	if err != nil {
 		return nil, err
