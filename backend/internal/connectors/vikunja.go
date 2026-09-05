@@ -30,6 +30,8 @@ const (
 	// Every unset date arrives as the zero value of Go's time.Time rather than
 	// null, so "no due date" and "never completed" look like year-1 timestamps.
 	vikunjaUnsetTimePrefix = "0001-01-01"
+	// repeat_mode 1 repeats by calendar month and ignores repeat_after.
+	vikunjaRepeatModeMonthly = 1
 )
 
 // ErrVikunjaNotConnected separates "this user has not set Vikunja up" from a
@@ -116,6 +118,9 @@ func (v *VikunjaConnector) Sync(ctx context.Context, userID string) error {
 	if err != nil {
 		return fmt.Errorf("fetch vikunja projects: %w", err)
 	}
+	// Read here rather than in the write path so a task dictated later can be
+	// filed without asking Vikunja which project is the default one.
+	defaultProjectID := v.defaultProjectID(ctx, creds, projects)
 
 	lastSync, err := v.getLastSync(ctx, userID)
 	if err != nil {
@@ -179,6 +184,10 @@ func (v *VikunjaConnector) Sync(ctx context.Context, userID string) error {
 			IsRecurring: vikunjaIsRecurring(task),
 			Raw:         raw,
 		})
+	}
+
+	if err := v.syncProjects(ctx, tx, userID, projects, defaultProjectID); err != nil {
+		return fmt.Errorf("sync vikunja projects: %w", err)
 	}
 
 	if err := v.markInactiveTasks(ctx, tx, userID, activeTaskIDs); err != nil {
@@ -483,6 +492,52 @@ func (v *VikunjaConnector) upsertTaskAsHabit(ctx context.Context, db connectorDB
 	return habitID, nil
 }
 
+// syncProjects mirrors the project list, including archived ones so a task
+// synced before its project was closed still resolves to a name. Projects the
+// provider no longer returns are dropped: keeping them would offer the parser a
+// project that no longer accepts tasks.
+func (v *VikunjaConnector) syncProjects(ctx context.Context, db connectorDB, userID string, projects map[int64]vikunjaProject, defaultProjectID int64) error {
+	knownIDs := make([]string, 0, len(projects))
+	for id, project := range projects {
+		externalID := strconv.FormatInt(id, 10)
+		knownIDs = append(knownIDs, externalID)
+
+		var parentID any
+		if project.ParentProjectID != 0 {
+			parentID = strconv.FormatInt(project.ParentProjectID, 10)
+		}
+
+		if _, err := db.Exec(ctx, `
+			INSERT INTO task_projects (
+				user_id, source, external_id, name, path,
+				parent_external_id, archived, is_default, updated_at
+			)
+			VALUES ($1, 'vikunja', $2, $3, $4, $5, $6, $7, NOW())
+			ON CONFLICT (user_id, source, external_id) DO UPDATE SET
+				name = EXCLUDED.name,
+				path = EXCLUDED.path,
+				parent_external_id = EXCLUDED.parent_external_id,
+				archived = EXCLUDED.archived,
+				is_default = EXCLUDED.is_default,
+				updated_at = NOW()
+		`, userID, externalID,
+			strings.TrimSpace(project.Title),
+			vikunjaProjectPath(id, projects),
+			parentID,
+			project.IsArchived,
+			id == defaultProjectID,
+		); err != nil {
+			return err
+		}
+	}
+
+	_, err := db.Exec(ctx, `
+		DELETE FROM task_projects
+		WHERE user_id = $1 AND source = 'vikunja' AND NOT (external_id = ANY($2))
+	`, userID, knownIDs)
+	return err
+}
+
 func (v *VikunjaConnector) markInactiveTasks(ctx context.Context, db connectorDB, userID string, activeIDs []string) error {
 	_, err := db.Exec(ctx, `
 		UPDATE tasks
@@ -662,7 +717,7 @@ func vikunjaRecurrence(task vikunjaTask) string {
 	}
 
 	// repeat_mode 1 repeats monthly and ignores repeat_after entirely.
-	if task.RepeatMode == 1 {
+	if task.RepeatMode == vikunjaRepeatModeMonthly {
 		return "every month"
 	}
 
