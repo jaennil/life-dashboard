@@ -14,6 +14,7 @@ type Config struct {
 	Log        LogConfig        `mapstructure:"log"`
 	Sentry     SentryConfig     `mapstructure:"sentry"`
 	WebPush    WebPushConfig    `mapstructure:"web_push"`
+	Telegram   TelegramConfig   `mapstructure:"telegram"`
 	Connectors ConnectorsConfig `mapstructure:"connectors"`
 	Weather    WeatherConfig    `mapstructure:"weather"`
 	Unleash    UnleashConfig    `mapstructure:"unleash"`
@@ -23,6 +24,12 @@ type WebPushConfig struct {
 	PublicKey  string `mapstructure:"public_key"`
 	PrivateKey string `mapstructure:"private_key"`
 	Subscriber string `mapstructure:"subscriber"`
+}
+
+// TelegramConfig carries the one bot the whole instance talks through. An empty
+// token disables every Telegram feature rather than failing at send time.
+type TelegramConfig struct {
+	BotToken string `mapstructure:"bot_token"`
 }
 
 type UnleashConfig struct {
@@ -164,6 +171,7 @@ func Load() (*Config, error) {
 	viper.BindEnv("sentry.environment", "SENTRY_ENVIRONMENT")
 	viper.BindEnv("sentry.release", "SENTRY_RELEASE")
 	viper.BindEnv("sentry.traces_sample_rate", "SENTRY_BACKEND_TRACES_SAMPLE_RATE")
+	viper.BindEnv("telegram.bot_token", "TELEGRAM_BOT_TOKEN")
 	viper.BindEnv("web_push.public_key", "WEB_PUSH_PUBLIC_KEY")
 	viper.BindEnv("web_push.private_key", "WEB_PUSH_PRIVATE_KEY")
 	viper.BindEnv("web_push.subscriber", "WEB_PUSH_SUBSCRIBER")
