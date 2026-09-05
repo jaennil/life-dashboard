@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// aiFinanceObligationLimit keeps the obligation list to what fits in a report:
+// the biggest upcoming payments, not the full tail of small subscriptions.
+const aiFinanceObligationLimit = 8
+
 type AIFinanceOverviewData struct {
 	CurrentBalanceRub    float64        `json:"current_balance_rub"`
 	SpendingRub          float64        `json:"spending_rub"`
@@ -15,6 +19,11 @@ type AIFinanceOverviewData struct {
 	TransactionCount     int            `json:"transaction_count"`
 	TopExpenseCategories []CategoryStat `json:"top_expense_categories,omitempty"`
 	TopExpensePayees     []TopExpense   `json:"top_expense_payees,omitempty"`
+	// Obligations are what is already committed for the next month, which is
+	// what turns a balance into an answer about whether it is enough.
+	UpcomingObligations      []FinanceObligation `json:"upcoming_obligations,omitempty"`
+	UpcomingObligationsTotal float64             `json:"upcoming_obligations_total,omitempty"`
+	ObligationWindowDays     int                 `json:"obligation_window_days,omitempty"`
 }
 
 type AIFinanceTransaction struct {
@@ -126,7 +135,38 @@ func (h *AIHandler) buildFinanceOverviewInRange(ctx context.Context, userID stri
 		return AIFinanceOverviewData{}, err
 	}
 
+	h.attachFinanceObligations(ctx, &data, userID)
+
 	return data, nil
+}
+
+// attachFinanceObligations runs the same detection the finance page uses. A
+// failure is left silent on purpose: the rest of the overview is still worth
+// reporting, and obligations are a projection rather than a fact.
+func (h *AIHandler) attachFinanceObligations(ctx context.Context, data *AIFinanceOverviewData, userID string) {
+	now := time.Now()
+	records, err := loadFinanceExpenseRecords(ctx, h.db, userID, now)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load obligations for ai context")
+		return
+	}
+	rules, err := loadFinanceObligationRules(ctx, h.db, userID)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load obligation rules for ai context")
+		return
+	}
+
+	summary := detectFinanceObligations(records, now, 30, rules)
+	if summary.Count == 0 {
+		return
+	}
+	items := summary.Items
+	if len(items) > aiFinanceObligationLimit {
+		items = items[:aiFinanceObligationLimit]
+	}
+	data.UpcomingObligations = items
+	data.UpcomingObligationsTotal = summary.UpcomingTotal
+	data.ObligationWindowDays = summary.WindowDays
 }
 
 func (h *AIHandler) buildRecentTransactionsInRange(ctx context.Context, userID string, start, end time.Time, limit int) (AIRecentTransactionsData, error) {
@@ -196,6 +236,8 @@ func renderFinanceOverviewText(title string, data AIFinanceOverviewData) string 
 		}
 	}
 
+	sb.WriteString(renderFinanceObligationsText(data))
+
 	sb.WriteString("Крупные получатели денег:\n")
 	if len(data.TopExpensePayees) == 0 {
 		sb.WriteString("  - Нет заметных расходных получателей за период\n")
@@ -206,6 +248,21 @@ func renderFinanceOverviewText(title string, data AIFinanceOverviewData) string 
 	}
 
 	return strings.TrimSpace(sb.String())
+}
+
+func renderFinanceObligationsText(data AIFinanceOverviewData) string {
+	if len(data.UpcomingObligations) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Регулярные платежи на ближайшие %d дн.: %d шт. на %.0f ₽ (прогноз по истории, не факт списания)\n",
+		data.ObligationWindowDays, len(data.UpcomingObligations), data.UpcomingObligationsTotal))
+	for _, item := range data.UpcomingObligations {
+		sb.WriteString(fmt.Sprintf("  - %s: %.0f ₽, ожидается %s, %s\n",
+			item.Name, item.Amount, item.NextDueAt.In(aiDisplayLocation).Format("02.01"), item.CadenceLabel))
+	}
+	return sb.String()
 }
 
 func renderRecentTransactionsText(title string, data AIRecentTransactionsData) string {

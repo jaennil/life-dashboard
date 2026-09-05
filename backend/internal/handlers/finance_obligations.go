@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	authmw "life-dashboard/internal/middleware"
 )
 
@@ -94,49 +95,15 @@ func (h *FinanceHandler) GetObligations(w http.ResponseWriter, r *http.Request) 
 	}
 
 	now := time.Now()
-	historyFrom := now.AddDate(0, 0, -210)
 
-	rows, err := h.db.Query(ctx, `
-		SELECT
-			t.occurred_at,
-			ABS(t.amount),
-			COALESCE(t.payee, ''),
-			COALESCE(t.comment, ''),
-			COALESCE(t.category, '')
-		FROM transactions t
-		LEFT JOIN accounts a ON a.id = t.account_id
-		WHERE t.user_id = $1
-			AND t.amount < 0
-			AND t.currency = 'RUB'
-			AND t.is_transfer = FALSE
-			AND t.occurred_at >= $2
-			AND t.occurred_at < $3
-			AND COALESCE(a.in_balance, TRUE) = TRUE
-		ORDER BY t.occurred_at ASC
-	`, userID, historyFrom, now.Add(24*time.Hour))
+	records, err := loadFinanceExpenseRecords(ctx, h.db, userID, now)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("query obligations source expenses")
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
 
-	records := make([]financeExpenseRecord, 0, 128)
-	for rows.Next() {
-		var item financeExpenseRecord
-		if err := rows.Scan(&item.OccurredAt, &item.Amount, &item.Payee, &item.Comment, &item.Category); err != nil {
-			h.logger.Warn().Err(err).Msg("scan obligations source expense")
-			continue
-		}
-		records = append(records, item)
-	}
-	if err := rows.Err(); err != nil {
-		h.logger.Error().Err(err).Msg("iterate obligations source expenses")
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	rules, err := h.loadFinanceObligationRules(ctx, userID)
+	rules, err := loadFinanceObligationRules(ctx, h.db, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("load finance obligation rules")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -222,8 +189,50 @@ func (h *FinanceHandler) DeleteObligationRule(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// loadFinanceExpenseRecords reads the expense history obligation detection runs
+// on: seven months of RUB spending, transfers and off-balance accounts excluded.
+// Shared so the AI context detects the same obligations the page shows.
+func loadFinanceExpenseRecords(ctx context.Context, db *pgxpool.Pool, userID string, now time.Time) ([]financeExpenseRecord, error) {
+	rows, err := db.Query(ctx, `
+		SELECT
+			t.occurred_at,
+			ABS(t.amount),
+			COALESCE(t.payee, ''),
+			COALESCE(t.comment, ''),
+			COALESCE(t.category, '')
+		FROM transactions t
+		LEFT JOIN accounts a ON a.id = t.account_id
+		WHERE t.user_id = $1
+			AND t.amount < 0
+			AND t.currency = 'RUB'
+			AND t.is_transfer = FALSE
+			AND t.occurred_at >= $2
+			AND t.occurred_at < $3
+			AND COALESCE(a.in_balance, TRUE) = TRUE
+		ORDER BY t.occurred_at ASC
+	`, userID, now.AddDate(0, 0, -210), now.Add(24*time.Hour))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	records := make([]financeExpenseRecord, 0, 128)
+	for rows.Next() {
+		var item financeExpenseRecord
+		if err := rows.Scan(&item.OccurredAt, &item.Amount, &item.Payee, &item.Comment, &item.Category); err != nil {
+			continue
+		}
+		records = append(records, item)
+	}
+	return records, rows.Err()
+}
+
 func (h *FinanceHandler) loadFinanceObligationRules(ctx context.Context, userID string) ([]FinanceObligationRule, error) {
-	rows, err := h.db.Query(ctx, `
+	return loadFinanceObligationRules(ctx, h.db, userID)
+}
+
+func loadFinanceObligationRules(ctx context.Context, db *pgxpool.Pool, userID string) ([]FinanceObligationRule, error) {
+	rows, err := db.Query(ctx, `
 		SELECT match_key, match_label, action, created_at, updated_at
 		FROM finance_obligation_rules
 		WHERE user_id = $1
