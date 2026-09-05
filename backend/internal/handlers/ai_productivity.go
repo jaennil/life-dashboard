@@ -140,6 +140,7 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 			COALESCE(description, ''),
 			COALESCE(project_name, ''),
 			COALESCE(section_name, ''),
+			COALESCE(array_to_string(labels, ', '), ''),
 			COALESCE(priority, 1),
 			is_recurring,
 			added_at,
@@ -183,6 +184,7 @@ func (h *AIHandler) buildProductivityOverviewInRange(ctx context.Context, userID
 			&task.Description,
 			&task.ProjectName,
 			&task.SectionName,
+			&task.Labels,
 			&task.Priority,
 			&task.IsRecurring,
 			&task.AddedAt,
@@ -296,6 +298,9 @@ func renderProductivityOverviewText(title string, data AIProductivityOverviewDat
 				line += "]"
 			}
 			line += fmt.Sprintf(" | p%d | %s", task.Priority, label)
+			if task.Labels != "" {
+				line += " | метки: " + task.Labels
+			}
 			if task.IsRecurring {
 				line += " | recurring"
 			}

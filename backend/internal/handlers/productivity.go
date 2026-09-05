@@ -59,6 +59,7 @@ type ProductivityTask struct {
 	Description     string     `json:"description"`
 	ProjectName     string     `json:"project_name"`
 	SectionName     string     `json:"section_name"`
+	Labels          string     `json:"labels,omitempty"`
 	Priority        int        `json:"priority"`
 	IsRecurring     bool       `json:"is_recurring"`
 	AddedAt         *time.Time `json:"added_at"`
@@ -301,6 +302,7 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 			COALESCE(description, ''),
 			COALESCE(project_name, ''),
 			COALESCE(section_name, ''),
+			COALESCE(array_to_string(labels, ', '), ''),
 			COALESCE(priority, 1),
 			is_recurring,
 			added_at,
@@ -329,6 +331,7 @@ func (h *ProductivityHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 			&task.Description,
 			&task.ProjectName,
 			&task.SectionName,
+			&task.Labels,
 			&task.Priority,
 			&task.IsRecurring,
 			&task.AddedAt,
