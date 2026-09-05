@@ -62,8 +62,8 @@ func TestCheckupToolExecutionsOrder(t *testing.T) {
 	}
 
 	executions := handler.checkupToolExecutions(context.Background(), "user-1", window)
-	if len(executions) != 10 {
-		t.Fatalf("expected 10 executions, got %d", len(executions))
+	if len(executions) != 11 {
+		t.Fatalf("expected 11 executions, got %d", len(executions))
 	}
 
 	// The daily series is the one execution that does not follow the report
@@ -106,6 +106,7 @@ func TestCheckupToolExecutionsOrder(t *testing.T) {
 		{aiToolWorkoutOverview, "тренировки"},
 		{aiToolNutritionOverview, "питание"},
 		{aiToolHabitOverview, "привычки"},
+		{aiToolScreenTimeOverview, "экранное время"},
 		{aiToolJournalOverview, "дневник"},
 		{aiToolCalendarOverview, "календарь"},
 	}

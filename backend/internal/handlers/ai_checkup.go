@@ -465,6 +465,17 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 			},
 		},
 		{
+			Name:            aiToolScreenTimeOverview,
+			Section:         "экранное время",
+			RequestedPeriod: window.RequestedPeriod,
+			Start:           &start,
+			End:             &end,
+			Run: func(sb *strings.Builder) error {
+				h.appendCheckupScreenTimeContext(ctx, sb, userID, window)
+				return nil
+			},
+		},
+		{
 			Name:            aiToolJournalOverview,
 			Section:         "дневник",
 			RequestedPeriod: window.RequestedPeriod,
@@ -487,6 +498,19 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 			},
 		},
 	}
+}
+
+// appendCheckupScreenTimeContext keeps a failed section from killing the whole
+// report, the same way the other checkup sections do.
+func (h *AIHandler) appendCheckupScreenTimeContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
+	sb.WriteString("\n")
+	data, err := h.buildScreenTimeOverviewInRange(ctx, userID, window.Start, window.End)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("build screen time checkup context")
+		sb.WriteString("=== ЭКРАННОЕ ВРЕМЯ ===\nДанные экранного времени временно недоступны.\n")
+		return
+	}
+	sb.WriteString(renderScreenTimeOverviewText("=== ЭКРАННОЕ ВРЕМЯ ===", data))
 }
 
 func (h *AIHandler) appendCheckupHealthContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {

@@ -155,6 +155,7 @@ type aiContextScope struct {
 	journal      bool
 	calendar     bool
 	weather      bool
+	screentime   bool
 }
 
 type aiJournalEntry struct {
@@ -1134,11 +1135,12 @@ func defaultAIContextScope() aiContextScope {
 		journal:      true,
 		calendar:     true,
 		weather:      true,
+		screentime:   true,
 	}
 }
 
 func (s aiContextScope) empty() bool {
-	return !s.finance && !s.productivity && !s.activities && !s.health && !s.workouts && !s.routines && !s.habits && !s.nutrition && !s.journal && !s.calendar && !s.weather
+	return !s.finance && !s.productivity && !s.activities && !s.health && !s.workouts && !s.routines && !s.habits && !s.nutrition && !s.journal && !s.calendar && !s.weather && !s.screentime
 }
 
 func (s aiContextScope) sectionNames() []string {
@@ -1176,6 +1178,9 @@ func (s aiContextScope) sectionNames() []string {
 	if s.weather {
 		names = append(names, "погода")
 	}
+	if s.screentime {
+		names = append(names, "экранное время")
+	}
 	if len(names) == 0 {
 		return defaultAIContextScope().sectionNames()
 	}
@@ -1199,6 +1204,7 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	journalKeywords := []string{"дневник", "journal", "ноушн", "notion", "настроен", "рефлекс", "запис"}
 	calendarKeywords := []string{"календар", "встреч", "событи", "созвон", "митинг", "расписан", "план"}
 	weatherKeywords := []string{"погод", "температ", "дожд", "ветер", "на улице"}
+	screentimeKeywords := []string{"экранн", "screen time", "screentime", "телефон", "смартфон", "залип", "скроллинг", "скроллю", "сайт", "инстаграм", "instagram", "ютуб", "youtube", "тикток", "соцсет", "в приложени"}
 	generalKeywords := []string{"сводк", "обзор", "проанализ", "анализ", "итог", "общ", "что происходит", "что нового", "удивил"}
 
 	if containsAny(combined, financeKeywords...) {
@@ -1233,6 +1239,9 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	}
 	if containsAny(combined, weatherKeywords...) {
 		scope.weather = true
+	}
+	if containsAny(combined, screentimeKeywords...) {
+		scope.screentime = true
 	}
 
 	if strings.Contains(combined, "фитнес") || strings.Contains(combined, "нагруз") {
