@@ -41,6 +41,16 @@ type checkupWindow struct {
 	Note            string
 }
 
+// A source quiet for longer than this is reported as lagging rather than as
+// evidence of nothing happening.
+const checkupStaleSourceAge = 36 * time.Hour
+
+// How much of the previous report travels into the next one.
+const checkupPreviousReportRunes = 1200
+
+// How many dictated phrases travel with a report.
+const checkupDictatedPhraseLimit = 12
+
 const (
 	checkupPeriodToday     = "today"
 	checkupPeriodYesterday = "yesterday"
@@ -255,6 +265,9 @@ func (h *AIHandler) buildCheckupContextWithProgress(ctx context.Context, userID 
 	if window.Note != "" {
 		sb.WriteString("Примечание: " + window.Note + "\n")
 	}
+
+	h.appendDataFreshness(ctx, &sb, userID)
+	h.appendPreviousCheckup(ctx, &sb, userID)
 
 	run, err := h.runAITools(ctx, userID, h.checkupToolExecutions(ctx, userID, window), progress)
 	if err != nil {
@@ -497,6 +510,113 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 				return nil
 			},
 		},
+	}
+}
+
+// appendDataFreshness tells the model which sources are actually current.
+//
+// Without it a silent gap reads as a fact: an integration that stopped syncing
+// five days ago looks exactly like five days of doing nothing, and the report
+// then scolds the user for the connector's failure.
+func (h *AIHandler) appendDataFreshness(ctx context.Context, sb *strings.Builder, userID string) {
+	rows, err := h.db.Query(ctx, `
+		SELECT source, last_synced_at, consecutive_failures
+		FROM sync_state
+		WHERE user_id = $1 AND enabled = TRUE
+		ORDER BY source
+	`, userID)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load sync freshness for checkup")
+		return
+	}
+	defer rows.Close()
+
+	now := time.Now()
+	fresh := make([]string, 0, 8)
+	stale := make([]string, 0, 4)
+	for rows.Next() {
+		var source string
+		var lastSynced *time.Time
+		var failures int
+		if err := rows.Scan(&source, &lastSynced, &failures); err != nil {
+			return
+		}
+
+		if lastSynced == nil {
+			stale = append(stale, source+" (не синхронизировался ни разу)")
+			continue
+		}
+
+		age := now.Sub(*lastSynced)
+		description := fmt.Sprintf("%s (%s назад", source, formatAIAge(age))
+		if failures > 0 {
+			description += fmt.Sprintf(", ошибок подряд: %d", failures)
+		}
+		description += ")"
+
+		if age > checkupStaleSourceAge || failures > 0 {
+			stale = append(stale, description)
+			continue
+		}
+		fresh = append(fresh, source)
+	}
+
+	if len(fresh) == 0 && len(stale) == 0 {
+		return
+	}
+
+	sb.WriteString("\n=== СВЕЖЕСТЬ ДАННЫХ ===\n")
+	if len(fresh) > 0 {
+		sb.WriteString("Актуальные источники: " + strings.Join(fresh, ", ") + "\n")
+	}
+	if len(stale) > 0 {
+		sb.WriteString("Отстают: " + strings.Join(stale, ", ") + "\n")
+		sb.WriteString("По отстающим источникам пустые данные означают отсутствие синхронизации, а не отсутствие событий. Не делай из них выводов о поведении пользователя.\n")
+	}
+}
+
+// appendPreviousCheckup carries the last report into this one, so the new one
+// can say what changed instead of restating the same observations. Only the
+// opening of the report travels: it holds the conclusions, and the tail is
+// mostly the detail that this report will recompute anyway.
+func (h *AIHandler) appendPreviousCheckup(ctx context.Context, sb *strings.Builder, userID string) {
+	var content, period string
+	var createdAt time.Time
+	err := h.db.QueryRow(ctx, `
+		SELECT content, requested_period, created_at
+		FROM ai_checkup_reports
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, userID).Scan(&content, &period, &createdAt)
+	if err != nil {
+		return
+	}
+
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return
+	}
+	runes := []rune(trimmed)
+	if len(runes) > checkupPreviousReportRunes {
+		trimmed = strings.TrimSpace(string(runes[:checkupPreviousReportRunes])) + "..."
+	}
+
+	sb.WriteString(fmt.Sprintf("\n=== ПРОШЛЫЙ CHECKUP (%s, %s) ===\n",
+		checkupPeriodLabel(period), formatAITimestampLocal(createdAt, "02.01.2006 15:04")))
+	sb.WriteString(trimmed + "\n")
+	sb.WriteString("Это предыдущий отчёт. Отметь, что изменилось с тех пор, и не повторяй те же советы, если ситуация не поменялась.\n")
+}
+
+// formatAIAge says how long ago in words a report can use directly.
+func formatAIAge(age time.Duration) string {
+	switch {
+	case age < time.Hour:
+		return fmt.Sprintf("%d мин", int(age.Minutes()))
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%d ч", int(age.Hours()))
+	default:
+		return fmt.Sprintf("%d дн", int(age.Hours()/24))
 	}
 }
 
@@ -761,7 +881,57 @@ func (h *AIHandler) appendCheckupNutritionContext(ctx context.Context, sb *strin
 	}
 }
 
+// appendCheckupJournalContext covers everything the user wrote or said in the
+// window: the journal proper, and then the phrases dictated into the dashboard.
 func (h *AIHandler) appendCheckupJournalContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
+	h.appendCheckupJournalEntries(ctx, sb, userID, window)
+	h.appendDictatedPhrases(ctx, sb, userID, window)
+}
+
+// appendDictatedPhrases lists what was said out loud into the dashboard. The
+// archived phrase is the wording before any parser touched it, so it shows both
+// what the user meant and where it was routed, including the misroutes.
+func (h *AIHandler) appendDictatedPhrases(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
+	rows, err := h.db.Query(ctx, `
+		SELECT COALESCE(payload->>'text', ''), COALESCE(payload->>'domain', ''), created_at
+		FROM raw_events
+		WHERE user_id = $1
+			AND source = 'voice'
+			AND event_type = 'phrase'
+			AND created_at >= $2
+			AND created_at <= $3
+			AND COALESCE(payload->>'text', '') <> ''
+		ORDER BY created_at DESC
+		LIMIT $4
+	`, userID, window.Start, window.End, checkupDictatedPhraseLimit)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load dictated phrases for checkup")
+		return
+	}
+	defer rows.Close()
+
+	lines := make([]string, 0, checkupDictatedPhraseLimit)
+	for rows.Next() {
+		var text, domain string
+		var createdAt time.Time
+		if err := rows.Scan(&text, &domain, &createdAt); err != nil {
+			return
+		}
+		line := fmt.Sprintf("  - %s: %s", formatAITimestampLocal(createdAt, "02.01 15:04"), strings.TrimSpace(text))
+		if domain != "" && domain != voiceDomainUnknown {
+			line += " [" + domain + "]"
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return
+	}
+
+	sb.WriteString("\nНадиктованное в дашборд (сырые фразы, до разбора):\n")
+	sb.WriteString(strings.Join(lines, "\n") + "\n")
+}
+
+func (h *AIHandler) appendCheckupJournalEntries(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
 	sb.WriteString("\n=== ДНЕВНИК ===\n")
 
 	var entriesCount int
