@@ -17,6 +17,16 @@ type AINutritionOverviewData struct {
 	AvgFatG     float64           `json:"avg_fat_g"`
 	AvgWaterML  float64           `json:"avg_water_ml"`
 	RecentDays  []AINutritionDay  `json:"recent_days"`
+	// Beverages splits the liquid: the daily water figure alone cannot tell
+	// whether the norm was made of water or of four energy drinks.
+	Beverages     []AINutritionBeverage `json:"beverages,omitempty"`
+	HydrationMode string                `json:"hydration_mode,omitempty"`
+}
+
+type AINutritionBeverage struct {
+	Type             string  `json:"type"`
+	TotalML          float64 `json:"total_ml"`
+	CountsTowardGoal bool    `json:"counts_toward_goal"`
 }
 
 type AINutritionDay struct {
@@ -54,6 +64,8 @@ func (h *AIHandler) buildNutritionOverviewData(ctx context.Context, userID strin
 		return data, err
 	}
 
+	h.attachNutritionBeverages(ctx, &data, userID, since, time.Now(), targets)
+
 	rows, err := h.db.Query(ctx, `
 		SELECT date, COALESCE(calories_total, 0), COALESCE(protein_g, 0), COALESCE(carbs_g, 0), COALESCE(fat_g, 0), COALESCE(fiber_g, 0), COALESCE(water_ml, 0)
 		FROM nutrition_daily
@@ -83,6 +95,80 @@ func (h *AIHandler) buildNutritionOverviewData(ctx context.Context, userID strin
 	return data, nil
 }
 
+// attachNutritionBeverages sums the logged drinks by type over the window.
+// Missing hydration is normal, so a failure here is silent.
+func (h *AIHandler) attachNutritionBeverages(ctx context.Context, data *AINutritionOverviewData, userID string, start, end time.Time, targets *NutritionTargets) {
+	mode := hydrationModeStrict
+	if targets != nil && targets.HydrationMode != "" {
+		mode = normalizeHydrationMode(targets.HydrationMode)
+	}
+	data.HydrationMode = mode
+
+	perDay, err := loadHydrationRange(ctx, h.db, userID, start, end, mode)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load hydration for ai context")
+		return
+	}
+
+	totals := map[string]float64{}
+	counts := map[string]bool{}
+	for _, aggregate := range perDay {
+		for _, beverage := range aggregate.Beverages {
+			totals[beverage.BeverageType] += beverage.AmountML
+			counts[beverage.BeverageType] = beverage.CountsTowardGoal
+		}
+	}
+	if len(totals) == 0 {
+		return
+	}
+
+	// Fixed order so the same report twice reads the same way.
+	for _, beverageType := range hydrationBeverageOrder {
+		amount, ok := totals[beverageType]
+		if !ok || amount <= 0 {
+			continue
+		}
+		data.Beverages = append(data.Beverages, AINutritionBeverage{
+			Type:             beverageType,
+			TotalML:          amount,
+			CountsTowardGoal: counts[beverageType],
+		})
+	}
+}
+
+func renderNutritionBeveragesText(data AINutritionOverviewData) string {
+	if len(data.Beverages) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(data.Beverages))
+	for _, beverage := range data.Beverages {
+		label := hydrationBeverageLabel(beverage.Type)
+		if !beverage.CountsTowardGoal {
+			label += " (не в цель)"
+		}
+		parts = append(parts, fmt.Sprintf("%s %.0f мл", label, beverage.TotalML))
+	}
+	return fmt.Sprintf("Напитки за период (режим %s): %s\n", data.HydrationMode, strings.Join(parts, ", "))
+}
+
+func hydrationBeverageLabel(beverageType string) string {
+	switch beverageType {
+	case hydrationBeverageTea:
+		return "чай"
+	case hydrationBeverageCoffee:
+		return "кофе"
+	case hydrationBeverageEnergy:
+		return "энергетики"
+	case hydrationBeverageMilkshake:
+		return "сладкие напитки"
+	case hydrationBeverageOther:
+		return "прочее"
+	default:
+		return beverageType
+	}
+}
+
 func renderNutritionOverviewText(title string, data AINutritionOverviewData) string {
 	var sb strings.Builder
 	sb.WriteString(strings.TrimSpace(title))
@@ -95,6 +181,7 @@ func renderNutritionOverviewText(title string, data AINutritionOverviewData) str
 		sb.WriteString(fmt.Sprintf(" | вода %.0f мл", data.AvgWaterML))
 	}
 	sb.WriteString("\n")
+	sb.WriteString(renderNutritionBeveragesText(data))
 
 	if len(data.RecentDays) == 0 {
 		sb.WriteString("  Нет логов питания за период\n")
