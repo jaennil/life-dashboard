@@ -185,13 +185,16 @@ func main() {
 		}
 	}
 
+	pushOptions := handlers.WebPushOptions{
+		PublicKey: cfg.WebPush.PublicKey, PrivateKey: cfg.WebPush.PrivateKey, Subscriber: cfg.WebPush.Subscriber,
+	}
 	aiHandler := handlers.NewAI(pool, handlers.AIOptions{
 		BaseURL:         cfg.AI.BaseURL,
 		Model:           cfg.AI.Model,
 		APIKey:          cfg.AI.APIKey,
 		ReasoningEffort: cfg.AI.ReasoningEffort,
 		RequestTimeout:  cfg.AI.RequestTimeout,
-	}, weatherHandler, unleashClient, log.Logger)
+	}, weatherHandler, unleashClient, pushOptions, log.Logger)
 
 	sched := scheduler.New(log.Logger)
 	for _, conn := range activeConnectors {
@@ -230,12 +233,13 @@ func main() {
 	// The lazy close in the webhook only fires when the next phrase arrives, so
 	// this sweep is what actually bounds a dictated session that was never
 	// finished out loud.
-	voiceSessions := handlers.NewVoiceWorkout(pool, aiHandler, hevy, fatSecretConn, vikunja, cfg.AI.ParseModel, cfg.AI.ParseReasoningEffort, handlers.WebPushOptions{
-		PublicKey: cfg.WebPush.PublicKey, PrivateKey: cfg.WebPush.PrivateKey, Subscriber: cfg.WebPush.Subscriber,
-	}, log.Logger)
+	voiceSessions := handlers.NewVoiceWorkout(pool, aiHandler, hevy, fatSecretConn, vikunja, cfg.AI.ParseModel, cfg.AI.ParseReasoningEffort, pushOptions, log.Logger)
 	inputWorkerCtx, stopInputWorker := context.WithCancel(context.Background())
 	defer stopInputWorker()
 	voiceSessions.StartInputWorker(inputWorkerCtx)
+	// The checkup generation outlives the request that asked for it, so it needs
+	// a worker of its own rather than the request goroutine.
+	aiHandler.StartCheckupWorker(inputWorkerCtx)
 	if err := sched.AddJob("0 */10 * * * *", "voice_workout_idle_close", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
@@ -407,6 +411,8 @@ func main() {
 		r.Post("/api/v1/ai/chat", aiHandler.Chat)
 		r.Post("/api/v1/ai/checkup", aiHandler.Checkup)
 		r.Get("/api/v1/ai/checkup/latest", aiHandler.GetLatestCheckup)
+		r.Get("/api/v1/ai/checkup/jobs", aiHandler.ListCheckupJobs)
+		r.Get("/api/v1/ai/checkup/jobs/{jobID}", aiHandler.GetCheckupJob)
 		r.Post("/api/v1/input", voiceSessions.ReceiveTypedText)
 		r.Get("/api/v1/input/jobs", voiceSessions.ListInputJobs)
 		r.Get("/api/v1/input/jobs/{jobID}", voiceSessions.GetInputJob)

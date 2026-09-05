@@ -102,18 +102,39 @@ func (p *webPushSender) enabled() bool {
 }
 
 func (p *webPushSender) sendInputResult(ctx context.Context, userID, jobID, display string, success bool) error {
+	title := "Запись готова"
+	if !success {
+		title = "Не удалось обработать запись"
+	}
+	return p.send(ctx, userID, jobID, map[string]string{
+		"title": title, "body": display, "url": "/input", "tag": "input-job-" + jobID,
+	})
+}
+
+// sendCheckupResult tells a closed app that a queued checkup finished. The tag
+// is per job, so a repeated delivery of the same report collapses into one
+// notification while a later checkup still arrives as its own.
+func (p *webPushSender) sendCheckupResult(ctx context.Context, userID, jobID, body string, success bool) error {
+	title := "Checkup готов"
+	if !success {
+		title = "Checkup не собрался"
+	}
+	return p.send(ctx, userID, jobID, map[string]string{
+		"title": title, "body": body, "url": "/ai", "tag": "checkup-job-" + jobID,
+	})
+}
+
+// send delivers one notification to every subscription the user has. Only a
+// delivery that reached nobody counts as a failure: one dead browser must not
+// make the queue retry a notification the phone already showed.
+func (p *webPushSender) send(ctx context.Context, userID, jobID string, notification map[string]string) error {
 	if !p.enabled() {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	title := "Запись готова"
-	if !success {
-		title = "Не удалось обработать запись"
-	}
-	payload, err := json.Marshal(map[string]string{
-		"title": title, "body": display, "url": "/input", "tag": "input-job-" + jobID,
-	})
+
+	payload, err := json.Marshal(notification)
 	if err != nil {
 		return err
 	}

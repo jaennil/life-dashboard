@@ -26,7 +26,11 @@ type AIHandler struct {
 	opts    AIOptions
 	weather *WeatherHandler
 	unleash *unleashclient.Client
-	logger  zerolog.Logger
+	// push notifies a closed app that a queued checkup is ready, and wake saves
+	// the queue worker from waiting out its poll interval after an enqueue.
+	push   *webPushSender
+	wake   chan struct{}
+	logger zerolog.Logger
 }
 
 // AIOptions carries the upstream settings. They travel as a struct rather than
@@ -51,7 +55,7 @@ var aiDisplayLocation = func() *time.Location {
 	return time.FixedZone("MSK", 3*60*60)
 }()
 
-func NewAI(db *pgxpool.Pool, opts AIOptions, weather *WeatherHandler, unleashClient *unleashclient.Client, logger zerolog.Logger) *AIHandler {
+func NewAI(db *pgxpool.Pool, opts AIOptions, weather *WeatherHandler, unleashClient *unleashclient.Client, pushOptions WebPushOptions, logger zerolog.Logger) *AIHandler {
 	opts.BaseURL = strings.TrimRight(opts.BaseURL, "/")
 	if opts.RequestTimeout <= 0 {
 		opts.RequestTimeout = aiUpstreamDefaultTimeout
@@ -61,6 +65,8 @@ func NewAI(db *pgxpool.Pool, opts AIOptions, weather *WeatherHandler, unleashCli
 		opts:    opts,
 		weather: weather,
 		unleash: unleashClient,
+		push:    newWebPushSender(db, pushOptions, logger),
+		wake:    make(chan struct{}, 1),
 		logger:  logger.With().Str("handler", "ai").Logger(),
 	}
 }

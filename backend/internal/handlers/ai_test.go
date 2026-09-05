@@ -456,7 +456,7 @@ func TestFormatAIMealTypesTranslatesKnownMeals(t *testing.T) {
 }
 
 func TestUpstreamBodyOmitsReasoningEffortWhenUnset(t *testing.T) {
-	h := NewAI(nil, AIOptions{Model: "some-model"}, nil, nil, zerolog.Nop())
+	h := NewAI(nil, AIOptions{Model: "some-model"}, nil, nil, WebPushOptions{}, zerolog.Nop())
 
 	raw, err := h.upstreamBody([]ChatMessage{{Role: "user", Content: "hi"}}, true)
 	if err != nil {
@@ -481,7 +481,7 @@ func TestUpstreamBodyOmitsReasoningEffortWhenUnset(t *testing.T) {
 }
 
 func TestUpstreamBodySendsConfiguredReasoningEffort(t *testing.T) {
-	h := NewAI(nil, AIOptions{Model: "some-model", ReasoningEffort: "high"}, nil, nil, zerolog.Nop())
+	h := NewAI(nil, AIOptions{Model: "some-model", ReasoningEffort: "high"}, nil, nil, WebPushOptions{}, zerolog.Nop())
 
 	raw, err := h.upstreamBody([]ChatMessage{{Role: "user", Content: "hi"}}, false)
 	if err != nil {
@@ -515,7 +515,7 @@ func TestModelOverrideDoesNotInheritReasoningEffort(t *testing.T) {
 		BaseURL:         server.URL,
 		Model:           "reasoning-model",
 		ReasoningEffort: "high",
-	}, nil, nil, zerolog.Nop())
+	}, nil, nil, WebPushOptions{}, zerolog.Nop())
 
 	if _, err := h.CompleteWithModel(context.Background(), "test", nil, "fast-model", ""); err != nil {
 		t.Fatalf("CompleteWithModel: %v", err)
@@ -529,19 +529,19 @@ func TestModelOverrideDoesNotInheritReasoningEffort(t *testing.T) {
 }
 
 func TestNewAIFallsBackToDefaultTimeout(t *testing.T) {
-	h := NewAI(nil, AIOptions{Model: "m"}, nil, nil, zerolog.Nop())
+	h := NewAI(nil, AIOptions{Model: "m"}, nil, nil, WebPushOptions{}, zerolog.Nop())
 	if got := h.upstreamTimeout(); got != aiUpstreamDefaultTimeout {
 		t.Fatalf("timeout = %s, want %s", got, aiUpstreamDefaultTimeout)
 	}
 
-	h = NewAI(nil, AIOptions{Model: "m", RequestTimeout: 42 * time.Second}, nil, nil, zerolog.Nop())
+	h = NewAI(nil, AIOptions{Model: "m", RequestTimeout: 42 * time.Second}, nil, nil, WebPushOptions{}, zerolog.Nop())
 	if got := h.upstreamTimeout(); got != 42*time.Second {
 		t.Fatalf("timeout = %s, want 42s", got)
 	}
 }
 
 func TestNewAITrimsBaseURLSlash(t *testing.T) {
-	h := NewAI(nil, AIOptions{BaseURL: "http://example.test:8000/"}, nil, nil, zerolog.Nop())
+	h := NewAI(nil, AIOptions{BaseURL: "http://example.test:8000/"}, nil, nil, WebPushOptions{}, zerolog.Nop())
 	if h.opts.BaseURL != "http://example.test:8000" {
 		t.Fatalf("base url = %q", h.opts.BaseURL)
 	}
