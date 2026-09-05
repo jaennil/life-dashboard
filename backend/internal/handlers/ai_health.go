@@ -312,7 +312,16 @@ func (h *AIHandler) appendBodyComposition(ctx context.Context, sb *strings.Build
 			WHERE user_id = $1 AND metric_type = $2
 				AND timestamp >= $3 AND timestamp < $4
 		`, userID, metric.metric, start, end).Scan(&first, &last, &measurements)
-		if err != nil || measurements == 0 {
+		if err != nil {
+			continue
+		}
+		if measurements == 0 {
+			// Body composition moves slowly and the scale is not stepped on every
+			// week, so a window with no measurement is not the same as no data:
+			// the last known value still describes the body today.
+			if line, ok := h.lastKnownBodyMetric(ctx, userID, metric.metric, metric.label, metric.unit, end); ok {
+				lines = append(lines, line)
+			}
 			continue
 		}
 
@@ -328,10 +337,33 @@ func (h *AIHandler) appendBodyComposition(ctx context.Context, sb *strings.Build
 	}
 
 	if len(lines) == 0 {
-		sb.WriteString("Состав тела: нет данных за период\n")
+		sb.WriteString("Состав тела: нет данных\n")
 		return
 	}
-	sb.WriteString("Состав тела (последнее значение, Δ за период): " + strings.Join(lines, ", ") + "\n")
+	sb.WriteString("Состав тела (последнее значение, Δ за период; для метрик без замеров в периоде указан возраст замера): " + strings.Join(lines, ", ") + "\n")
+}
+
+// lastKnownBodyMetric falls back to the most recent measurement before the
+// window, labelled with its age so the report never passes an old number off as
+// a fresh one.
+func (h *AIHandler) lastKnownBodyMetric(ctx context.Context, userID, metric, label, unit string, before time.Time) (string, bool) {
+	var value float64
+	var measuredAt time.Time
+	err := h.db.QueryRow(ctx, `
+		SELECT value, timestamp
+		FROM biometrics
+		WHERE user_id = $1 AND metric_type = $2 AND timestamp < $3
+		ORDER BY timestamp DESC
+		LIMIT 1
+	`, userID, metric, before).Scan(&value, &measuredAt)
+	if err != nil {
+		return "", false
+	}
+
+	if unit != "" && unit != "%" {
+		unit = " " + unit
+	}
+	return fmt.Sprintf("%s %.1f%s (замер %s назад)", label, value, unit, formatAIAge(before.Sub(measuredAt))), true
 }
 
 // walkingQualityMetrics are the gait numbers Apple Health records on their own.
