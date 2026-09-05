@@ -23,7 +23,7 @@ const (
 type ProductivityHabitsResponse struct {
 	Date    string                    `json:"date"`
 	Summary ProductivityHabitsSummary `json:"summary"`
-	Habits  []ProductivityHabit      `json:"habits"`
+	Habits  []ProductivityHabit       `json:"habits"`
 }
 
 type ProductivityHabitsSummary struct {
@@ -49,7 +49,7 @@ type ProductivityHabit struct {
 
 type saveManualHabitRequest struct {
 	Name     string `json:"name"`
-	Routine string `json:"routine"`
+	Routine  string `json:"routine"`
 	AreaName string `json:"area_name"`
 }
 
@@ -104,8 +104,8 @@ func (h *ProductivityHandler) CreateHabit(w http.ResponseWriter, r *http.Request
 	}
 
 	rawPayload, _ := json.Marshal(map[string]any{
-		"source":   manualHabitSource,
-		"routine":  routine,
+		"source":    manualHabitSource,
+		"routine":   routine,
 		"area_name": areaName,
 	})
 
@@ -148,8 +148,8 @@ func (h *ProductivityHandler) UpdateHabit(w http.ResponseWriter, r *http.Request
 	}
 
 	rawPayload, _ := json.Marshal(map[string]any{
-		"source":   manualHabitSource,
-		"routine":  routine,
+		"source":    manualHabitSource,
+		"routine":   routine,
 		"area_name": areaName,
 	})
 
@@ -253,10 +253,10 @@ func (h *ProductivityHandler) SetHabitStatus(w http.ResponseWriter, r *http.Requ
 	}
 
 	rawPayload, _ := json.Marshal(map[string]any{
-		"source":     manualHabitSource,
-		"status":     status,
+		"source":      manualHabitSource,
+		"status":      status,
 		"target_date": targetDate.Format("2006-01-02"),
-		"updated_at": time.Now().UTC().Format(time.RFC3339),
+		"updated_at":  time.Now().UTC().Format(time.RFC3339),
 	})
 
 	_, err := h.db.Exec(ctx, `
@@ -315,7 +315,7 @@ func (h *ProductivityHandler) loadManualHabits(ctx context.Context, userID strin
 	}
 
 	response := &ProductivityHabitsResponse{
-		Date: targetDate.Format("2006-01-02"),
+		Date:   targetDate.Format("2006-01-02"),
 		Habits: []ProductivityHabit{},
 	}
 	if len(habits) == 0 {

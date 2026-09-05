@@ -37,4 +37,3 @@ func TestCompletedStreak(t *testing.T) {
 		t.Fatalf("completedStreak() = %d, want 3", got)
 	}
 }
-
