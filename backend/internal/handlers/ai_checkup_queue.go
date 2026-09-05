@@ -323,34 +323,21 @@ func (h *AIHandler) processNextCheckupNotification(ctx context.Context) bool {
 	}
 
 	success := job.Status == "succeeded"
-	body := checkupNotificationBody(job.Period, job.Content, success)
 
-	// Telegram gets the whole report, the push only a line: one is read in a
-	// chat, the other on a lock screen. A failure here retries both, and the
-	// push carries a per-job tag so the repeat replaces rather than stacks.
-	if success && h.telegram != nil {
-		if _, err := h.telegram.SendReport(ctx, job.UserID, "Checkup "+checkupPeriodLabel(job.Period), job.Content); err != nil {
-			delay := time.Duration(job.Attempts) * time.Minute
-			if delay > time.Hour {
-				delay = time.Hour
-			}
-			if updateErr := h.retryCheckupNotification(ctx, job.ID, err.Error(), delay); updateErr != nil {
-				h.logger.Error().Err(updateErr).Str("job_id", job.ID).Msg("retry checkup notification")
-			}
-			h.logger.Warn().Err(err).Str("job_id", job.ID).Msg("send checkup to telegram")
-			return true
-		}
+	// Push first, Telegram second, and both before the row is marked sent. The
+	// order matters on a retry: a repeated push replaces the previous one thanks
+	// to its per-job tag, while a repeated Telegram message would be a second
+	// copy of the whole report in the chat.
+	if err := h.push.sendCheckupResult(ctx, job.UserID, job.ID, checkupNotificationBody(job.Period, job.Content, success), success); err != nil {
+		h.deferCheckupNotification(ctx, job, err, "send checkup push")
+		return true
 	}
 
-	if err := h.push.sendCheckupResult(ctx, job.UserID, job.ID, body, success); err != nil {
-		delay := time.Duration(job.Attempts) * time.Minute
-		if delay > time.Hour {
-			delay = time.Hour
+	if success && h.telegram != nil {
+		if _, err := h.telegram.SendReport(ctx, job.UserID, "Checkup "+checkupPeriodLabel(job.Period), job.Content); err != nil {
+			h.deferCheckupNotification(ctx, job, err, "send checkup to telegram")
+			return true
 		}
-		if updateErr := h.retryCheckupNotification(ctx, job.ID, err.Error(), delay); updateErr != nil {
-			h.logger.Error().Err(updateErr).Str("job_id", job.ID).Msg("retry checkup notification")
-		}
-		return true
 	}
 
 	if _, err := h.db.Exec(ctx, `
@@ -362,6 +349,19 @@ func (h *AIHandler) processNextCheckupNotification(ctx context.Context) bool {
 		h.logger.Error().Err(err).Str("job_id", job.ID).Msg("complete checkup notification")
 	}
 	return true
+}
+
+// deferCheckupNotification backs a failed delivery off by a minute per attempt,
+// up to an hour: a push service or a bot that is down stays down for a while.
+func (h *AIHandler) deferCheckupNotification(ctx context.Context, job checkupNotificationJob, cause error, action string) {
+	delay := time.Duration(job.Attempts) * time.Minute
+	if delay > time.Hour {
+		delay = time.Hour
+	}
+	h.logger.Warn().Err(cause).Str("job_id", job.ID).Dur("retry_in", delay).Msg(action)
+	if err := h.retryCheckupNotification(ctx, job.ID, cause.Error(), delay); err != nil {
+		h.logger.Error().Err(err).Str("job_id", job.ID).Msg("retry checkup notification")
+	}
 }
 
 // checkupNotificationBody keeps the notification to the first thing the report
