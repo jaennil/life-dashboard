@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +12,97 @@ import (
 
 type taskWriter interface {
 	CreateTask(ctx context.Context, userID string, draft connectors.VikunjaTaskDraft) (connectors.VikunjaTaskRef, error)
+}
+
+// taskProject is one project the dictated task can be filed into, mirrored
+// locally by the sync.
+type taskProject struct {
+	ExternalID string
+	Name       string
+	Path       string
+	IsDefault  bool
+}
+
+func (h *VoiceWorkoutHandler) loadTaskProjects(ctx context.Context, userID string) ([]taskProject, error) {
+	rows, err := h.db.Query(ctx, `
+		SELECT external_id, name, path, is_default
+		FROM task_projects
+		WHERE user_id = $1 AND source = 'vikunja' AND archived = FALSE
+		ORDER BY is_default DESC, path
+		LIMIT 100
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	projects := make([]taskProject, 0, 16)
+	for rows.Next() {
+		var project taskProject
+		if err := rows.Scan(&project.ExternalID, &project.Name, &project.Path, &project.IsDefault); err != nil {
+			return nil, err
+		}
+		projects = append(projects, project)
+	}
+	return projects, rows.Err()
+}
+
+// resolveTaskProject maps what the model answered onto a real project.
+//
+// The prompt asks for a verbatim copy, but a model that paraphrases must not
+// silently file the task somewhere else: only an unambiguous match counts, and
+// anything else falls back to the default project with a note to the user.
+func resolveTaskProject(answer string, projects []taskProject) (taskProject, bool) {
+	needle := strings.ToLower(strings.TrimSpace(answer))
+	if needle == "" {
+		return taskProject{}, false
+	}
+
+	for _, project := range projects {
+		if strings.ToLower(project.Path) == needle || strings.ToLower(project.Name) == needle {
+			return project, true
+		}
+	}
+
+	var match taskProject
+	found := 0
+	for _, project := range projects {
+		if strings.Contains(strings.ToLower(project.Path), needle) {
+			match = project
+			found++
+		}
+	}
+	if found == 1 {
+		return match, true
+	}
+	return taskProject{}, false
+}
+
+// taskRepeatSeconds turns a spoken interval into what Vikunja stores. Months are
+// the exception: the provider repeats them by calendar rather than by duration,
+// which is a separate mode and only exists for a single month.
+func taskRepeatSeconds(repeat *voiceParsedRepeat) (seconds int64, monthly bool, ok bool) {
+	if repeat == nil {
+		return 0, false, false
+	}
+	every := repeat.Every
+	if every <= 0 {
+		every = 1
+	}
+
+	switch strings.ToLower(strings.TrimSpace(repeat.Unit)) {
+	case "day", "days", "день", "дня", "дней":
+		return int64(every) * 24 * 3600, false, true
+	case "week", "weeks", "неделя", "недели", "недель":
+		return int64(every) * 7 * 24 * 3600, false, true
+	case "month", "months", "месяц", "месяца", "месяцев":
+		if every == 1 {
+			return 0, true, true
+		}
+		return 0, false, false
+	default:
+		return 0, false, false
+	}
 }
 
 // applyTask writes a dictated task straight to Vikunja.
@@ -37,9 +129,34 @@ func (h *VoiceWorkoutHandler) applyTask(ctx context.Context, userID, eventID str
 	}
 
 	draft := connectors.VikunjaTaskDraft{
-		Title:    title,
-		Priority: interpreted.Task.Priority,
+		Title:       title,
+		Description: strings.TrimSpace(interpreted.Task.Description),
+		Priority:    interpreted.Task.Priority,
 	}
+
+	if named := strings.TrimSpace(interpreted.Task.Project); named != "" {
+		projects, err := h.loadTaskProjects(ctx, userID)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("user_id", userID).Msg("load task projects")
+		}
+		if project, ok := resolveTaskProject(named, projects); ok {
+			if id, err := strconv.ParseInt(project.ExternalID, 10, 64); err == nil {
+				draft.ProjectID = id
+			}
+		} else {
+			// Filing into the wrong project is worse than filing into the inbox,
+			// so an unrecognized name is reported rather than guessed at.
+			response.Unmatched = append(response.Unmatched, "проект \""+named+"\" не нашёл")
+		}
+	}
+
+	if seconds, monthly, ok := taskRepeatSeconds(interpreted.Task.Repeat); ok {
+		draft.RepeatEverySeconds = seconds
+		draft.RepeatMonthly = monthly
+	} else if interpreted.Task.Repeat != nil {
+		response.Unmatched = append(response.Unmatched, "повтор не разобрал")
+	}
+
 	if raw := strings.TrimSpace(interpreted.Task.DueAt); raw != "" {
 		if dueAt, err := time.Parse(time.RFC3339, raw); err == nil {
 			draft.DueAt = dueAt
@@ -79,7 +196,74 @@ func summarizeCreatedTask(task connectors.VikunjaTaskRef) string {
 	if task.DueAt != nil {
 		parts = append(parts, "до "+task.DueAt.Local().Format("02.01 15:04"))
 	}
+	if task.Recurrence != "" {
+		parts = append(parts, taskRecurrenceRu(task.Recurrence))
+	}
 	return strings.Join(parts, " · ")
+}
+
+// taskRecurrenceRu translates the provider's repeat rule for the phone. The
+// stored form stays English because that is what the habit tables already
+// carry; only the line someone reads out of a notification is localized.
+func taskRecurrenceRu(recurrence string) string {
+	rule := strings.TrimSpace(recurrence)
+	fromCompletion := strings.HasSuffix(rule, " from completion")
+	rule = strings.TrimSuffix(rule, " from completion")
+
+	// Singular for "every <unit>", then the two plural forms Russian needs: one
+	// for 2-4 and one for 5 and up.
+	units := map[string][3]string{
+		"minute": {"минуту", "минуты", "минут"},
+		"hour":   {"час", "часа", "часов"},
+		"day":    {"день", "дня", "дней"},
+		"week":   {"неделю", "недели", "недель"},
+		"month":  {"месяц", "месяца", "месяцев"},
+	}
+	feminine := map[string]bool{"minute": true, "week": true}
+
+	translated := ""
+	fields := strings.Fields(rule)
+	switch {
+	case len(fields) == 2 && fields[0] == "every":
+		if forms, ok := units[fields[1]]; ok {
+			prefix := "каждый"
+			if feminine[fields[1]] {
+				prefix = "каждую"
+			}
+			translated = prefix + " " + forms[0]
+		}
+	case len(fields) == 3 && fields[0] == "every":
+		unit := strings.TrimSuffix(fields[2], "s")
+		count, err := strconv.Atoi(fields[1])
+		if forms, ok := units[unit]; ok && err == nil {
+			translated = "каждые " + fields[1] + " " + russianPlural(count, forms)
+		}
+	}
+	if translated == "" {
+		translated = rule
+	}
+	if fromCompletion {
+		translated += " от выполнения"
+	}
+	return translated
+}
+
+// russianPlural picks the form for a count: 1, 2-4, or 5 and up, with the teens
+// taking the last form regardless of their final digit.
+func russianPlural(count int, forms [3]string) string {
+	if count < 0 {
+		count = -count
+	}
+	switch {
+	case count%100 >= 11 && count%100 <= 19:
+		return forms[2]
+	case count%10 == 1:
+		return forms[0]
+	case count%10 >= 2 && count%10 <= 4:
+		return forms[1]
+	default:
+		return forms[2]
+	}
 }
 
 func (h *VoiceWorkoutHandler) recordTaskID(ctx context.Context, eventID, taskID string) error {

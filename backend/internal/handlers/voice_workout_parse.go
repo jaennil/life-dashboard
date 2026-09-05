@@ -67,9 +67,22 @@ type voiceParseResult struct {
 // already resolved to a timestamp: "в пятницу" can only be turned into a date
 // against the moment the phrase was said, which the prompt carries.
 type voiceParsedTask struct {
-	Title    string `json:"title"`
-	DueAt    string `json:"due_at"`
-	Priority int    `json:"priority"`
+	Title string `json:"title"`
+	// Project is copied verbatim from the list in the prompt, the same rule the
+	// workout parse uses for template ids: an invented project cannot be filed.
+	Project     string             `json:"project"`
+	Description string             `json:"description"`
+	DueAt       string             `json:"due_at"`
+	Priority    int                `json:"priority"`
+	Repeat      *voiceParsedRepeat `json:"repeat"`
+}
+
+// voiceParsedRepeat is a repeat rule in the words people actually say: every N
+// days, weeks or months. Turning it into what the provider stores is this side's
+// job, not the model's arithmetic.
+type voiceParsedRepeat struct {
+	Every int    `json:"every"`
+	Unit  string `json:"unit"`
 }
 
 // voiceInterpretation is the router's verdict on a phrase. Parsed stays nil when
@@ -191,7 +204,7 @@ func (h *VoiceWorkoutHandler) loadCandidateLastSets(ctx context.Context, userID 
 // Every rule here comes from a real phrasing rather than from imagination, and
 // the hard constraint is that a template_id must be copied from the list: an
 // invented id would be rejected by Hevy, or worse, accepted as another exercise.
-func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoodCandidate, draft []voiceParsedExercise, workoutOpen bool, now time.Time) string {
+func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoodCandidate, projects []taskProject, draft []voiceParsedExercise, workoutOpen bool, now time.Time) string {
 	var sb strings.Builder
 	sb.WriteString("Ты разбираешь фразу, надиктованную вслух по-русски в дневник пользователя.\n")
 	sb.WriteString("Верни только JSON, без markdown и без пояснений, в формате:\n")
@@ -199,7 +212,7 @@ func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoo
 	sb.WriteString("\nДля еды формат такой:\n")
 	sb.WriteString(`{"domain":"food","exercises":[],"entries":[{"food_id":"...","serving_id":"...","name":"...","grams":70,"meal":"breakfast"}],"unmatched":["..."]}`)
 	sb.WriteString("\nДля задачи формат такой:\n")
-	sb.WriteString(`{"domain":"task","exercises":[],"entries":[],"task":{"title":"забрать запчасти","due_at":"2026-09-05T12:00:00+03:00","priority":0},"unmatched":[]}`)
+	sb.WriteString(`{"domain":"task","exercises":[],"entries":[],"task":{"title":"забрать запчасти","project":"citroen","description":"","due_at":"2026-09-05T12:00:00+03:00","priority":0,"repeat":null},"unmatched":[]}`)
 	sb.WriteString("\n\nСначала определи domain - о чём фраза:\n")
 	sb.WriteString("- workout: упражнения, подходы, повторения, веса.\n")
 	sb.WriteString("- food: съеденное, продукты, граммы, калории.\n")
@@ -212,7 +225,21 @@ func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoo
 	sb.WriteString(fmt.Sprintf("- Сейчас %s. Относительный срок (\"завтра\", \"в пятницу\", \"через неделю\") переведи в due_at по этому времени и в этом же часовом поясе.\n", now.Format("2006-01-02 15:04 -07:00, Monday")))
 	sb.WriteString("- Если время дня не названо, поставь 12:00. Если срока нет вообще, оставь due_at пустой строкой - выдуманный дедлайн хуже, чем его отсутствие.\n")
 	sb.WriteString("- priority заполняй только когда срочность сказана словами: 1 низкий, 2 средний, 3 высокий, 4 срочно. Иначе 0.\n")
+	sb.WriteString("- description заполняй только если во фразе есть подробности сверх названия: адрес, номер, условие. Пересказывать title в description не надо.\n")
+	sb.WriteString("- repeat заполняй только если сказано про повторение: \"каждый день\", \"раз в две недели\", \"каждый месяц\". unit - day, week или month, every - число. Иначе null.\n")
+	sb.WriteString("- \"каждую пятницу\" - это repeat {\"every\":1,\"unit\":\"week\"}, а ближайшую пятницу положи в due_at: интервал повтора считается от срока.\n")
 	sb.WriteString("- Прошедшее дело - это не задача: \"купил хлеб\" не task.\n")
+	if len(projects) > 0 {
+		sb.WriteString("- project: скопируй строку из списка ниже целиком, если проект назван вслух или однозначно следует из дела. Не придумывай новых названий: если ничего не подходит, оставь пустую строку и задача уйдёт в проект по умолчанию.\n")
+		sb.WriteString("\nПроекты пользователя:\n")
+		for _, project := range projects {
+			line := "- " + project.Path
+			if project.IsDefault {
+				line += " (по умолчанию)"
+			}
+			sb.WriteString(line + "\n")
+		}
+	}
 	if workoutOpen {
 		sb.WriteString("Сейчас у пользователя открыта тренировка. Короткая фраза с числами почти наверняка workout: \"ещё 8\" или \"12 по 30\" - это подходы.\n")
 		sb.WriteString("Если во фразе есть вес, повторения или что-то похожее на название упражнения - это workout, даже если распознавание исказило слова до бессмыслицы. Тогда положи исходную формулировку в unmatched, но domain оставь workout: это честнее, чем объявить надиктованный подход заметкой.\n")
@@ -285,8 +312,15 @@ func (h *VoiceWorkoutHandler) parsePhrase(ctx context.Context, userID, text stri
 		h.logger.Warn().Err(err).Msg("load food candidates")
 	}
 
+	// Projects come from the local mirror the sync keeps, so naming a project
+	// out loud costs no round trip to the provider.
+	projects, err := h.loadTaskProjects(ctx, userID)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load task projects")
+	}
+
 	messages := []ChatMessage{
-		{Role: "system", Content: buildVoiceParsePrompt(candidates, foods, draft, workoutOpen, time.Now())},
+		{Role: "system", Content: buildVoiceParsePrompt(candidates, foods, projects, draft, workoutOpen, time.Now())},
 		{Role: "user", Content: text},
 	}
 

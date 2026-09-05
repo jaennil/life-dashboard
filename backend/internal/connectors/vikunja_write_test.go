@@ -3,6 +3,7 @@ package connectors
 import (
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 )
@@ -77,5 +78,47 @@ func TestVikunjaProjectRefOrdering(t *testing.T) {
 		if order[i] != want[i] {
 			t.Fatalf("unexpected project order %v, want %v", order, want)
 		}
+	}
+}
+
+func TestVikunjaCreatePayload(t *testing.T) {
+	due := time.Date(2026, 9, 6, 9, 0, 0, 0, time.UTC)
+	payload := vikunjaCreatePayload(VikunjaTaskDraft{
+		Title:              "  забрать запчасти  ",
+		Description:        "у сервиса на Марьино",
+		DueAt:              due,
+		Priority:           3,
+		RepeatEverySeconds: 7 * 24 * 3600,
+	})
+
+	if payload["title"] != "забрать запчасти" {
+		t.Fatalf("unexpected title %v", payload["title"])
+	}
+	if payload["due_date"] != "2026-09-06T09:00:00Z" {
+		t.Fatalf("unexpected due_date %v", payload["due_date"])
+	}
+	if payload["priority"] != 3 {
+		t.Fatalf("unexpected priority %v", payload["priority"])
+	}
+	if payload["repeat_after"] != int64(7*24*3600) {
+		t.Fatalf("unexpected repeat_after %v", payload["repeat_after"])
+	}
+	if _, ok := payload["repeat_mode"]; ok {
+		t.Fatalf("an interval repeat must not also send repeat_mode: %v", payload)
+	}
+
+	// A monthly repeat is a mode, and Vikunja ignores repeat_after in that mode.
+	monthly := vikunjaCreatePayload(VikunjaTaskDraft{Title: "оплатить", RepeatMonthly: true, RepeatEverySeconds: 999})
+	if monthly["repeat_mode"] != vikunjaRepeatModeMonthly {
+		t.Fatalf("unexpected repeat_mode %v", monthly["repeat_mode"])
+	}
+	if _, ok := monthly["repeat_after"]; ok {
+		t.Fatalf("monthly repeat must not send an interval: %v", monthly)
+	}
+
+	// Nothing optional set: only the title travels.
+	bare := vikunjaCreatePayload(VikunjaTaskDraft{Title: "постричься"})
+	if len(bare) != 1 {
+		t.Fatalf("unexpected bare payload %v", bare)
 	}
 }

@@ -22,6 +22,10 @@ type VikunjaTaskDraft struct {
 	ProjectID   int64
 	DueAt       time.Time
 	Priority    int
+	// RepeatEverySeconds repeats the task by duration, RepeatMonthly by calendar
+	// month. Vikunja treats the two as different modes, so only one is sent.
+	RepeatEverySeconds int64
+	RepeatMonthly      bool
 }
 
 // VikunjaTaskRef is what a write reports back: enough to answer the request
@@ -34,6 +38,7 @@ type VikunjaTaskRef struct {
 	DueAt       *time.Time `json:"due_at"`
 	Done        bool       `json:"done"`
 	CompletedAt *time.Time `json:"completed_at"`
+	Recurrence  string     `json:"recurrence,omitempty"`
 	URL         string     `json:"url"`
 }
 
@@ -111,18 +116,7 @@ func (v *VikunjaConnector) CreateTask(ctx context.Context, userID string, draft 
 		return VikunjaTaskRef{}, fmt.Errorf("unknown Vikunja project %d", projectID)
 	}
 
-	payload := map[string]any{"title": title}
-	if description := strings.TrimSpace(draft.Description); description != "" {
-		payload["description"] = description
-	}
-	if !draft.DueAt.IsZero() {
-		payload["due_date"] = draft.DueAt.UTC().Format(time.RFC3339)
-	}
-	if priority := vikunjaAPIPriority(draft.Priority); priority > 0 {
-		payload["priority"] = priority
-	}
-
-	body, err := v.write(ctx, creds, http.MethodPut, fmt.Sprintf("/projects/%d/tasks", projectID), payload)
+	body, err := v.write(ctx, creds, http.MethodPut, fmt.Sprintf("/projects/%d/tasks", projectID), vikunjaCreatePayload(draft))
 	if err != nil {
 		return VikunjaTaskRef{}, fmt.Errorf("create vikunja task: %w", err)
 	}
@@ -233,6 +227,7 @@ func (v *VikunjaConnector) taskRef(task vikunjaTask, creds vikunjaCredentials, p
 		ProjectID:   task.ProjectID,
 		ProjectName: vikunjaProjectPath(task.ProjectID, projects),
 		Done:        task.Done,
+		Recurrence:  vikunjaRecurrence(task),
 		URL:         fmt.Sprintf("%s/tasks/%d", creds.webURL, task.ID),
 	}
 	if due := parseVikunjaTime(task.DueDate); !due.IsZero() {
@@ -268,6 +263,31 @@ func (v *VikunjaConnector) write(ctx context.Context, creds vikunjaCredentials, 
 		return nil, fmt.Errorf("vikunja api %s %s returned %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return body, nil
+}
+
+// vikunjaCreatePayload builds the create body. Only fields the caller actually
+// set are sent: Vikunja stores what it is given, so an empty description or a
+// zero due date would overwrite nothing but still read as a deliberate value.
+func vikunjaCreatePayload(draft VikunjaTaskDraft) map[string]any {
+	payload := map[string]any{"title": strings.TrimSpace(draft.Title)}
+	if description := strings.TrimSpace(draft.Description); description != "" {
+		payload["description"] = description
+	}
+	if !draft.DueAt.IsZero() {
+		payload["due_date"] = draft.DueAt.UTC().Format(time.RFC3339)
+	}
+	if priority := vikunjaAPIPriority(draft.Priority); priority > 0 {
+		payload["priority"] = priority
+	}
+	// The two repeat kinds are exclusive: repeat_mode 1 makes Vikunja ignore
+	// repeat_after, so sending both would silently drop the interval.
+	switch {
+	case draft.RepeatMonthly:
+		payload["repeat_mode"] = vikunjaRepeatModeMonthly
+	case draft.RepeatEverySeconds > 0:
+		payload["repeat_after"] = draft.RepeatEverySeconds
+	}
+	return payload
 }
 
 // vikunjaAPIPriority converts a stored 1-4 priority back to what Vikunja
