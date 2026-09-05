@@ -9,9 +9,12 @@ import { api, type AIHistoryMessage, type AILatestCheckup } from '@/lib/api'
 import {
   CHECKUP_ACTIONS,
   activateStreamStatus,
-  buildCheckupStatusItems,
   requestChatStream,
-  requestCheckupStream,
+  enqueueCheckup,
+  getCheckupJob,
+  isCheckupJobRunning,
+  listCheckupJobs,
+  type CheckupJob,
   type AIMessage,
   type AIStreamEvent,
   type CheckupAction,
@@ -47,6 +50,14 @@ const MARKDOWN_COMPONENTS = {
   ),
 } as const
 
+// Slow enough not to hammer the API while a reasoning model works for minutes,
+// fast enough that a finished report shows up while the phone is still in hand.
+const CHECKUP_POLL_MS = 3000
+
+function checkupPendingText(periodLabel: string) {
+  return `Собираю ${periodLabel.toLowerCase().startsWith('checkup') ? periodLabel : 'checkup ' + periodLabel}. Это занимает несколько минут - можно закрыть приложение, придёт уведомление.`
+}
+
 export function AiChat() {
   const globalRange = useGlobalDateRange()
   const [messages, setMessages] = useState<AIMessage[]>([])
@@ -56,6 +67,10 @@ export function AiChat() {
   const [historyError, setHistoryError] = useState('')
   const [latestCheckup, setLatestCheckup] = useState<AILatestCheckup | null>(null)
   const [streamStatusItems, setStreamStatusItems] = useState<StreamStatusItem[]>([])
+  // The id of the checkup being generated in the background, if any. It outlives
+  // this page: reopening the app picks the job back up instead of starting over.
+  const [checkupJobID, setCheckupJobID] = useState<string | null>(null)
+  const [checkupError, setCheckupError] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -83,6 +98,65 @@ export function AiChat() {
     if (!label) return
     setStreamStatusItems(prev => activateStreamStatus(prev, label))
   }
+
+  // Reattach to a checkup that is still running: it was queued by this account,
+  // not by this tab, so a reload or a phone that went to sleep must not lose it.
+  useEffect(() => {
+    let active = true
+    listCheckupJobs()
+      .then(jobs => {
+        if (!active) return
+        const running = jobs.find(isCheckupJobRunning)
+        if (!running) return
+        setCheckupJobID(running.id)
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: checkupPendingText(running.period_label),
+          loading: true,
+        }])
+      })
+      .catch(() => {})
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    if (!checkupJobID) return
+    let active = true
+
+    const finish = (job: CheckupJob) => {
+      if (job.status === 'succeeded' && job.content) {
+        updatePendingAssistant(job.content, false)
+        setLatestCheckup({
+          has_report: true,
+          period: job.period,
+          period_label: job.period_label,
+          generated_at: job.completed_at ?? new Date().toISOString(),
+        })
+      } else {
+        updatePendingAssistant('Не удалось собрать checkup. Попробуй ещё раз.', false)
+        setCheckupError(job.last_error ?? '')
+      }
+      setCheckupJobID(null)
+    }
+
+    const timer = window.setInterval(async () => {
+      try {
+        const job = await getCheckupJob(checkupJobID)
+        if (!active) return
+        if (isCheckupJobRunning(job)) return
+        finish(job)
+      } catch (error) {
+        if (!active) return
+        setCheckupError(error instanceof Error ? error.message : 'Не удалось получить статус checkup')
+        setCheckupJobID(null)
+      }
+    }, CHECKUP_POLL_MS)
+
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [checkupJobID])
 
   useEffect(() => {
     let active = true
@@ -138,31 +212,23 @@ export function AiChat() {
   }
 
   async function sendCheckup(action: CheckupAction) {
-    if (loading || historyLoading) return
-    setLoading(true)
-    setStreamStatusItems(buildCheckupStatusItems())
+    if (loading || historyLoading || checkupJobID) return
+    setCheckupError('')
 
     const userMsg: AIMessage = { role: 'user', content: action.userMessage }
-    const assistantMsg: AIMessage = { role: 'assistant', content: '', loading: true }
+    const assistantMsg: AIMessage = {
+      role: 'assistant',
+      content: checkupPendingText(findCheckupLabel(action.period)),
+      loading: true,
+    }
     setMessages(prev => [...prev, userMsg, assistantMsg])
 
     try {
-      const result = await requestCheckupStream(action.period, {
-        onDelta: content => updatePendingAssistant(content, true),
-        onStatus: pushStreamStatus,
-      })
-      updatePendingAssistant(result.content, false)
-      if (!result.isError) {
-        setLatestCheckup({
-          has_report: true,
-          period: action.period,
-          period_label: result.periodLabel ?? findCheckupLabel(action.period),
-          generated_at: result.generatedAt ?? new Date().toISOString(),
-        })
-      }
-    } finally {
-      setStreamStatusItems([])
-      setLoading(false)
+      const accepted = await enqueueCheckup(action.period)
+      setCheckupJobID(accepted.job_id)
+    } catch (error) {
+      updatePendingAssistant('Не удалось поставить checkup в очередь.', false)
+      setCheckupError(error instanceof Error ? error.message : '')
     }
   }
 
@@ -219,6 +285,12 @@ export function AiChat() {
         </div>
       ) : null}
 
+      {checkupError ? (
+        <div className="mb-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          Checkup не собрался: {checkupError}
+        </div>
+      ) : null}
+
       <EditableWidgetGrid
         storageKey="ai_widget_layout_v2"
         widgets={[
@@ -242,11 +314,14 @@ export function AiChat() {
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+            {checkupJobID ? (
+              <span className="mr-1 self-center text-xs text-muted-foreground">Checkup собирается в фоне...</span>
+            ) : null}
             {CHECKUP_ACTIONS.map(action => (
               <button
                 key={action.period}
                 onClick={() => sendCheckup(action)}
-                disabled={loading || historyLoading}
+                disabled={loading || historyLoading || !!checkupJobID}
                 className="rounded-xl border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {action.label}

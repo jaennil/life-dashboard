@@ -2,8 +2,10 @@
 
 ## Database ER diagram
 
-The diagram reflects migrations `000001` through `000028`. JSON payloads,
-embeddings, and some operational timestamps are omitted for readability.
+The diagram reflects migrations `000001` through `000029`. JSON payloads,
+embeddings, and some operational timestamps are omitted for readability, as
+are the queue tables that carry no history of their own (`input_jobs`,
+`ai_checkup_jobs`, `web_push_subscriptions`).
 
 ```mermaid
 erDiagram
