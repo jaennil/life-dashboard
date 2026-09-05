@@ -132,6 +132,10 @@ func (h *VoiceWorkoutHandler) applyTask(ctx context.Context, userID, eventID str
 		Title:       title,
 		Description: strings.TrimSpace(interpreted.Task.Description),
 		Priority:    interpreted.Task.Priority,
+		Labels:      interpreted.Task.Labels,
+		// A dictated label is a guess at an existing one. Creating it would fill
+		// the workspace with near-duplicates nobody filters by.
+		AllowNewLabels: false,
 	}
 
 	if named := strings.TrimSpace(interpreted.Task.Project); named != "" {
@@ -182,6 +186,9 @@ func (h *VoiceWorkoutHandler) applyTask(ctx context.Context, userID, eventID str
 		h.logger.Warn().Err(err).Str("event_id", eventID).Msg("record created task id")
 	}
 
+	if len(created.SkippedLabels) > 0 {
+		response.Unmatched = append(response.Unmatched, "меток нет в Vikunja: "+strings.Join(created.SkippedLabels, ", "))
+	}
 	response.Task = summarizeCreatedTask(created)
 	response.Message = "Записал задачу в Vikunja."
 }
@@ -198,6 +205,9 @@ func summarizeCreatedTask(task connectors.VikunjaTaskRef) string {
 	}
 	if task.Recurrence != "" {
 		parts = append(parts, taskRecurrenceRu(task.Recurrence))
+	}
+	if len(task.Labels) > 0 {
+		parts = append(parts, "метки: "+strings.Join(task.Labels, ", "))
 	}
 	return strings.Join(parts, " · ")
 }

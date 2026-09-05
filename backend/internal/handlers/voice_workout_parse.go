@@ -72,6 +72,7 @@ type voiceParsedTask struct {
 	// workout parse uses for template ids: an invented project cannot be filed.
 	Project     string             `json:"project"`
 	Description string             `json:"description"`
+	Labels      []string           `json:"labels"`
 	DueAt       string             `json:"due_at"`
 	Priority    int                `json:"priority"`
 	Repeat      *voiceParsedRepeat `json:"repeat"`
@@ -226,6 +227,7 @@ func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoo
 	sb.WriteString("- Если время дня не названо, поставь 12:00. Если срока нет вообще, оставь due_at пустой строкой - выдуманный дедлайн хуже, чем его отсутствие.\n")
 	sb.WriteString("- priority заполняй только когда срочность сказана словами: 1 низкий, 2 средний, 3 высокий, 4 срочно. Иначе 0.\n")
 	sb.WriteString("- description заполняй только если во фразе есть подробности сверх названия: адрес, номер, условие. Пересказывать title в description не надо.\n")
+	sb.WriteString("- labels заполняй только если метка названа вслух (\"с меткой дом\", \"пометь как срочное\"). Новые метки не выдумывай: несуществующая будет пропущена.\n")
 	sb.WriteString("- repeat заполняй только если сказано про повторение: \"каждый день\", \"раз в две недели\", \"каждый месяц\". unit - day, week или month, every - число. Иначе null.\n")
 	sb.WriteString("- \"каждую пятницу\" - это repeat {\"every\":1,\"unit\":\"week\"}, а ближайшую пятницу положи в due_at: интервал повтора считается от срока.\n")
 	sb.WriteString("- Прошедшее дело - это не задача: \"купил хлеб\" не task.\n")

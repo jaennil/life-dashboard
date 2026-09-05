@@ -34,11 +34,15 @@ func NewProductivityTasks(db *pgxpool.Pool, vikunja *connectors.VikunjaConnector
 }
 
 type createTaskRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	ProjectID   int64  `json:"project_id"`
-	DueAt       string `json:"due_at"`
-	Priority    int    `json:"priority"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	ProjectID   int64    `json:"project_id"`
+	DueAt       string   `json:"due_at"`
+	Priority    int      `json:"priority"`
+	Labels      []string `json:"labels"`
+	// RepeatEvery counts RepeatUnit periods: 2 + "week" is every two weeks.
+	RepeatEvery int    `json:"repeat_every"`
+	RepeatUnit  string `json:"repeat_unit"`
 }
 
 // CreateTask adds a task to Vikunja.
@@ -61,6 +65,19 @@ func (h *ProductivityTasksHandler) CreateTask(w http.ResponseWriter, r *http.Req
 		Description: req.Description,
 		ProjectID:   req.ProjectID,
 		Priority:    req.Priority,
+		Labels:      req.Labels,
+		// Typed by hand, so a label that does not exist yet is a new label
+		// rather than a mistake.
+		AllowNewLabels: true,
+	}
+	if strings.TrimSpace(req.RepeatUnit) != "" {
+		seconds, monthly, ok := taskRepeatSeconds(&voiceParsedRepeat{Every: req.RepeatEvery, Unit: req.RepeatUnit})
+		if !ok {
+			http.Error(w, "unsupported repeat_unit", http.StatusBadRequest)
+			return
+		}
+		draft.RepeatEverySeconds = seconds
+		draft.RepeatMonthly = monthly
 	}
 	if raw := strings.TrimSpace(req.DueAt); raw != "" {
 		dueAt, err := time.Parse(time.RFC3339, raw)

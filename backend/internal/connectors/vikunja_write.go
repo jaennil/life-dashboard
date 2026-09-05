@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,6 +27,12 @@ type VikunjaTaskDraft struct {
 	// month. Vikunja treats the two as different modes, so only one is sent.
 	RepeatEverySeconds int64
 	RepeatMonthly      bool
+	// Labels are titles, not ids: the caller names them the way a person does.
+	Labels []string
+	// AllowNewLabels separates a person typing a new label, which should be
+	// created, from a model guessing one, which should not: an invented label
+	// pollutes the workspace and nobody ever filters by it.
+	AllowNewLabels bool
 }
 
 // VikunjaTaskRef is what a write reports back: enough to answer the request
@@ -39,7 +46,11 @@ type VikunjaTaskRef struct {
 	Done        bool       `json:"done"`
 	CompletedAt *time.Time `json:"completed_at"`
 	Recurrence  string     `json:"recurrence,omitempty"`
-	URL         string     `json:"url"`
+	Labels      []string   `json:"labels,omitempty"`
+	// SkippedLabels are the ones that do not exist and were not allowed to be
+	// created, reported so the caller can say so rather than silently drop them.
+	SkippedLabels []string `json:"skipped_labels,omitempty"`
+	URL           string   `json:"url"`
 }
 
 // VikunjaProjectRef names a project for the task-creation form.
@@ -126,8 +137,123 @@ func (v *VikunjaConnector) CreateTask(ctx context.Context, userID string, draft 
 		return VikunjaTaskRef{}, fmt.Errorf("decode created vikunja task: %w", err)
 	}
 
+	ref := v.taskRef(created, creds, projects)
+	if len(draft.Labels) > 0 {
+		attached, skipped, err := v.applyTaskLabels(ctx, creds, created.ID, draft.Labels, draft.AllowNewLabels)
+		if err != nil {
+			// The task exists by now, so a label failure is reported alongside it
+			// rather than turned into a failed create.
+			v.logger.Warn().Err(err).Int64("task", created.ID).Msg("attach vikunja labels")
+		}
+		ref.Labels = attached
+		ref.SkippedLabels = skipped
+	}
+
 	v.resyncAfterWrite(ctx, userID, "create")
-	return v.taskRef(created, creds, projects), nil
+	return ref, nil
+}
+
+// applyTaskLabels resolves label titles to ids and puts them on the task in one
+// call. Vikunja has no "create task with labels": labels are a separate
+// relation, so this is a second round trip by design.
+func (v *VikunjaConnector) applyTaskLabels(ctx context.Context, creds vikunjaCredentials, taskID int64, wanted []string, allowNew bool) ([]string, []string, error) {
+	existing, err := v.fetchLabels(ctx, creds)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ids := make([]int64, 0, len(wanted))
+	attached := make([]string, 0, len(wanted))
+	skipped := make([]string, 0)
+	seen := make(map[int64]bool, len(wanted))
+
+	for _, title := range wanted {
+		trimmed := strings.TrimSpace(title)
+		if trimmed == "" {
+			continue
+		}
+
+		id, ok := existing[strings.ToLower(trimmed)]
+		if !ok {
+			if !allowNew {
+				skipped = append(skipped, trimmed)
+				continue
+			}
+			created, err := v.createLabel(ctx, creds, trimmed)
+			if err != nil {
+				skipped = append(skipped, trimmed)
+				continue
+			}
+			id = created
+			existing[strings.ToLower(trimmed)] = created
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+		attached = append(attached, trimmed)
+	}
+
+	if len(ids) == 0 {
+		return attached, skipped, nil
+	}
+
+	labels := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		labels = append(labels, map[string]any{"id": id})
+	}
+	if _, err := v.write(ctx, creds, http.MethodPost, fmt.Sprintf("/tasks/%d/labels/bulk", taskID),
+		map[string]any{"labels": labels}); err != nil {
+		return nil, skipped, err
+	}
+	return attached, skipped, nil
+}
+
+// fetchLabels maps every label the account can use, keyed by lowercased title.
+func (v *VikunjaConnector) fetchLabels(ctx context.Context, creds vikunjaCredentials) (map[string]int64, error) {
+	labels := make(map[string]int64)
+
+	for page := 1; page <= vikunjaMaxPages; page++ {
+		query := url.Values{}
+		query.Set("page", strconv.Itoa(page))
+		query.Set("per_page", strconv.Itoa(vikunjaPageSize))
+
+		body, header, err := v.get(ctx, creds, "/labels", query)
+		if err != nil {
+			return nil, fmt.Errorf("fetch vikunja labels: %w", err)
+		}
+
+		var batch []vikunjaLabel
+		if err := json.Unmarshal(body, &batch); err != nil {
+			return nil, fmt.Errorf("decode vikunja labels: %w", err)
+		}
+		for _, label := range batch {
+			if title := strings.TrimSpace(label.Title); title != "" {
+				labels[strings.ToLower(title)] = label.ID
+			}
+		}
+
+		if vikunjaLastPage(header, page, len(batch)) {
+			break
+		}
+	}
+	return labels, nil
+}
+
+func (v *VikunjaConnector) createLabel(ctx context.Context, creds vikunjaCredentials, title string) (int64, error) {
+	body, err := v.write(ctx, creds, http.MethodPut, "/labels", map[string]any{"title": title})
+	if err != nil {
+		return 0, err
+	}
+	var created vikunjaLabel
+	if err := json.Unmarshal(body, &created); err != nil {
+		return 0, err
+	}
+	if created.ID == 0 {
+		return 0, fmt.Errorf("vikunja returned no label id for %q", title)
+	}
+	return created.ID, nil
 }
 
 // CompleteTask marks a task done.

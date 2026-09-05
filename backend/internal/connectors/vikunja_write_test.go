@@ -1,6 +1,11 @@
 package connectors
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"testing"
 	"time"
@@ -120,5 +125,95 @@ func TestVikunjaCreatePayload(t *testing.T) {
 	bare := vikunjaCreatePayload(VikunjaTaskDraft{Title: "постричься"})
 	if len(bare) != 1 {
 		t.Fatalf("unexpected bare payload %v", bare)
+	}
+}
+
+func TestApplyTaskLabelsMatchesExistingAndSkipsUnknown(t *testing.T) {
+	var bulk map[string]any
+	created := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/labels":
+			w.Header().Set(vikunjaTotalPagesHeader, "1")
+			fmt.Fprint(w, `[{"id":7,"title":"Дом"},{"id":9,"title":"работа"}]`)
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/labels":
+			created++
+			fmt.Fprint(w, `{"id":42,"title":"новая"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/tasks/5/labels/bulk":
+			_ = json.NewDecoder(r.Body).Decode(&bulk)
+			fmt.Fprint(w, `{}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	connector := NewVikunja(nil, zerolog.Nop())
+	apiURL, err := vikunjaAPIURL(server.URL)
+	if err != nil {
+		t.Fatalf("api url: %v", err)
+	}
+	creds := vikunjaCredentials{apiURL: apiURL, token: "tk_test"}
+
+	// A dictated label is only ever matched, never invented.
+	attached, skipped, err := connector.applyTaskLabels(context.Background(), creds, 5, []string{"дом", "новая"}, false)
+	if err != nil {
+		t.Fatalf("apply labels: %v", err)
+	}
+	if len(attached) != 1 || attached[0] != "дом" {
+		t.Fatalf("unexpected attached labels %#v", attached)
+	}
+	if len(skipped) != 1 || skipped[0] != "новая" {
+		t.Fatalf("unexpected skipped labels %#v", skipped)
+	}
+	if created != 0 {
+		t.Fatalf("a label was created without permission")
+	}
+
+	labels, ok := bulk["labels"].([]any)
+	if !ok || len(labels) != 1 {
+		t.Fatalf("unexpected bulk payload %#v", bulk)
+	}
+	if id := labels[0].(map[string]any)["id"]; id != float64(7) {
+		t.Fatalf("bulk payload carried the wrong label id: %#v", id)
+	}
+}
+
+func TestApplyTaskLabelsCreatesWhenAllowed(t *testing.T) {
+	createdTitles := make([]string, 0, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/labels":
+			w.Header().Set(vikunjaTotalPagesHeader, "1")
+			fmt.Fprint(w, `[]`)
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/labels":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			createdTitles = append(createdTitles, fmt.Sprint(body["title"]))
+			fmt.Fprint(w, `{"id":11,"title":"ремонт"}`)
+		default:
+			fmt.Fprint(w, `{}`)
+		}
+	}))
+	defer server.Close()
+
+	connector := NewVikunja(nil, zerolog.Nop())
+	apiURL, _ := vikunjaAPIURL(server.URL)
+
+	attached, skipped, err := connector.applyTaskLabels(context.Background(),
+		vikunjaCredentials{apiURL: apiURL, token: "tk_test"}, 5, []string{"  ремонт  ", ""}, true)
+	if err != nil {
+		t.Fatalf("apply labels: %v", err)
+	}
+	if len(attached) != 1 || attached[0] != "ремонт" {
+		t.Fatalf("unexpected attached labels %#v", attached)
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("nothing should have been skipped: %#v", skipped)
+	}
+	if len(createdTitles) != 1 || createdTitles[0] != "ремонт" {
+		t.Fatalf("unexpected created labels %#v", createdTitles)
 	}
 }
