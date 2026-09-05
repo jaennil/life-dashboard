@@ -6,6 +6,13 @@ metadata:
     reloader.stakater.com/auto: "true"
 spec:
   replicas: 1
+  # Recreate, not the default RollingUpdate. Two backends must never overlap:
+  # the new one applies migrations at startup while the old one is still serving
+  # the previous schema, and Telegram rejects a second getUpdates poller with
+  # "terminated by other getUpdates request". The price is a few seconds of
+  # downtime per deploy, which is the right trade for a single-user dashboard.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: backend
