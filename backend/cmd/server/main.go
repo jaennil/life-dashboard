@@ -233,6 +233,9 @@ func main() {
 	// The lazy close in the webhook only fires when the next phrase arrives, so
 	// this sweep is what actually bounds a dictated session that was never
 	// finished out loud.
+	telegramHandler := handlers.NewTelegram(pool, cfg.Telegram.BotToken, log.Logger)
+	aiHandler.UseTelegram(telegramHandler)
+
 	voiceSessions := handlers.NewVoiceWorkout(pool, aiHandler, hevy, fatSecretConn, vikunja, cfg.AI.ParseModel, cfg.AI.ParseReasoningEffort, pushOptions, log.Logger)
 	inputWorkerCtx, stopInputWorker := context.WithCancel(context.Background())
 	defer stopInputWorker()
@@ -240,6 +243,19 @@ func main() {
 	// The checkup generation outlives the request that asked for it, so it needs
 	// a worker of its own rather than the request goroutine.
 	aiHandler.StartCheckupWorker(inputWorkerCtx)
+	telegramHandler.StartTelegramWorker(inputWorkerCtx)
+
+	// Every five minutes rather than on the hour: schedules carry a minute, and
+	// a report promised at 21:30 should not wait until 22:00.
+	if err := sched.AddJob("0 */5 * * * *", "checkup_schedules", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if queued := aiHandler.EnqueueDueCheckups(ctx, time.Now()); queued > 0 {
+			log.Info().Int("queued", queued).Msg("scheduled checkups queued")
+		}
+	}); err != nil {
+		log.Fatal().Err(err).Msg("failed to register checkup schedule job")
+	}
 	if err := sched.AddJob("0 */10 * * * *", "voice_workout_idle_close", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
@@ -413,6 +429,12 @@ func main() {
 		r.Get("/api/v1/ai/checkup/latest", aiHandler.GetLatestCheckup)
 		r.Get("/api/v1/ai/checkup/jobs", aiHandler.ListCheckupJobs)
 		r.Get("/api/v1/ai/checkup/jobs/{jobID}", aiHandler.GetCheckupJob)
+		r.Get("/api/v1/ai/checkup/schedules", aiHandler.GetCheckupSchedules)
+		r.Put("/api/v1/ai/checkup/schedules", aiHandler.SaveCheckupSchedules)
+
+		r.Get("/api/v1/telegram", telegramHandler.GetStatus)
+		r.Post("/api/v1/telegram/link", telegramHandler.CreateLink)
+		r.Delete("/api/v1/telegram/link", telegramHandler.Unlink)
 		r.Post("/api/v1/input", voiceSessions.ReceiveTypedText)
 		r.Get("/api/v1/input/jobs", voiceSessions.ListInputJobs)
 		r.Get("/api/v1/input/jobs/{jobID}", voiceSessions.GetInputJob)

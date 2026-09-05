@@ -28,9 +28,12 @@ type AIHandler struct {
 	unleash *unleashclient.Client
 	// push notifies a closed app that a queued checkup is ready, and wake saves
 	// the queue worker from waiting out its poll interval after an enqueue.
-	push   *webPushSender
-	wake   chan struct{}
-	logger zerolog.Logger
+	push *webPushSender
+	wake chan struct{}
+	// telegram delivers the finished report in full. Optional: an instance
+	// without a bot token simply never has one.
+	telegram *TelegramHandler
+	logger   zerolog.Logger
 }
 
 // AIOptions carries the upstream settings. They travel as a struct rather than
@@ -69,6 +72,13 @@ func NewAI(db *pgxpool.Pool, opts AIOptions, weather *WeatherHandler, unleashCli
 		wake:    make(chan struct{}, 1),
 		logger:  logger.With().Str("handler", "ai").Logger(),
 	}
+}
+
+// UseTelegram wires the bot in after construction: the Telegram handler needs
+// nothing from the AI handler, and passing it through the constructor would put
+// a seventh argument in front of every caller for one optional dependency.
+func (h *AIHandler) UseTelegram(telegram *TelegramHandler) {
+	h.telegram = telegram
 }
 
 // Complete exposes a single non-streaming upstream call. The voice-workout

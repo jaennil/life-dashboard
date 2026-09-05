@@ -324,6 +324,24 @@ func (h *AIHandler) processNextCheckupNotification(ctx context.Context) bool {
 
 	success := job.Status == "succeeded"
 	body := checkupNotificationBody(job.Period, job.Content, success)
+
+	// Telegram gets the whole report, the push only a line: one is read in a
+	// chat, the other on a lock screen. A failure here retries both, and the
+	// push carries a per-job tag so the repeat replaces rather than stacks.
+	if success && h.telegram != nil {
+		if _, err := h.telegram.SendReport(ctx, job.UserID, "Checkup "+checkupPeriodLabel(job.Period), job.Content); err != nil {
+			delay := time.Duration(job.Attempts) * time.Minute
+			if delay > time.Hour {
+				delay = time.Hour
+			}
+			if updateErr := h.retryCheckupNotification(ctx, job.ID, err.Error(), delay); updateErr != nil {
+				h.logger.Error().Err(updateErr).Str("job_id", job.ID).Msg("retry checkup notification")
+			}
+			h.logger.Warn().Err(err).Str("job_id", job.ID).Msg("send checkup to telegram")
+			return true
+		}
+	}
+
 	if err := h.push.sendCheckupResult(ctx, job.UserID, job.ID, body, success); err != nil {
 		delay := time.Duration(job.Attempts) * time.Minute
 		if delay > time.Hour {
