@@ -90,3 +90,27 @@ func registeredGETRoutes(t *testing.T, router chi.Routes) map[string]bool {
 	}
 	return routes
 }
+
+func TestConnectorSyncSpecSpreadsTheHerd(t *testing.T) {
+	// Every connector keeps its quarter-hour cadence, but no two share a minute
+	// until there are more than fifteen of them.
+	seen := map[string]bool{}
+	for index := 0; index < 12; index++ {
+		spec := connectorSyncSpec(index)
+		if seen[spec] {
+			t.Fatalf("connector %d reuses spec %q", index, spec)
+		}
+		seen[spec] = true
+	}
+
+	if got := connectorSyncSpec(0); got != "0 0,15,30,45 * * * *" {
+		t.Fatalf("first connector spec = %q", got)
+	}
+	if got := connectorSyncSpec(3); got != "0 3,18,33,48 * * * *" {
+		t.Fatalf("fourth connector spec = %q", got)
+	}
+	// The cycle wraps rather than producing a minute past 59.
+	if got := connectorSyncSpec(15); got != connectorSyncSpec(0) {
+		t.Fatalf("spec %q did not wrap onto the first slot", got)
+	}
+}

@@ -29,6 +29,19 @@ import (
 	"life-dashboard/internal/syncstate"
 )
 
+// connectorSyncSpec spreads the connectors across the quarter-hour instead of
+// firing all of them on the same tick.
+//
+// They used to share one "every 15 minutes" spec, so a dozen syncs opened TLS
+// connections at the same second from a Raspberry Pi. The result was timeouts
+// against unrelated providers - Google, Notion, Xiaomi, the local Vikunja -
+// landing exactly on :00, :15, :30 and :45. One connector per minute keeps the
+// same cadence per source without the herd.
+func connectorSyncSpec(index int) string {
+	offset := index % 15
+	return fmt.Sprintf("0 %d,%d,%d,%d * * * *", offset, offset+15, offset+30, offset+45)
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -197,9 +210,9 @@ func main() {
 	}, weatherHandler, unleashClient, pushOptions, log.Logger)
 
 	sched := scheduler.New(log.Logger)
-	for _, conn := range activeConnectors {
+	for index, conn := range activeConnectors {
 		connCopy := conn
-		if err := sched.AddJob("0 */15 * * * *", connCopy.Name(), func() {
+		if err := sched.AddJob(connectorSyncSpec(index), connCopy.Name(), func() {
 			ctx := context.Background()
 			dueSyncs, err := syncstate.LoadDueSyncs(ctx, pool, connCopy.Name(), time.Now())
 			if err != nil {
