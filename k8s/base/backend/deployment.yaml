@@ -105,6 +105,15 @@ spec:
           ports:
             - containerPort: 8080
               name: http
+          # The process waits up to three minutes for Postgres before giving up,
+          # and liveness would otherwise kill it after about a hundred seconds of
+          # that wait. A startup probe suspends liveness until the server answers.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 48
           livenessProbe:
             httpGet:
               path: /health

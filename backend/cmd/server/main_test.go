@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
@@ -112,5 +115,49 @@ func TestConnectorSyncSpecSpreadsTheHerd(t *testing.T) {
 	// The cycle wraps rather than producing a minute past 59.
 	if got := connectorSyncSpec(15); got != connectorSyncSpec(0) {
 		t.Fatalf("spec %q did not wrap onto the first slot", got)
+	}
+}
+
+func TestRetryStartupSucceedsAfterTheDatabaseComesBack(t *testing.T) {
+	attempts := 0
+	err := retryStartup(context.Background(), 200*time.Millisecond, time.Millisecond, func() error {
+		attempts++
+		if attempts < 3 {
+			return errors.New("connection refused")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected the third attempt to succeed, got %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("unexpected attempt count %d", attempts)
+	}
+}
+
+func TestRetryStartupGivesUpWithTheLastError(t *testing.T) {
+	attempts := 0
+	want := errors.New("still down")
+	err := retryStartup(context.Background(), 20*time.Millisecond, 5*time.Millisecond, func() error {
+		attempts++
+		return want
+	})
+	if !errors.Is(err, want) {
+		t.Fatalf("expected the last error back, got %v", err)
+	}
+	if attempts < 2 {
+		t.Fatalf("expected several attempts inside the budget, got %d", attempts)
+	}
+}
+
+func TestRetryStartupStopsWhenContextIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := retryStartup(ctx, time.Minute, time.Millisecond, func() error {
+		return errors.New("down")
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected the cancellation to win, got %v", err)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -28,6 +29,39 @@ import (
 	"life-dashboard/internal/scheduler"
 	"life-dashboard/internal/syncstate"
 )
+
+const (
+	// startupBudget is how long the process waits for Postgres before giving up.
+	// A CloudNativePG restart takes about ninety seconds, and the backend used to
+	// die inside that window and crash-loop until it happened to start after the
+	// database came back. The startup probe in the deployment is sized to cover
+	// this budget, otherwise the liveness probe would kill the wait.
+	startupBudget   = 3 * time.Minute
+	startupInterval = 5 * time.Second
+)
+
+// retryStartup repeats attempt until it succeeds or the budget runs out.
+//
+// It does not tell an unavailable database from a broken migration: a genuinely
+// bad migration therefore fails three minutes later than it used to, which is a
+// fair price for surviving every database restart.
+func retryStartup(ctx context.Context, budget, interval time.Duration, attempt func() error) error {
+	deadline := time.Now().Add(budget)
+	for {
+		err := attempt()
+		if err == nil {
+			return nil
+		}
+		if !time.Now().Add(interval).Before(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
 
 // connectorSyncSpec spreads the connectors across the quarter-hour instead of
 // firing all of them on the same tick.
@@ -72,19 +106,36 @@ func main() {
 
 	ctx := context.Background()
 
-	pool, err := database.New(ctx, cfg.Database)
-	if err != nil {
+	var pool *pgxpool.Pool
+	if err := retryStartup(ctx, startupBudget, startupInterval, func() error {
+		connected, err := database.New(ctx, cfg.Database)
+		if err != nil {
+			log.Warn().Err(err).Msg("database not ready, retrying")
+			return err
+		}
+		pool = connected
+		return nil
+	}); err != nil {
 		log.Fatal().Err(err).Msg("failed to connect to database")
 	}
 	defer pool.Close()
 	log.Info().Msg("database connected")
 
 	migrateURL := "pgx5://" + cfg.Database.URL[len("postgres://"):]
-	m, err := migrate.New("file://migrations", migrateURL)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to init migrations")
-	}
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+	if err := retryStartup(ctx, startupBudget, startupInterval, func() error {
+		m, err := migrate.New("file://migrations", migrateURL)
+		if err != nil {
+			log.Warn().Err(err).Msg("migrations not ready, retrying")
+			return err
+		}
+		defer func() { _, _ = m.Close() }()
+
+		if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+			log.Warn().Err(err).Msg("migration run failed, retrying")
+			return err
+		}
+		return nil
+	}); err != nil {
 		log.Fatal().Err(err).Msg("failed to run migrations")
 	}
 	log.Info().Msg("migrations applied")
