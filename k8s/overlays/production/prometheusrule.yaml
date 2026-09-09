@@ -38,14 +38,31 @@ spec:
             description: Backend p95 latency in namespace {{ $labels.namespace }} has been above 2 seconds for 10 minutes.
     - name: life-dashboard.integrations
       rules:
+        # A single failed run is normal: connectors talk to consumer APIs over a
+        # home connection and the scheduler already retries with backoff. Only a
+        # source that keeps failing is worth waking someone up for, and grouping
+        # by source puts the culprit in the notification.
         - alert: LifeDashboardSyncErrors
-          expr: increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",status="error"}[15m]) > 0
-          for: 0m
+          expr: sum by (source) (increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",status="error"}[1h])) >= 3
+          for: 10m
           labels:
             severity: warning
           annotations:
-            summary: Life Dashboard sync errors detected
-            description: One or more connector sync runs failed in the last 15 minutes.
+            summary: Life Dashboard sync errors detected ({{ $labels.source }})
+            description: Connector {{ $labels.source }} failed {{ $value }} sync runs in the last hour.
+        # The failure that actually costs data is silence: a source that keeps
+        # trying and never succeeds. That never fired an alert before.
+        - alert: LifeDashboardSyncStalled
+          expr: |
+            sum by (source) (increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",status="success"}[6h])) == 0
+            and
+            sum by (source) (increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend"}[6h])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Life Dashboard source is not syncing ({{ $labels.source }})
+            description: Connector {{ $labels.source }} has been running without a single successful sync for 6 hours.
     - name: life-dashboard.ai
       rules:
         - alert: LifeDashboardAIUpstreamErrors
