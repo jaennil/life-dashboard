@@ -673,6 +673,68 @@ function AppleHealthSection({ onChanged, reloadKey }: { onChanged: () => void; r
   )
 }
 
+// The tracker app is configured entirely on the phone, so the only thing the
+// dashboard owes it is the pair of values to paste: where to post and what to
+// post as. Both come from the same key Apple Health already uses.
+function LocationSection({ reloadKey }: { reloadKey: number }) {
+  const [info, setInfo] = useState<HealthAPIKeyInfo | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    api.getAPIKey()
+      .then(setInfo)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [reloadKey])
+
+  const apiKey = info?.api_key ?? ''
+  const receiverURL = (info?.webhook_url || 'https://lifedash.dubrovskih.ru/api/v1/webhook/health')
+    .replace(/\/webhook\/health$/, '/webhook/overland')
+
+  return (
+    <div>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-foreground">Местоположение</h2>
+      <div className="flex flex-col gap-4 rounded-2xl border bg-card/90 p-5 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-xl">📍</div>
+          <div>
+            <p className="text-sm font-semibold text-foreground">Overland → Webhook</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Приложение шлёт точки пачками, офлайн копит и досылает. Из точек собираются визиты: где был и сколько.</p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="h-8 animate-pulse rounded bg-muted/30" />
+        ) : apiKey ? (
+          <div className="flex flex-col gap-2 border-t pt-3">
+            <div className="grid gap-2 md:grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-medium text-foreground">Receiver Endpoint URL</p>
+                <code className="select-all break-all rounded-lg bg-muted px-3 py-2 font-mono text-xs">{receiverURL}</code>
+              </div>
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-medium text-foreground">Access Token</p>
+                <code className="select-all break-all rounded-lg bg-muted px-3 py-2 font-mono text-xs">{apiKey}</code>
+              </div>
+            </div>
+            <div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground">
+              <p className="font-medium text-foreground">Настройка в Overland:</p>
+              <p>1. Settings → Receiver Endpoint URL — вставить адрес выше.</p>
+              <p>2. Access Token — вставить ключ, приложение пришлёт его как Bearer.</p>
+              <p>3. Tracking Enabled — включить, Significant Location Only — тоже: батарея почти не тратится.</p>
+              <p>4. Разрешение на геолокацию — Always и Precise Location, иначе фоновых точек не будет.</p>
+              <p>5. Send Now — проверить, что приложение отвечает "ok".</p>
+            </div>
+          </div>
+        ) : (
+          <p className="border-t pt-3 text-xs text-muted-foreground">Сгенерируйте API ключ в разделе Apple Health - Overland использует тот же ключ.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const SCHEDULE_LABELS: Record<CheckupSchedulePeriod, string> = {
   today: 'Каждый день',
   week: 'Каждую неделю',
@@ -981,6 +1043,8 @@ export function Settings() {
         </div>
 
         <AppleHealthSection onChanged={load} reloadKey={healthReloadKey} />
+
+        <LocationSection reloadKey={healthReloadKey} />
       </div>
 
       <CheckupDeliverySection />
