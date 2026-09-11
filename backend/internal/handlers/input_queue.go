@@ -211,8 +211,8 @@ func (h *VoiceWorkoutHandler) processNextInputNotification(ctx context.Context) 
 		return false
 	}
 
-	success := job.Result.Status != "failed"
-	if err := h.push.sendInputResult(ctx, job.UserID, job.ID, inputNotificationBody(job.Result.Display), success); err != nil {
+	title, url := inputNotificationHeader(job.Result)
+	if err := h.push.sendInputResult(ctx, job.UserID, job.ID, title, inputNotificationBody(job.Result.Display), url); err != nil {
 		delay := time.Duration(job.Attempts) * time.Minute
 		if delay > time.Hour {
 			delay = time.Hour
@@ -231,6 +231,22 @@ func (h *VoiceWorkoutHandler) processNextInputNotification(ctx context.Context) 
 		h.logger.Error().Err(err).Str("job_id", job.ID).Msg("complete input notification")
 	}
 	return true
+}
+
+// inputNotificationHeader names the notification by what the phrase turned into
+// and sends the tap where the whole result is: a question is answered in the
+// chat, everything else is recorded on the input page.
+func inputNotificationHeader(result voiceWorkoutResponse) (title, url string) {
+	if result.Domain == voiceDomainQuestion {
+		if result.Status == "failed" {
+			return "Не смог ответить", "/ai"
+		}
+		return "Ответ готов", "/ai"
+	}
+	if result.Status == "failed" {
+		return "Не удалось обработать запись", "/input"
+	}
+	return "Запись готова", "/input"
 }
 
 func inputNotificationBody(display string) string {

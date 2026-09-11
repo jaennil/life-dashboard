@@ -101,13 +101,9 @@ func (p *webPushSender) enabled() bool {
 	return p != nil && p.options.PublicKey != "" && p.options.PrivateKey != ""
 }
 
-func (p *webPushSender) sendInputResult(ctx context.Context, userID, jobID, display string, success bool) error {
-	title := "Запись готова"
-	if !success {
-		title = "Не удалось обработать запись"
-	}
+func (p *webPushSender) sendInputResult(ctx context.Context, userID, jobID, title, body, url string) error {
 	return p.send(ctx, userID, jobID, map[string]string{
-		"title": title, "body": display, "url": "/input", "tag": "input-job-" + jobID,
+		"title": title, "body": body, "url": url, "tag": "input-job-" + jobID,
 	})
 }
 

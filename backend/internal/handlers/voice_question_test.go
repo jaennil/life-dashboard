@@ -107,3 +107,23 @@ func TestRerouteQuestionOnlyOverridesWrites(t *testing.T) {
 		t.Errorf("a plain meal was rerouted to %q", got)
 	}
 }
+
+func TestInputNotificationHeaderSeparatesAnswersFromRecords(t *testing.T) {
+	cases := []struct {
+		result    voiceWorkoutResponse
+		wantTitle string
+		wantURL   string
+	}{
+		{voiceWorkoutResponse{Domain: voiceDomainQuestion, Status: "ok"}, "Ответ готов", "/ai"},
+		{voiceWorkoutResponse{Domain: voiceDomainQuestion, Status: "failed"}, "Не смог ответить", "/ai"},
+		{voiceWorkoutResponse{Domain: voiceDomainFood, Status: "ok"}, "Запись готова", "/input"},
+		{voiceWorkoutResponse{Domain: voiceDomainWorkout, Status: "failed"}, "Не удалось обработать запись", "/input"},
+	}
+	for _, tc := range cases {
+		title, url := inputNotificationHeader(tc.result)
+		if title != tc.wantTitle || url != tc.wantURL {
+			t.Errorf("%s/%s = (%q, %q), want (%q, %q)",
+				tc.result.Domain, tc.result.Status, title, url, tc.wantTitle, tc.wantURL)
+		}
+	}
+}
