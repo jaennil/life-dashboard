@@ -680,8 +680,10 @@ function LocationSection({ reloadKey }: { reloadKey: number }) {
   const [info, setInfo] = useState<HealthAPIKeyInfo | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // The skeleton is the initial state rather than something the effect turns on:
+  // setting state synchronously in an effect body costs a cascading render, and
+  // a reload here replaces one key with the same key.
   useEffect(() => {
-    setLoading(true)
     api.getAPIKey()
       .then(setInfo)
       .catch(() => {})
