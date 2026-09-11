@@ -6,6 +6,7 @@ import { api, type InputJob, type QuickInputResponse } from '@/lib/api'
 const EXAMPLES = [
   'Лимонад с витаминами 330 мл',
   'Подтягивания 8 раз, 3 подхода',
+  'Чем добрать КБЖУ сегодня?',
   'Закончить тренировку',
 ]
 
@@ -13,6 +14,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   food: 'Питание',
   workout: 'Тренировка',
   task: 'Задача',
+  question: 'Вопрос',
   note: 'Заметка',
   weight: 'Вес',
   unknown: 'Не определено',
@@ -116,7 +118,7 @@ export function QuickInput() {
       <PageHeader
         eyebrow="Quick capture"
         title="Ввод"
-        description="Записывай питание и тренировку текстом — обработка такая же, как у голосовой команды."
+        description="Записывай питание и тренировку или задавай вопрос текстом — обработка такая же, как у голосовой команды."
         badges={[{ label: 'Текст или голос', tone: 'primary' }]}
       />
 
@@ -141,7 +143,7 @@ export function QuickInput() {
         <form onSubmit={handleSubmit} className="rounded-2xl border bg-card/90 p-4 shadow-sm sm:p-6">
           <label htmlFor="quick-input" className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <PenLine className="h-4 w-4 text-primary" />
-            Что записать?
+            Что записать или спросить?
           </label>
           <textarea
             ref={inputRef}
@@ -151,7 +153,7 @@ export function QuickInput() {
             onKeyDown={handleKeyDown}
             rows={5}
             autoFocus
-            placeholder="Например: лимонад с витаминами 330 мл"
+            placeholder="Например: лимонад с витаминами 330 мл или чем добрать КБЖУ сегодня?"
             className="mt-3 w-full resize-y rounded-2xl border bg-background px-4 py-3 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/60 focus:ring-2 focus:ring-primary/15"
           />
           <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

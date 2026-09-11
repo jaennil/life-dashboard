@@ -565,6 +565,7 @@ export interface QuickInputResponse {
   food?: string
   workout?: string
   task?: string
+  answer?: string
   parse_error?: string
   push_error?: string
 }
