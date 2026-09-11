@@ -17,6 +17,7 @@ type Config struct {
 	Telegram   TelegramConfig   `mapstructure:"telegram"`
 	Connectors ConnectorsConfig `mapstructure:"connectors"`
 	Weather    WeatherConfig    `mapstructure:"weather"`
+	Location   LocationConfig   `mapstructure:"location"`
 	Unleash    UnleashConfig    `mapstructure:"unleash"`
 }
 
@@ -90,6 +91,13 @@ type MFPConfig struct {
 	SessionCookie string `mapstructure:"session_cookie"`
 	AccessToken   string `mapstructure:"access_token"`
 	UserID        string `mapstructure:"user_id"`
+}
+
+// LocationConfig points the place naming at map services. Empty means the
+// public OpenStreetMap endpoints; a self-hosted mirror goes here.
+type LocationConfig struct {
+	OverpassURL  string `mapstructure:"overpass_url"`
+	NominatimURL string `mapstructure:"nominatim_url"`
 }
 
 type WeatherConfig struct {
@@ -239,6 +247,9 @@ func Load() (*Config, error) {
 	viper.BindEnv("connectors.mfp.session_cookie", "MFP_SESSION_COOKIE")
 	viper.BindEnv("connectors.mfp.access_token", "MFP_ACCESS_TOKEN")
 	viper.BindEnv("connectors.mfp.user_id", "MFP_USER_ID")
+
+	viper.BindEnv("location.overpass_url", "OVERPASS_URL")
+	viper.BindEnv("location.nominatim_url", "NOMINATIM_URL")
 
 	viper.BindEnv("weather.lat", "WEATHER_LAT")
 	viper.BindEnv("weather.lon", "WEATHER_LON")

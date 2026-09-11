@@ -314,6 +314,20 @@ func main() {
 	aiHandler.StartCheckupWorker(inputWorkerCtx)
 	telegramHandler.StartTelegramWorker(inputWorkerCtx)
 
+	// Naming new places is a slow trickle against public map services, so it runs
+	// on its own timer rather than in the request the phone is waiting on.
+	placeNaming := handlers.NewPlaceNaming(pool,
+		handlers.NewOSMPlaceNamer(cfg.Location.OverpassURL, cfg.Location.NominatimURL), log.Logger)
+	if err := sched.AddJob("0 */10 * * * *", "location_place_naming", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := placeNaming.NameNewPlaces(ctx); err != nil {
+			log.Error().Err(err).Msg("name new places")
+		}
+	}); err != nil {
+		log.Fatal().Err(err).Msg("failed to register place naming job")
+	}
+
 	// Every five minutes rather than on the hour: schedules carry a minute, and
 	// a report promised at 21:30 should not wait until 22:00.
 	if err := sched.AddJob("0 */5 * * * *", "checkup_schedules", func() {
