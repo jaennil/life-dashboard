@@ -53,7 +53,11 @@ type overlandFeature struct {
 }
 
 type overlandProperties struct {
-	Timestamp          string   `json:"timestamp"`
+	Timestamp string `json:"timestamp"`
+	// Action is "visit" for a CoreLocation visit event and empty for a plain fix.
+	Action             string   `json:"action"`
+	ArrivalDate        string   `json:"arrival_date"`
+	DepartureDate      string   `json:"departure_date"`
 	Altitude           *float64 `json:"altitude"`
 	Speed              *float64 `json:"speed"`
 	Course             *float64 `json:"course"`
@@ -104,19 +108,29 @@ func (h *LocationWebhookHandler) ReceiveOverland(w http.ResponseWriter, r *http.
 		batch.Locations = batch.Locations[:locationMaxPoints]
 	}
 
-	points := parseOverlandPoints(batch)
+	points, visits := parseOverlandBatch(batch)
+
 	saved, err := h.storeLocationPoints(r.Context(), userID, points)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("store location points")
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	savedVisits, err := h.storeLocationVisits(r.Context(), userID, visits)
+	if err != nil {
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("store location visits")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
-	if saved > 0 {
+	if saved > 0 || savedVisits > 0 {
 		h.touchLocationSync(r.Context(), userID)
 	}
 	h.logger.Info().Str("user_id", userID).
-		Int("received", len(batch.Locations)).Int("stored", saved).Msg("location batch ingested")
+		Int("received", len(batch.Locations)).
+		Int("stored", saved).
+		Int("visits", savedVisits).
+		Msg("location batch ingested")
 
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"result":"ok"}`))
@@ -139,10 +153,24 @@ type locationPoint struct {
 	Raw          []byte
 }
 
-// parseOverlandPoints turns a batch into storable fixes, dropping only what
-// cannot be placed on a map or in time.
-func parseOverlandPoints(batch overlandBatch) []locationPoint {
+// locationVisit is one stay as CoreLocation reported it.
+type locationVisit struct {
+	ArrivedAt  time.Time
+	DepartedAt *time.Time
+	Latitude   float64
+	Longitude  float64
+	Accuracy   *float64
+	Wifi       string
+	DeviceID   string
+	Raw        []byte
+}
+
+// parseOverlandBatch splits a batch into plain fixes and visit events, dropping
+// only what cannot be placed on a map or in time.
+func parseOverlandBatch(batch overlandBatch) ([]locationPoint, []locationVisit) {
 	points := make([]locationPoint, 0, len(batch.Locations))
+	visits := make([]locationVisit, 0, 4)
+
 	for _, feature := range batch.Locations {
 		if len(feature.Geometry.Coordinates) < 2 {
 			continue
@@ -153,6 +181,13 @@ func parseOverlandPoints(batch overlandBatch) []locationPoint {
 		}
 		recordedAt, ok := parseOverlandTime(properties.Timestamp)
 		if !ok {
+			continue
+		}
+
+		if strings.EqualFold(properties.Action, "visit") {
+			if visit, ok := buildLocationVisit(feature, properties, recordedAt); ok {
+				visits = append(visits, visit)
+			}
 			continue
 		}
 
@@ -172,7 +207,47 @@ func parseOverlandPoints(batch overlandBatch) []locationPoint {
 			Raw:          feature.Properties,
 		})
 	}
-	return points
+	return points, visits
+}
+
+// buildLocationVisit reads one visit event.
+//
+// Both dates can be missing, and each absence means something specific: no
+// arrival is a visit that had already started when tracking began, no departure
+// is a visit still in progress. The event's own timestamp stands in for a
+// missing arrival, because a visit has to be somewhere on the timeline to be
+// worth anything.
+func buildLocationVisit(feature overlandFeature, properties overlandProperties, recordedAt time.Time) (locationVisit, bool) {
+	visit := locationVisit{
+		ArrivedAt: recordedAt,
+		Longitude: feature.Geometry.Coordinates[0],
+		Latitude:  feature.Geometry.Coordinates[1],
+		Accuracy:  properties.HorizontalAccuracy,
+		Wifi:      truncateField(properties.Wifi, 255),
+		DeviceID:  truncateField(properties.DeviceID, 100),
+		Raw:       feature.Properties,
+	}
+	arrived, arrivalKnown := parseOverlandTime(properties.ArrivalDate)
+	if arrivalKnown {
+		visit.ArrivedAt = arrived
+	}
+
+	departed, departureKnown := parseOverlandTime(properties.DepartureDate)
+	if !departureKnown {
+		return visit, true
+	}
+	switch {
+	case !arrivalKnown && departed.Before(visit.ArrivedAt):
+		// Tracking began mid-visit, so the substituted arrival is later than the
+		// real departure. Anchor the row on what is actually known - that the
+		// place was left at this time - and let the zero length say the rest.
+		visit.ArrivedAt = departed
+	case departed.Before(visit.ArrivedAt):
+		// Both dates came from the phone and they contradict each other.
+		return locationVisit{}, false
+	}
+	visit.DepartedAt = &departed
+	return visit, true
 }
 
 // parseOverlandTime accepts the timestamp formats the app has shipped with. A
@@ -270,4 +345,43 @@ func (h *LocationWebhookHandler) archiveUnparsedBatch(ctx context.Context, userI
 	`, locationSourceOverland, stored, userID); err != nil {
 		h.logger.Warn().Err(err).Msg("archive unparsed location batch")
 	}
+}
+
+func (h *LocationWebhookHandler) storeLocationVisits(ctx context.Context, userID string, visits []locationVisit) (int, error) {
+	if len(visits) == 0 {
+		return 0, nil
+	}
+
+	batch := &pgx.Batch{}
+	for _, visit := range visits {
+		// The arrival arrives first and the departure later, as a second event for
+		// the same visit: the update closes the open row rather than adding one.
+		batch.Queue(`
+			INSERT INTO location_visits (
+				user_id, source, arrived_at, departed_at, latitude, longitude,
+				accuracy_m, wifi, device_id, raw
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			ON CONFLICT (user_id, source, arrived_at) DO UPDATE SET
+				departed_at = COALESCE(EXCLUDED.departed_at, location_visits.departed_at),
+				accuracy_m  = COALESCE(EXCLUDED.accuracy_m, location_visits.accuracy_m),
+				wifi        = COALESCE(NULLIF(EXCLUDED.wifi, ''), location_visits.wifi),
+				raw         = EXCLUDED.raw,
+				updated_at  = NOW()
+		`, userID, locationSourceOverland, visit.ArrivedAt, visit.DepartedAt, visit.Latitude,
+			visit.Longitude, visit.Accuracy, visit.Wifi, visit.DeviceID, visit.Raw)
+	}
+
+	results := h.db.SendBatch(ctx, batch)
+	defer results.Close()
+
+	saved := 0
+	for range visits {
+		tag, err := results.Exec()
+		if err != nil {
+			return saved, err
+		}
+		saved += int(tag.RowsAffected())
+	}
+	return saved, results.Close()
 }
