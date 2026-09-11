@@ -203,6 +203,11 @@ func (h *VoiceWorkoutHandler) processText(ctx context.Context, userID, eventID s
 		// and while a workout is open the finish itself is unambiguous.
 		interpreted = h.classify(ctx, userID, spoken, openSessionID, workoutOpen, &response)
 	}
+	if rerouted := rerouteQuestion(interpreted.Domain, text); rerouted != interpreted.Domain {
+		h.logger.Info().Str("user_id", userID).Str("claimed", interpreted.Domain).
+			Msg("phrase rerouted to question")
+		interpreted = voiceInterpretation{Domain: rerouted}
+	}
 	response.Domain = interpreted.Domain
 	// A parser failure is retried by the durable worker. Do not mutate a workout
 	// session on the fallback domain or the retry would append the phrase twice.

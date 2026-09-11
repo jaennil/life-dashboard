@@ -74,3 +74,40 @@ var voiceQuestionOpeners = []string{
 	"подскажи", "посоветуй", "посчитай", "проанализируй", "оцени", "сравни",
 	"покажи", "расскажи",
 }
+
+// rerouteQuestion overrides a verdict that would write something when the phrase
+// is plainly a question. It takes the phrase as it was said, not the one the
+// parser saw: stripping the finish command also eats the question mark.
+func rerouteQuestion(domain, text string) string {
+	if domain != voiceDomainFood && domain != voiceDomainTask {
+		return domain
+	}
+	if !looksLikeQuestion(text) {
+		return domain
+	}
+	return voiceDomainQuestion
+}
+
+// looksLikeQuestion is a guard, not a router: the model decides the domain, and
+// this only overrides a verdict that would write something.
+//
+// Misreading "чем добрать кбжу" as food puts an invented meal in the diary and
+// "что купить на неделю" as a task puts a chore in Vikunja, and both have to be
+// cleaned up by hand. A wrongly answered question costs one useless answer.
+func looksLikeQuestion(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	if strings.HasSuffix(trimmed, "?") {
+		return true
+	}
+
+	lowered := strings.ToLower(trimmed)
+	for _, opener := range voiceQuestionOpeners {
+		if strings.HasPrefix(lowered, opener) {
+			return true
+		}
+	}
+	return false
+}
