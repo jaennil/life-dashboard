@@ -140,6 +140,16 @@ func (h *LocationWebhookHandler) ReceiveOverland(w http.ResponseWriter, r *http.
 		return
 	}
 
+	if savedVisits > 0 {
+		// Grouping and labelling are bookkeeping on top of the visit, so a failure
+		// here must not turn a stored visit into a rejected batch the phone will
+		// send again.
+		if err := h.attachVisitsToPlaces(r.Context(), userID); err != nil {
+			h.logger.Warn().Err(err).Str("user_id", userID).Msg("attach visits to places")
+		} else if err := h.relabelPlaces(r.Context(), userID, time.Now().AddDate(0, 0, -placeLabelWindowDays)); err != nil {
+			h.logger.Warn().Err(err).Str("user_id", userID).Msg("relabel places")
+		}
+	}
 	if saved > 0 || savedVisits > 0 {
 		h.touchLocationSync(r.Context(), userID)
 	}
