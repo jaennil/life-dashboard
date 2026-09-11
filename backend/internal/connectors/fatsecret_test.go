@@ -136,3 +136,17 @@ func TestPendingBackfillTakesTheHistorySlot(t *testing.T) {
 		t.Fatalf("manual run reads %d days, want %d", len(manual), nutritionSyncDays)
 	}
 }
+
+func TestFatSecretSyncDaysTreatsPrefetchAsALightRun(t *testing.T) {
+	// The refresh in front of an AI answer has seconds, not minutes: it must read
+	// the same hot window the cron tick does, not the deep manual one.
+	if got := fatSecretSyncDays(SyncTriggerPrefetch); got != fatSecretScheduledSyncDays+1 {
+		t.Fatalf("fatSecretSyncDays(prefetch) = %d, want %d", got, fatSecretScheduledSyncDays+1)
+	}
+	if !SyncTriggerPrefetch.Light() || !SyncTriggerScheduled.Light() {
+		t.Fatal("prefetch and scheduled runs must both be light")
+	}
+	if SyncTriggerManual.Light() || SyncTriggerInitial.Light() {
+		t.Fatal("manual and initial runs must stay deep")
+	}
+}

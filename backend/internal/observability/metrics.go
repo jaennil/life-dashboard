@@ -15,6 +15,7 @@ import (
 const (
 	SyncTriggerManual    = "manual"
 	SyncTriggerInitial   = "initial"
+	SyncTriggerPrefetch  = "prefetch"
 	SyncTriggerScheduled = "scheduled"
 )
 

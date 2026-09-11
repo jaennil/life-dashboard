@@ -347,7 +347,7 @@ func (c *FatSecretConnector) Sync(ctx context.Context, userID string) error {
 }
 
 func fatSecretSyncDays(trigger SyncTrigger) int {
-	if trigger == SyncTriggerScheduled {
+	if trigger.Light() {
 		return fatSecretScheduledSyncDays + 1
 	}
 	return nutritionSyncDays
@@ -365,7 +365,7 @@ func fatSecretSyncDates(trigger SyncTrigger, now time.Time, backfillPending bool
 		dates = append(dates, today.AddDate(0, 0, -i))
 	}
 
-	if trigger != SyncTriggerScheduled {
+	if !trigger.Light() {
 		for i := fatSecretScheduledSyncDays; i < nutritionSyncDays; i++ {
 			dates = append(dates, today.AddDate(0, 0, -i))
 		}
