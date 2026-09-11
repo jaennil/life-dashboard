@@ -42,8 +42,12 @@ spec:
         # home connection and the scheduler already retries with backoff. Only a
         # source that keeps failing is worth waking someone up for, and grouping
         # by source puts the culprit in the notification.
+        #
+        # The prefetch before an AI answer is excluded: it cuts a slow source off
+        # after a few seconds on purpose, so its errors say the answer did not
+        # wait, not that the integration is broken.
         - alert: LifeDashboardSyncErrors
-          expr: sum by (source) (increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",status="error"}[1h])) >= 3
+          expr: sum by (source) (increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",status="error",trigger!="prefetch"}[1h])) >= 3
           for: 10m
           labels:
             severity: warning
@@ -56,7 +60,7 @@ spec:
           expr: |
             sum by (source) (increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",status="success"}[6h])) == 0
             and
-            sum by (source) (increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend"}[6h])) > 0
+            sum by (source) (increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",trigger!="prefetch"}[6h])) > 0
           for: 15m
           labels:
             severity: warning
