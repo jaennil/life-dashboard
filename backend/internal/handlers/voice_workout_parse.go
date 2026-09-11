@@ -214,13 +214,21 @@ func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoo
 	sb.WriteString(`{"domain":"food","exercises":[],"entries":[{"food_id":"...","serving_id":"...","name":"...","grams":70,"meal":"breakfast"}],"unmatched":["..."]}`)
 	sb.WriteString("\nДля задачи формат такой:\n")
 	sb.WriteString(`{"domain":"task","exercises":[],"entries":[],"task":{"title":"забрать запчасти","project":"citroen","description":"","due_at":"2026-09-05T12:00:00+03:00","priority":0,"repeat":null},"unmatched":[]}`)
+	sb.WriteString("\nДля вопроса формат такой:\n")
+	sb.WriteString(`{"domain":"question","exercises":[],"entries":[],"task":null,"unmatched":[]}`)
 	sb.WriteString("\n\nСначала определи domain - о чём фраза:\n")
 	sb.WriteString("- workout: упражнения, подходы, повторения, веса.\n")
 	sb.WriteString("- food: съеденное, продукты, граммы, калории.\n")
 	sb.WriteString("- task: то, что надо сделать: поручение себе, дело, напоминание, покупка.\n")
+	sb.WriteString("- question: вопрос ассистенту или просьба совета по своим данным.\n")
 	sb.WriteString("- weight: собственный вес пользователя.\n")
 	sb.WriteString("- note: всё остальное, мысли и заметки.\n")
 	sb.WriteString("Если domain не workout, не food и не task, верни только domain, а массивы оставь пустыми.\n")
+	sb.WriteString("\nКак отличить вопрос:\n")
+	sb.WriteString("- Фраза спрашивает, а не сообщает факт - это question, даже если она про еду, тренировки, деньги или задачи. \"Сколько я съел белка?\" - question, а не food. \"Что сегодня потренить?\" - question, а не workout.\n")
+	sb.WriteString("- Просьба совета, подсказки, расчёта или оценки - тоже question: \"чем добрать кбжу\", \"посоветуй что съесть\", \"стоит ли идти в зал\", \"сколько у меня на балансе\".\n")
+	sb.WriteString("- Сообщение о сделанном остаётся собой: \"съел борщ\" - food, \"сделал 5 подтягиваний\" - workout, \"надо забрать посылку\" - task.\n")
+	sb.WriteString("- Для question ничего не разбирай: exercises и entries пустые, task null.\n")
 	sb.WriteString("\nПравила разбора задачи:\n")
 	sb.WriteString("- title - это само дело в инфинитиве, без слов \"надо\", \"не забыть\" и \"напомни\".\n")
 	sb.WriteString(fmt.Sprintf("- Сейчас %s. Относительный срок (\"завтра\", \"в пятницу\", \"через неделю\") переведи в due_at по этому времени и в этом же часовом поясе.\n", now.Format("2006-01-02 15:04 -07:00, Monday")))
@@ -413,6 +421,9 @@ func (h *VoiceWorkoutHandler) classify(ctx context.Context, userID, text, sessio
 	}
 
 	domain := resolveVoiceDomain(parsed.Domain, workoutOpen)
+	if domain == voiceDomainQuestion {
+		return voiceInterpretation{Domain: domain}
+	}
 	if domain == voiceDomainFood {
 		return voiceInterpretation{
 			Domain:    domain,

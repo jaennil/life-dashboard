@@ -7,23 +7,26 @@ import (
 )
 
 // Domains a dictated phrase can belong to. Workout, food and task are written
-// through; the rest exist so that a stray thought is recognized as such and
-// answered honestly instead of being forced into a workout.
+// through, question is answered back; the rest exist so that a stray thought is
+// recognized as such and answered honestly instead of being forced into a
+// workout.
 const (
-	voiceDomainWorkout = "workout"
-	voiceDomainFood    = "food"
-	voiceDomainTask    = "task"
-	voiceDomainNote    = "note"
-	voiceDomainWeight  = "weight"
-	voiceDomainUnknown = "unknown"
+	voiceDomainWorkout  = "workout"
+	voiceDomainFood     = "food"
+	voiceDomainTask     = "task"
+	voiceDomainQuestion = "question"
+	voiceDomainNote     = "note"
+	voiceDomainWeight   = "weight"
+	voiceDomainUnknown  = "unknown"
 )
 
 var voiceKnownDomains = map[string]bool{
-	voiceDomainWorkout: true,
-	voiceDomainFood:    true,
-	voiceDomainTask:    true,
-	voiceDomainNote:    true,
-	voiceDomainWeight:  true,
+	voiceDomainWorkout:  true,
+	voiceDomainFood:     true,
+	voiceDomainTask:     true,
+	voiceDomainQuestion: true,
+	voiceDomainNote:     true,
+	voiceDomainWeight:   true,
 }
 
 // voiceDomainReplies explain a domain that is recognized but not yet wired up.
@@ -124,6 +127,9 @@ func composeVoiceDisplay(response voiceWorkoutResponse) string {
 	}
 	if response.Task != "" {
 		parts = append(parts, response.Task)
+	}
+	if response.Answer != "" {
+		parts = append(parts, response.Answer)
 	}
 	if response.Workout != "" {
 		parts = append(parts, response.Workout)

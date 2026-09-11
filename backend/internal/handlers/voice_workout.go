@@ -84,18 +84,21 @@ type voiceWorkoutResponse struct {
 	// phrase, so the Shortcut can show both while the phone is still in hand.
 	// Getting this wrong silently is the main risk of dictating, and this is the
 	// only place it can be caught before the workout is written.
-	Heard         string   `json:"heard"`
-	Understood    string   `json:"understood,omitempty"`
-	Workout       string   `json:"workout,omitempty"`
-	Unmatched     []string `json:"unmatched,omitempty"`
-	Title         string   `json:"title,omitempty"`
-	ParseError    string   `json:"parse_error,omitempty"`
-	Domain        string   `json:"domain,omitempty"`
-	Food          string   `json:"food,omitempty"`
-	Task          string   `json:"task,omitempty"`
-	HevyWorkoutID string   `json:"hevy_workout_id,omitempty"`
-	PushError     string   `json:"push_error,omitempty"`
-	Message       string   `json:"message,omitempty"`
+	Heard      string   `json:"heard"`
+	Understood string   `json:"understood,omitempty"`
+	Workout    string   `json:"workout,omitempty"`
+	Unmatched  []string `json:"unmatched,omitempty"`
+	Title      string   `json:"title,omitempty"`
+	ParseError string   `json:"parse_error,omitempty"`
+	Domain     string   `json:"domain,omitempty"`
+	Food       string   `json:"food,omitempty"`
+	// Answer carries the reply to a dictated question. It is the one domain that
+	// gives something back instead of recording something.
+	Answer        string `json:"answer,omitempty"`
+	Task          string `json:"task,omitempty"`
+	HevyWorkoutID string `json:"hevy_workout_id,omitempty"`
+	PushError     string `json:"push_error,omitempty"`
+	Message       string `json:"message,omitempty"`
 	// Display is the one field the Shortcut reads: whatever happened, this is
 	// what to show.
 	Display string `json:"display"`
@@ -214,11 +217,14 @@ func (h *VoiceWorkoutHandler) processText(ctx context.Context, userID, eventID s
 	if interpreted.Domain != voiceDomainWorkout {
 		// Not a workout: no session is opened and none is touched. The reply says
 		// where the phrase was routed so a misclassification is visible at once.
+		var domainErr error
 		switch {
 		case interpreted.Domain == voiceDomainFood:
 			h.applyFood(ctx, userID, eventID, interpreted, &response)
 		case interpreted.Domain == voiceDomainTask:
 			h.applyTask(ctx, userID, eventID, interpreted, &response)
+		case interpreted.Domain == voiceDomainQuestion:
+			domainErr = h.answerQuestion(ctx, userID, spoken, &response)
 		default:
 			if reply, known := voiceDomainReplies[interpreted.Domain]; known {
 				response.Message = reply
@@ -228,7 +234,7 @@ func (h *VoiceWorkoutHandler) processText(ctx context.Context, userID, eventID s
 		}
 		response.Display = composeVoiceDisplay(response)
 		h.logger.Info().Str("user_id", userID).Str("domain", interpreted.Domain).Msg("voice phrase routed")
-		return response, nil
+		return response, domainErr
 	}
 
 	sessionID := openSessionID

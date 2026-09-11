@@ -178,7 +178,10 @@ func (h *VoiceWorkoutHandler) processNextInputJob(workerCtx context.Context) boo
 		return true
 	}
 
-	retryable := response.ParseError != "" || errors.Is(processErr, context.DeadlineExceeded)
+	// An unanswered question is reported now rather than retried in an hour: see
+	// errVoiceAnswerFailed.
+	retryable := (response.ParseError != "" || errors.Is(processErr, context.DeadlineExceeded)) &&
+		!errors.Is(processErr, errVoiceAnswerFailed)
 	if retryable && job.Attempts < inputJobMaxAttempts {
 		delay := inputJobBackoff[job.Attempts-1]
 		if err := h.retryInputJob(workerCtx, job.ID, processErr.Error(), delay); err != nil {
