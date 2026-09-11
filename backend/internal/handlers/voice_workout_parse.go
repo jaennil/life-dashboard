@@ -95,6 +95,10 @@ type voiceInterpretation struct {
 	Foods     []voiceFoodCandidate
 	Task      *voiceParsedTask
 	Unmatched []string
+	// Err carries the failure itself, not just its text. The queue decides how
+	// long to wait before the next attempt from what went wrong, and a message
+	// flattened to a string cannot answer that.
+	Err error
 }
 
 // loadCandidates builds the exercise shortlist: everything the account has
@@ -417,7 +421,7 @@ func (h *VoiceWorkoutHandler) classify(ctx context.Context, userID, text, sessio
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("parse phrase")
 		response.ParseError = err.Error()
-		return voiceInterpretation{Domain: resolveVoiceDomain("", workoutOpen)}
+		return voiceInterpretation{Domain: resolveVoiceDomain("", workoutOpen), Err: err}
 	}
 
 	domain := resolveVoiceDomain(parsed.Domain, workoutOpen)

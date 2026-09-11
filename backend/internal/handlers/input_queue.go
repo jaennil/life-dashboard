@@ -23,9 +23,27 @@ const (
 	inputNotificationLease = time.Minute
 )
 
-// A provider outage usually outlives a few seconds. Retry sparsely instead of
-// sending the same expensive parse back into the same unhealthy route.
-var inputJobBackoff = [...]time.Duration{time.Hour, 3 * time.Hour}
+// How long to wait before trying a failed job again.
+//
+// A provider that answers with an error is unhealthy - rate limited, out of
+// credit, broken - and hammering it helps nobody, so those retries are hours
+// apart. A provider that simply never answers is a different failure: it took
+// one call and dropped it, and the next call usually goes through. An hour-old
+// confirmation of a set dictated between two exercises is worthless, so a stall
+// is retried while the phone is still in hand.
+var (
+	inputJobUpstreamBackoff = [...]time.Duration{time.Hour, 3 * time.Hour}
+	inputJobStallBackoff    = [...]time.Duration{time.Minute, 5 * time.Minute}
+)
+
+func inputJobRetryDelay(attempts int, err error) time.Duration {
+	table := inputJobStallBackoff[:]
+	if errors.Is(err, errAIUpstream) {
+		table = inputJobUpstreamBackoff[:]
+	}
+	index := max(attempts-1, 0)
+	return table[min(index, len(table)-1)]
+}
 
 type inputJobAccepted struct {
 	JobID   string `json:"job_id"`
@@ -183,7 +201,8 @@ func (h *VoiceWorkoutHandler) processNextInputJob(workerCtx context.Context) boo
 	retryable := (response.ParseError != "" || errors.Is(processErr, context.DeadlineExceeded)) &&
 		!errors.Is(processErr, errVoiceAnswerFailed)
 	if retryable && job.Attempts < inputJobMaxAttempts {
-		delay := inputJobBackoff[job.Attempts-1]
+		delay := inputJobRetryDelay(job.Attempts, processErr)
+		h.logger.Info().Str("job_id", job.ID).Dur("retry_in", delay).Err(processErr).Msg("input job will retry")
 		if err := h.retryInputJob(workerCtx, job.ID, processErr.Error(), delay); err != nil {
 			h.logger.Error().Err(err).Str("job_id", job.ID).Msg("retry input job")
 		}

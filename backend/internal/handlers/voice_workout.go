@@ -213,6 +213,9 @@ func (h *VoiceWorkoutHandler) processText(ctx context.Context, userID, eventID s
 	// session on the fallback domain or the retry would append the phrase twice.
 	if response.ParseError != "" {
 		response.Display = composeVoiceDisplay(response)
+		if interpreted.Err != nil {
+			return response, interpreted.Err
+		}
 		return response, errors.New(response.ParseError)
 	}
 	if err := h.recordPhraseDomain(ctx, eventID, interpreted.Domain); err != nil {
