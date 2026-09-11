@@ -43,10 +43,14 @@ type VoiceWorkoutHandler struct {
 	// food writes dictated meals straight to the FatSecret diary.
 	food foodWriter
 	// task writes dictated tasks straight to Vikunja.
-	task   taskWriter
-	push   *webPushSender
-	wake   chan struct{}
-	logger zerolog.Logger
+	task taskWriter
+	push *webPushSender
+	// wake nudges the job loop on a new phrase, notifyWake the delivery loop on a
+	// finished one. Two channels because the two loops run independently: see
+	// StartInputWorker.
+	wake       chan struct{}
+	notifyWake chan struct{}
+	logger     zerolog.Logger
 }
 
 func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, hevy workoutWriter, food foodWriter, task taskWriter, parseModel, parseEffort string, pushOptions WebPushOptions, logger zerolog.Logger) *VoiceWorkoutHandler {
@@ -60,6 +64,7 @@ func NewVoiceWorkout(db *pgxpool.Pool, ai *AIHandler, hevy workoutWriter, food f
 		parseEffort: parseEffort,
 		push:        newWebPushSender(db, pushOptions, logger),
 		wake:        make(chan struct{}, 1),
+		notifyWake:  make(chan struct{}, 1),
 		logger:      logger.With().Str("handler", "voice_workout").Logger(),
 	}
 }

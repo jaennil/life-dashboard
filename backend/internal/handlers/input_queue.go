@@ -150,26 +150,45 @@ func (h *VoiceWorkoutHandler) insertInputJob(ctx context.Context, userID string,
 	return jobID, nil
 }
 
-// StartInputWorker starts one ordered consumer. A single consumer is deliberate:
-// workout phrases are stateful, and processing two phrases from one user at the
-// same time can corrupt the accumulated draft.
+// StartInputWorker starts the two loops the queue runs on.
+//
+// Processing stays a single ordered consumer: workout phrases are stateful, and
+// two phrases from one user at the same time can corrupt the accumulated draft.
+//
+// Delivery is separate, because it shares none of that state. Together in one
+// loop, a phrase that takes minutes to process also held back the notification
+// for a phrase that had already finished - a stalled parse once sat on its full
+// budget while a ready answer waited behind it.
 func (h *VoiceWorkoutHandler) StartInputWorker(ctx context.Context) {
-	go func() {
-		ticker := time.NewTicker(inputJobPoll)
-		defer ticker.Stop()
-		for {
-			for h.processNextInputJob(ctx) {
-			}
-			for h.processNextInputNotification(ctx) {
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-h.wake:
-			case <-ticker.C:
-			}
+	go h.pumpQueue(ctx, h.wake, h.processNextInputJob)
+	go h.pumpQueue(ctx, h.notifyWake, h.processNextInputNotification)
+}
+
+// pumpQueue drains step until it finds nothing left to do, then waits for a
+// wake-up or the next tick.
+func (h *VoiceWorkoutHandler) pumpQueue(ctx context.Context, wake <-chan struct{}, step func(context.Context) bool) {
+	ticker := time.NewTicker(inputJobPoll)
+	defer ticker.Stop()
+	for {
+		for step(ctx) {
 		}
-	}()
+		select {
+		case <-ctx.Done():
+			return
+		case <-wake:
+		case <-ticker.C:
+		}
+	}
+}
+
+// wakeDelivery hands a finished job straight to the delivery loop. Without it
+// the notification would wait out a poll interval that the old single loop never
+// had to pay.
+func (h *VoiceWorkoutHandler) wakeDelivery() {
+	select {
+	case h.notifyWake <- struct{}{}:
+	default:
+	}
 }
 
 func (h *VoiceWorkoutHandler) processNextInputJob(workerCtx context.Context) bool {
@@ -193,6 +212,7 @@ func (h *VoiceWorkoutHandler) processNextInputJob(workerCtx context.Context) boo
 			h.logger.Error().Err(err).Str("job_id", job.ID).Msg("complete input job")
 			return true
 		}
+		h.wakeDelivery()
 		return true
 	}
 
@@ -217,6 +237,7 @@ func (h *VoiceWorkoutHandler) processNextInputJob(workerCtx context.Context) boo
 		h.logger.Error().Err(err).Str("job_id", job.ID).Msg("fail input job")
 		return true
 	}
+	h.wakeDelivery()
 	return true
 }
 
