@@ -527,7 +527,9 @@ func main() {
 	healthWebhookPublic := handlers.NewHealthWebhook(pool, log.Logger)
 	r.Post("/api/v1/webhook/health", healthWebhookPublic.ReceiveData)
 	screenTimeWebhook := handlers.NewScreenTimeWebhook(pool, log.Logger)
+	locationWebhook := handlers.NewLocationWebhook(pool, log.Logger)
 	r.Post("/api/v1/webhook/screentime", screenTimeWebhook.ReceiveData)
+	r.Post("/api/v1/webhook/overland", locationWebhook.ReceiveOverland)
 
 	// One entry point for everything dictated: the handler routes by domain. The
 	// old path stays an alias so a Shortcut already configured on a phone keeps
