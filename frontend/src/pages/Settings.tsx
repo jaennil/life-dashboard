@@ -700,7 +700,7 @@ function LocationSection({ reloadKey }: { reloadKey: number }) {
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-xl">📍</div>
           <div>
             <p className="text-sm font-semibold text-foreground">Overland → Webhook</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">Приложение шлёт точки пачками, офлайн копит и досылает. Из точек собираются визиты: где был и сколько.</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Приложение шлёт точки пачками, офлайн копит и досылает. Визиты - где был и сколько - определяет сама iOS.</p>
           </div>
         </div>
 
@@ -720,11 +720,12 @@ function LocationSection({ reloadKey }: { reloadKey: number }) {
             </div>
             <div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground">
               <p className="font-medium text-foreground">Настройка в Overland:</p>
-              <p>1. Settings → Receiver Endpoint URL — вставить адрес выше.</p>
-              <p>2. Access Token — вставить ключ, приложение пришлёт его как Bearer.</p>
-              <p>3. Tracking Enabled — включить, Significant Location Only — тоже: батарея почти не тратится.</p>
-              <p>4. Разрешение на геолокацию — Always и Precise Location, иначе фоновых точек не будет.</p>
-              <p>5. Send Now — проверить, что приложение отвечает "ok".</p>
+              <p>1. Settings → Server URL — вставить адрес выше, Access Token — ключ, он уйдёт как Bearer.</p>
+              <p>2. Tracking Enabled — On, Continuous Tracking Mode — Significant: батарея почти не тратится.</p>
+              <p>3. Visit Tracking — On. Это главное: iOS сама определяет приход и уход с места, отсюда берутся визиты.</p>
+              <p>4. Pause Updates Automatically — No, иначе система тихо остановит трекинг.</p>
+              <p>5. Разрешение на геолокацию — Always и Precise Location.</p>
+              <p>6. Send Now — проверить, что приложение отвечает "ok".</p>
             </div>
           </div>
         ) : (
