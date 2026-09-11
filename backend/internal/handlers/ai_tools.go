@@ -22,6 +22,7 @@ const (
 	aiToolRoutineOverview      aiToolName = "routine_overview"
 	aiToolHabitOverview        aiToolName = "habit_overview"
 	aiToolScreenTimeOverview   aiToolName = "screentime_overview"
+	aiToolLocationOverview     aiToolName = "location_overview"
 	aiToolNutritionOverview    aiToolName = "nutrition_overview"
 	aiToolJournalOverview      aiToolName = "journal_overview"
 	aiToolCalendarOverview     aiToolName = "calendar_overview"
@@ -151,6 +152,7 @@ func buildAIToolPlannerPrompt(message, recentHistory string) string {
 	sb.WriteString("- journal_overview: заметки и записи из Notion/дневника; args: days, limit\n")
 	sb.WriteString("- calendar_overview: недавние и будущие события календаря; args: past_days, future_days, limit\n")
 	sb.WriteString("- screentime_overview: экранное время iPhone за период: часы в приложениях, топ приложений и топ сайтов; args: days\n")
+	sb.WriteString("- location_overview: где пользователь бывал: визиты по местам, время дома, на работе и в других местах; args: days\n")
 	sb.WriteString("- weather_overview: текущая погода и краткий прогноз; args: none\n")
 	sb.WriteString("Правила:\n")
 	sb.WriteString("- Выбирай от 1 до 4 tools.\n")
@@ -164,6 +166,7 @@ func buildAIToolPlannerPrompt(message, recentHistory string) string {
 	sb.WriteString("- Для вопросов про сон, пульс, HRV, вес, Apple Health, Zepp и шаги за день используй health_overview. Шаги из health_overview приоритетнее календаря и Strava.\n")
 	sb.WriteString("- Для питания, конкретных продуктов, рациона и вопросов \"что я ем\" используй nutrition_overview.\n")
 	sb.WriteString("- Для вопросов про экранное время, залипание в телефоне, конкретные приложения и посещаемые сайты используй screentime_overview.\n")
+	sb.WriteString("- Для вопросов про то, где пользователь был, сколько времени провёл дома, на работе или в других местах, и во сколько ушёл или вернулся, используй location_overview.\n")
 	sb.WriteString("- Для вопросов про Notion, заметки, записи, рефлексию и дневник используй journal_overview.\n")
 	sb.WriteString("- Если вопрос общий, но не checkup, всё равно выбирай только реально нужные domains.\n")
 	sb.WriteString("- Если вопрос не требует погоды, не выбирай weather_overview.\n")
@@ -300,6 +303,9 @@ func fallbackToolPlan(message string, history []ChatMessage) []aiToolCall {
 	if scope.nutrition {
 		appendCall(aiToolCall{Name: aiToolNutritionOverview, Days: 14})
 	}
+	if scope.location {
+		appendCall(aiToolCall{Name: aiToolLocationOverview, Days: 14})
+	}
 	if scope.journal {
 		appendCall(aiToolCall{Name: aiToolJournalOverview, Days: 30, Limit: 8})
 	}
@@ -327,7 +333,7 @@ func fallbackToolPlan(message string, history []ChatMessage) []aiToolCall {
 func isAllowedAITool(name aiToolName) bool {
 	switch name {
 	case aiToolFinanceOverview, aiToolRecentTransactions, aiToolProductivityOverview, aiToolActivityOverview, aiToolRecentActivities,
-		aiToolHealthOverview, aiToolWorkoutOverview, aiToolRecentWorkouts, aiToolRoutineOverview, aiToolHabitOverview, aiToolNutritionOverview, aiToolScreenTimeOverview, aiToolJournalOverview,
+		aiToolHealthOverview, aiToolWorkoutOverview, aiToolRecentWorkouts, aiToolRoutineOverview, aiToolHabitOverview, aiToolNutritionOverview, aiToolScreenTimeOverview, aiToolLocationOverview, aiToolJournalOverview,
 		aiToolCalendarOverview, aiToolWeatherOverview:
 		return true
 	default:
@@ -635,6 +641,40 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 						return err
 					}
 					sb.WriteString(renderScreenTimeOverviewText(fmt.Sprintf("=== ЭКРАННОЕ ВРЕМЯ (%d дней) ===", days), data))
+					return nil
+				},
+				Data: func() (any, error) {
+					data, err := load()
+					if err != nil {
+						return nil, err
+					}
+					return data, nil
+				},
+			})
+		case aiToolLocationOverview:
+			var cached *AILocationOverviewData
+			days := call.Days
+			load := func() (AILocationOverviewData, error) {
+				if cached != nil {
+					return *cached, nil
+				}
+				data, err := h.buildLocationOverviewData(ctx, userID, days)
+				if err != nil {
+					return AILocationOverviewData{}, err
+				}
+				cached = &data
+				return data, nil
+			}
+			executions = append(executions, aiToolExecution{
+				Name:    call.Name,
+				Section: "местоположение",
+				Days:    days,
+				Run: func(sb *strings.Builder) error {
+					data, err := load()
+					if err != nil {
+						return err
+					}
+					sb.WriteString(renderLocationOverviewText(fmt.Sprintf("=== МЕСТОПОЛОЖЕНИЕ (%d дней) ===", days), data))
 					return nil
 				},
 				Data: func() (any, error) {

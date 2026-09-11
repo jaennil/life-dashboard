@@ -154,6 +154,7 @@ type aiContextScope struct {
 	routines     bool
 	habits       bool
 	nutrition    bool
+	location     bool
 	journal      bool
 	calendar     bool
 	weather      bool
@@ -388,6 +389,8 @@ func aiToolProgressLabel(name aiToolName) string {
 		return "заметки"
 	case aiToolCalendarOverview:
 		return "календарь"
+	case aiToolLocationOverview:
+		return "местоположение"
 	case aiToolWeatherOverview:
 		return "погоду"
 	default:
@@ -1138,11 +1141,12 @@ func defaultAIContextScope() aiContextScope {
 		calendar:     true,
 		weather:      true,
 		screentime:   true,
+		location:     true,
 	}
 }
 
 func (s aiContextScope) empty() bool {
-	return !s.finance && !s.productivity && !s.activities && !s.health && !s.workouts && !s.routines && !s.habits && !s.nutrition && !s.journal && !s.calendar && !s.weather && !s.screentime
+	return !s.finance && !s.productivity && !s.activities && !s.health && !s.workouts && !s.routines && !s.habits && !s.nutrition && !s.journal && !s.calendar && !s.weather && !s.screentime && !s.location
 }
 
 func (s aiContextScope) sectionNames() []string {
@@ -1182,6 +1186,9 @@ func (s aiContextScope) sectionNames() []string {
 	}
 	if s.screentime {
 		names = append(names, "экранное время")
+	}
+	if s.location {
+		names = append(names, "местоположение")
 	}
 	if len(names) == 0 {
 		return defaultAIContextScope().sectionNames()
@@ -1241,6 +1248,12 @@ func selectAIContextScope(message string, history []ChatMessage) aiContextScope 
 	}
 	if containsAny(combined, weatherKeywords...) {
 		scope.weather = true
+	}
+	locationKeywords := []string{"где я был", "где был", "где бывал", "местополож", "локац", "геолок",
+		"сколько времени дома", "сколько был дома", "сколько на работе", "во сколько ушёл", "во сколько пришёл",
+		"выходил из дома", "как часто в зал", "маршрут"}
+	if containsAny(combined, locationKeywords...) {
+		scope.location = true
 	}
 	if containsAny(combined, screentimeKeywords...) {
 		scope.screentime = true

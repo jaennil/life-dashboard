@@ -491,6 +491,17 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 			},
 		},
 		{
+			Name:            aiToolLocationOverview,
+			Section:         "местоположение",
+			RequestedPeriod: window.RequestedPeriod,
+			Start:           &start,
+			End:             &end,
+			Run: func(sb *strings.Builder) error {
+				h.appendCheckupLocationContext(ctx, sb, userID, window)
+				return nil
+			},
+		},
+		{
 			Name:            aiToolJournalOverview,
 			Section:         "дневник",
 			RequestedPeriod: window.RequestedPeriod,
@@ -633,6 +644,19 @@ func (h *AIHandler) appendCheckupScreenTimeContext(ctx context.Context, sb *stri
 		return
 	}
 	sb.WriteString(renderScreenTimeOverviewText("=== ЭКРАННОЕ ВРЕМЯ ===", data))
+}
+
+// appendCheckupLocationContext puts the day on a map: where it was spent, and
+// for how long. Everything else in a checkup says what happened, not where.
+func (h *AIHandler) appendCheckupLocationContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
+	sb.WriteString("\n")
+	data, err := h.buildLocationOverviewInRange(ctx, userID, window.Start, window.End)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("build location checkup context")
+		sb.WriteString("=== МЕСТОПОЛОЖЕНИЕ ===\nДанные о местоположении временно недоступны.\n")
+		return
+	}
+	sb.WriteString(renderLocationOverviewText("=== МЕСТОПОЛОЖЕНИЕ ===", data))
 }
 
 func (h *AIHandler) appendCheckupHealthContext(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
