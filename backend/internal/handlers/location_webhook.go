@@ -3,8 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"math"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +24,14 @@ const (
 	locationMaxBody = 8 << 20
 	// Overland's own maximum batch size, used as the sanity bound.
 	locationMaxPoints = 1000
+	// Standing still, the app reports from the same spot every few seconds: the
+	// first real batch was 99 fixes inside a five metre box over eleven minutes.
+	// A fix that has not moved further than this says nothing the previous one
+	// did not already say.
+	locationMinMoveMeters = 30
+	// Except that the phone is still there, which one fix every few minutes says
+	// just as well and keeps a visit's duration honest.
+	locationHeartbeat = 3 * time.Minute
 )
 
 type LocationWebhookHandler struct {
@@ -110,7 +121,13 @@ func (h *LocationWebhookHandler) ReceiveOverland(w http.ResponseWriter, r *http.
 
 	points, visits := parseOverlandBatch(batch)
 
-	saved, err := h.storeLocationPoints(r.Context(), userID, points)
+	previous, err := h.lastPointBefore(r.Context(), userID, points)
+	if err != nil {
+		h.logger.Warn().Err(err).Str("user_id", userID).Msg("load previous fix")
+	}
+	kept := thinLocationPoints(previous, points)
+
+	saved, err := h.storeLocationPoints(r.Context(), userID, kept)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("store location points")
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -129,6 +146,7 @@ func (h *LocationWebhookHandler) ReceiveOverland(w http.ResponseWriter, r *http.
 	h.logger.Info().Str("user_id", userID).
 		Int("received", len(batch.Locations)).
 		Int("stored", saved).
+		Int("thinned", len(points)-len(kept)).
 		Int("visits", savedVisits).
 		Msg("location batch ingested")
 
@@ -345,6 +363,94 @@ func (h *LocationWebhookHandler) archiveUnparsedBatch(ctx context.Context, userI
 	`, locationSourceOverland, stored, userID); err != nil {
 		h.logger.Warn().Err(err).Msg("archive unparsed location batch")
 	}
+}
+
+// thinLocationPoints drops fixes that repeat what the previous one already said.
+//
+// The app cannot be asked for a sensible interval - iOS decides when to wake it -
+// so the choice is to store its full stream or to thin it here. A fix is kept
+// when it moved far enough to be a different place, or when enough time passed
+// that "still here" is itself news.
+func thinLocationPoints(previous *locationPoint, points []locationPoint) []locationPoint {
+	if len(points) == 0 {
+		return nil
+	}
+
+	ordered := append([]locationPoint(nil), points...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].RecordedAt.Before(ordered[j].RecordedAt) })
+
+	kept := make([]locationPoint, 0, len(ordered))
+	last := previous
+	for _, point := range ordered {
+		if last == nil || pointIsNews(*last, point) {
+			kept = append(kept, point)
+			current := point
+			last = &current
+		}
+	}
+	return kept
+}
+
+func pointIsNews(last, next locationPoint) bool {
+	if !next.RecordedAt.After(last.RecordedAt) {
+		// Out of order or a repeat: the unique index would drop it anyway.
+		return false
+	}
+	if next.RecordedAt.Sub(last.RecordedAt) >= locationHeartbeat {
+		return true
+	}
+	// A move smaller than the fix's own error is not a move. Below that floor the
+	// phone jitters in place by a few metres for hours.
+	threshold := float64(locationMinMoveMeters)
+	if next.Accuracy != nil && *next.Accuracy > threshold {
+		threshold = *next.Accuracy
+	}
+	return metersBetween(last.Latitude, last.Longitude, next.Latitude, next.Longitude) >= threshold
+}
+
+// metersBetween is the haversine distance. Over the distances a phone covers
+// between two fixes the earth is a sphere to well within GPS error.
+func metersBetween(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadiusM = 6371000.0
+	phi1 := lat1 * math.Pi / 180
+	phi2 := lat2 * math.Pi / 180
+	deltaPhi := (lat2 - lat1) * math.Pi / 180
+	deltaLambda := (lon2 - lon1) * math.Pi / 180
+
+	a := math.Sin(deltaPhi/2)*math.Sin(deltaPhi/2) +
+		math.Cos(phi1)*math.Cos(phi2)*math.Sin(deltaLambda/2)*math.Sin(deltaLambda/2)
+	return 2 * earthRadiusM * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+}
+
+// lastPointBefore loads the fix the batch continues from, so thinning survives
+// across requests instead of restarting at every batch boundary.
+func (h *LocationWebhookHandler) lastPointBefore(ctx context.Context, userID string, points []locationPoint) (*locationPoint, error) {
+	if len(points) == 0 {
+		return nil, nil
+	}
+	earliest := points[0].RecordedAt
+	for _, point := range points[1:] {
+		if point.RecordedAt.Before(earliest) {
+			earliest = point.RecordedAt
+		}
+	}
+
+	var previous locationPoint
+	err := h.db.QueryRow(ctx, `
+		SELECT recorded_at, latitude, longitude, accuracy_m
+		FROM location_points
+		WHERE user_id = $1 AND source = $2 AND recorded_at < $3
+		ORDER BY recorded_at DESC
+		LIMIT 1
+	`, userID, locationSourceOverland, earliest).Scan(
+		&previous.RecordedAt, &previous.Latitude, &previous.Longitude, &previous.Accuracy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &previous, nil
 }
 
 func (h *LocationWebhookHandler) storeLocationVisits(ctx context.Context, userID string, visits []locationVisit) (int, error) {

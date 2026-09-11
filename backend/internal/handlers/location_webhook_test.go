@@ -167,6 +167,71 @@ func TestParseOverlandBatchHandlesOpenAndUnstartedVisits(t *testing.T) {
 	}
 }
 
+func fixAt(offset time.Duration, lat, lon float64) locationPoint {
+	base := time.Date(2026, 9, 12, 22, 0, 0, 0, time.UTC)
+	return locationPoint{RecordedAt: base.Add(offset), Latitude: lat, Longitude: lon}
+}
+
+func TestThinLocationPointsCollapsesAPhoneLyingStill(t *testing.T) {
+	// The shape of the first real batch: a fix every few seconds from one spot.
+	points := make([]locationPoint, 0, 60)
+	for i := 0; i < 60; i++ {
+		points = append(points, fixAt(time.Duration(i)*10*time.Second, 55.755814, 37.617635))
+	}
+
+	kept := thinLocationPoints(nil, points)
+	// Ten minutes of standing still: the first fix plus a heartbeat every three.
+	if len(kept) != 4 {
+		t.Fatalf("kept %d of %d fixes, want 4", len(kept), len(points))
+	}
+	if !kept[0].RecordedAt.Equal(points[0].RecordedAt) {
+		t.Error("the first fix of the batch must always be kept")
+	}
+}
+
+func TestThinLocationPointsKeepsMovement(t *testing.T) {
+	// Walking: roughly 40 m every 20 seconds. Every fix is a different place.
+	points := []locationPoint{
+		fixAt(0, 55.755814, 37.617635),
+		fixAt(20*time.Second, 55.756174, 37.617635),
+		fixAt(40*time.Second, 55.756534, 37.617635),
+	}
+	if kept := thinLocationPoints(nil, points); len(kept) != 3 {
+		t.Fatalf("kept %d of 3 fixes while moving", len(kept))
+	}
+}
+
+func TestThinLocationPointsContinuesFromTheStoredFix(t *testing.T) {
+	previous := fixAt(0, 55.755814, 37.617635)
+	// The next batch starts seconds later from the same spot: nothing new yet.
+	points := []locationPoint{fixAt(30*time.Second, 55.755814, 37.617635)}
+	if kept := thinLocationPoints(&previous, points); len(kept) != 0 {
+		t.Fatalf("kept %d fixes that repeat the stored one", len(kept))
+	}
+}
+
+func TestThinLocationPointsRespectsPoorAccuracy(t *testing.T) {
+	accuracy := 500.0
+	previous := fixAt(0, 55.755814, 37.617635)
+	// A 100 m "move" inside a 500 m error circle is noise, not a move.
+	noisy := fixAt(30*time.Second, 55.756714, 37.617635)
+	noisy.Accuracy = &accuracy
+	if kept := thinLocationPoints(&previous, []locationPoint{noisy}); len(kept) != 0 {
+		t.Fatalf("a move smaller than the fix's own error was stored")
+	}
+}
+
+func TestMetersBetweenIsARealDistance(t *testing.T) {
+	// Red Square to Moscow City is about 6 km.
+	got := metersBetween(55.753930, 37.620393, 55.749650, 37.537130)
+	if got < 5000 || got > 6500 {
+		t.Fatalf("distance = %.0f m, want roughly 6 km", got)
+	}
+	if metersBetween(55.75, 37.62, 55.75, 37.62) != 0 {
+		t.Fatal("a point is not zero metres from itself")
+	}
+}
+
 func TestParseOverlandBatchRejectsContradictoryVisit(t *testing.T) {
 	_, visits := parseOverlandBatch(overlandBatch{Locations: []overlandFeature{visitFeature(t, map[string]any{
 		"timestamp": "2026-09-12T19:02:11Z", "action": "visit",
