@@ -881,6 +881,14 @@ func (h *AIHandler) appendCheckupNutritionContext(ctx context.Context, sb *strin
 			sb.WriteString("  - Нет детализации по приёмам пищи за период\n")
 		}
 	}
+
+	// The counts above say how well the diary is filled; this says what is in it.
+	foods, err := h.loadNutritionFoods(ctx, userID, window.Start, window.End)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load logged foods for checkup")
+		return
+	}
+	sb.WriteString(renderNutritionFoodsText(foods))
 }
 
 // appendCheckupJournalContext covers everything the user wrote or said in the

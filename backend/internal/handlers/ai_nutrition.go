@@ -21,6 +21,8 @@ type AINutritionOverviewData struct {
 	// whether the norm was made of water or of four energy drinks.
 	Beverages     []AINutritionBeverage `json:"beverages,omitempty"`
 	HydrationMode string                `json:"hydration_mode,omitempty"`
+	// Foods names what was actually eaten; the averages above only say how much.
+	Foods AINutritionFoods `json:"foods"`
 }
 
 type AINutritionBeverage struct {
@@ -65,6 +67,14 @@ func (h *AIHandler) buildNutritionOverviewData(ctx context.Context, userID strin
 	}
 
 	h.attachNutritionBeverages(ctx, &data, userID, since, time.Now(), targets)
+
+	// Item level detail is a bonus on top of the totals, so losing it must not
+	// cost the whole overview.
+	foods, err := h.loadNutritionFoods(ctx, userID, since, time.Now())
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load logged foods for ai context")
+	}
+	data.Foods = foods
 
 	rows, err := h.db.Query(ctx, `
 		SELECT date, COALESCE(calories_total, 0), COALESCE(protein_g, 0), COALESCE(carbs_g, 0), COALESCE(fat_g, 0), COALESCE(fiber_g, 0), COALESCE(water_ml, 0)
@@ -196,6 +206,7 @@ func renderNutritionOverviewText(title string, data AINutritionOverviewData) str
 		}
 		sb.WriteString("\n")
 	}
+	sb.WriteString(renderNutritionFoodsText(data.Foods))
 	return sb.String()
 }
 
