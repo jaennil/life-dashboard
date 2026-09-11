@@ -260,6 +260,11 @@ func main() {
 		RequestTimeout:  cfg.AI.RequestTimeout,
 	}, weatherHandler, unleashClient, pushOptions, log.Logger)
 
+	// The sync handler is built here rather than with the routes: the AI handler
+	// refreshes providers through it before answering a question.
+	syncHandler := handlers.NewSync(pool, activeConnectors, log.Logger)
+	aiHandler.UseSyncer(syncHandler)
+
 	sched := scheduler.New(log.Logger)
 	for index, conn := range activeConnectors {
 		connCopy := conn
@@ -407,7 +412,6 @@ func main() {
 		r.Post("/api/v1/auth/totp/enable", usersHandler.TOTPEnable)
 		r.Post("/api/v1/auth/totp/disable", usersHandler.TOTPDisable)
 
-		syncHandler := handlers.NewSync(pool, activeConnectors, log.Logger)
 		r.Post("/api/v1/sync/{source}", syncHandler.TriggerSync)
 
 		configuredMap := map[string]bool{

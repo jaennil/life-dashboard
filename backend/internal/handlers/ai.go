@@ -33,7 +33,9 @@ type AIHandler struct {
 	// telegram delivers the finished report in full. Optional: an instance
 	// without a bot token simply never has one.
 	telegram *TelegramHandler
-	logger   zerolog.Logger
+	// syncer refreshes the providers behind a question before it is answered.
+	syncer aiConnectorSyncer
+	logger zerolog.Logger
 }
 
 // AIOptions carries the upstream settings. They travel as a struct rather than
