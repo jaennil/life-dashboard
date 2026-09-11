@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -369,7 +371,10 @@ func (h *TelegramHandler) SendReport(ctx context.Context, userID, title, body st
 		return false, err
 	}
 
-	chunks := splitTelegramMessage(strings.TrimSpace(title+"\n\n"+body), telegramMaxMessageRunes)
+	// The title travels as a heading so it is formatted by the same path as the
+	// report itself, and the split happens before formatting: chunking rendered
+	// HTML could cut a tag in half.
+	chunks := splitTelegramMessage(strings.TrimSpace("## "+title+"\n\n"+body), telegramMaxMessageRunes)
 	for _, chunk := range chunks {
 		if err := h.client.sendMessage(ctx, chatID, chunk); err != nil {
 			return false, err
@@ -427,14 +432,103 @@ func newTelegramLinkCode() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
+// sendMessage renders the report's Markdown as Telegram HTML.
+//
+// HTML rather than MarkdownV2: everything is escaped first and only the handful
+// of tags built below is injected, so a stray asterisk or underscore in the text
+// cannot break the message. If Telegram still refuses the markup, the same text
+// goes out unformatted - a plain report beats no report.
 func (c *telegramClient) sendMessage(ctx context.Context, chatID int64, text string) error {
-	// No parse_mode on purpose: reports are Markdown-ish prose, and Telegram
-	// rejects the whole message over a stray underscore or bracket.
-	return c.call(ctx, "sendMessage", map[string]any{
+	err := c.postMessage(ctx, chatID, formatTelegramText(text, true), "HTML")
+	if err == nil {
+		return nil
+	}
+	if !isTelegramParseError(err) {
+		return err
+	}
+
+	c.logger.Warn().Err(err).Msg("telegram rejected the markup, resending as plain text")
+	return c.postMessage(ctx, chatID, formatTelegramText(text, false), "")
+}
+
+func (c *telegramClient) postMessage(ctx context.Context, chatID int64, text, parseMode string) error {
+	payload := map[string]any{
 		"chat_id":                  chatID,
 		"text":                     text,
 		"disable_web_page_preview": true,
-	}, nil)
+	}
+	if parseMode != "" {
+		payload["parse_mode"] = parseMode
+	}
+	return c.call(ctx, "sendMessage", payload, nil)
+}
+
+// isTelegramParseError picks out the one failure worth retrying unformatted:
+// Telegram could not read the entities we sent. Everything else - a revoked
+// token, a blocked chat, a rate limit - would fail the same way twice.
+func isTelegramParseError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "can't parse entities") ||
+		strings.Contains(message, "cant parse entities") ||
+		strings.Contains(message, "unsupported start tag") ||
+		strings.Contains(message, "unclosed start tag")
+}
+
+var (
+	telegramHeadingPattern = regexp.MustCompile(`^#{1,6}\s+(.+)$`)
+	telegramBoldPattern    = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	telegramCodePattern    = regexp.MustCompile("`([^`]+)`")
+)
+
+// formatTelegramText turns the Markdown the model writes into what a chat can
+// show. With asHTML it emits Telegram's HTML subset; without it, the same
+// structure in plain text, so the fallback path stays readable.
+//
+// Only the markup the reports actually contain is handled: headings, bold,
+// inline code and dash bullets. Anything else is left as literal text.
+func formatTelegramText(text string, asHTML bool) string {
+	body := strings.TrimSpace(text)
+	if asHTML {
+		// Escaped before any tag is inserted, so user data can never open one.
+		body = html.EscapeString(body)
+	}
+
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, " \t")
+
+		if match := telegramHeadingPattern.FindStringSubmatch(strings.TrimSpace(trimmed)); match != nil {
+			heading := strings.TrimSpace(strings.ReplaceAll(match[1], "**", ""))
+			if asHTML {
+				lines[i] = "<b>" + heading + "</b>"
+			} else {
+				lines[i] = heading
+			}
+			continue
+		}
+
+		// A dash bullet reads as a stray hyphen in a chat; a real bullet does not.
+		indent := trimmed[:len(trimmed)-len(strings.TrimLeft(trimmed, " "))]
+		rest := strings.TrimLeft(trimmed, " ")
+		if strings.HasPrefix(rest, "- ") || strings.HasPrefix(rest, "* ") {
+			trimmed = indent + "• " + strings.TrimSpace(rest[2:])
+		}
+		lines[i] = trimmed
+	}
+	body = strings.Join(lines, "\n")
+
+	if asHTML {
+		body = telegramBoldPattern.ReplaceAllString(body, "<b>$1</b>")
+		body = telegramCodePattern.ReplaceAllString(body, "<code>$1</code>")
+		return body
+	}
+
+	body = telegramBoldPattern.ReplaceAllString(body, "$1")
+	body = telegramCodePattern.ReplaceAllString(body, "$1")
+	return body
 }
 
 func (c *telegramClient) call(ctx context.Context, method string, payload map[string]any, out any) error {
