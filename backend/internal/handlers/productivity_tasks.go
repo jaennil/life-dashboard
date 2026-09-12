@@ -34,12 +34,15 @@ func NewProductivityTasks(db *pgxpool.Pool, vikunja *connectors.VikunjaConnector
 }
 
 type createTaskRequest struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	ProjectID   int64    `json:"project_id"`
-	DueAt       string   `json:"due_at"`
-	Priority    int      `json:"priority"`
-	Labels      []string `json:"labels"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	ProjectID   int64  `json:"project_id"`
+	// NewProject names a project to create and file this task into. It is only
+	// read when no project_id is given, so a typo cannot fork an existing project.
+	NewProject string   `json:"new_project"`
+	DueAt      string   `json:"due_at"`
+	Priority   int      `json:"priority"`
+	Labels     []string `json:"labels"`
 	// RepeatEvery counts RepeatUnit periods: 2 + "week" is every two weeks.
 	RepeatEvery int    `json:"repeat_every"`
 	RepeatUnit  string `json:"repeat_unit"`
@@ -86,6 +89,15 @@ func (h *ProductivityTasksHandler) CreateTask(w http.ResponseWriter, r *http.Req
 			return
 		}
 		draft.DueAt = dueAt
+	}
+
+	if title := strings.TrimSpace(req.NewProject); title != "" && draft.ProjectID == 0 {
+		project, err := h.vikunja.CreateProject(ctx, userID, title)
+		if err != nil && !errors.Is(err, connectors.ErrVikunjaProjectExists) {
+			h.writeConnectorError(w, err, "create vikunja project", userID)
+			return
+		}
+		draft.ProjectID = project.ID
 	}
 
 	task, err := h.vikunja.CreateTask(ctx, userID, draft)
