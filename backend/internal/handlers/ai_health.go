@@ -15,12 +15,15 @@ func (h *AIHandler) appendHealthContextInRange(ctx context.Context, sb *strings.
 	sb.WriteString(title + "\n")
 	sb.WriteString("Фактические показатели здоровья берутся только из biometrics/sleep_sessions (health webhook / Apple Health, если настроено). Календарь сюда не относится.\n")
 
+	// The phone and the band both count the same steps, so a day with two sources
+	// must not add them together: that reported eleven thousand steps for a day
+	// with six. The higher reading is the device that missed less of the day.
 	var totalSteps, avgSteps float64
 	var stepDaysCount int
 	h.db.QueryRow(ctx, `
 		SELECT COALESCE(SUM(day_steps), 0), COALESCE(AVG(day_steps), 0), COUNT(*)
 		FROM (
-			SELECT DATE(timestamp) AS day, SUM(value) AS day_steps
+			SELECT DATE(timestamp) AS day, MAX(value) AS day_steps
 			FROM biometrics
 			WHERE user_id = $1
 				AND metric_type = 'steps'
@@ -33,7 +36,7 @@ func (h *AIHandler) appendHealthContextInRange(ctx context.Context, sb *strings.
 	var bestStepDay string
 	var bestSteps float64
 	_ = h.db.QueryRow(ctx, `
-		SELECT TO_CHAR(DATE(timestamp), 'DD.MM'), COALESCE(SUM(value), 0) AS day_steps
+		SELECT TO_CHAR(DATE(timestamp), 'DD.MM'), MAX(value) AS day_steps
 		FROM biometrics
 		WHERE user_id = $1
 			AND metric_type = 'steps'
@@ -50,6 +53,7 @@ func (h *AIHandler) appendHealthContextInRange(ctx context.Context, sb *strings.
 			sb.WriteString(fmt.Sprintf(", лучший день %s (%.0f)", bestStepDay, bestSteps))
 		}
 		sb.WriteString("\n")
+		sb.WriteString("Шаги приходят с телефона по расписанию Shortcuts, а не в реальном времени: за сегодняшний день это столько, сколько было на момент последней отправки, и к вечеру их почти наверняка больше.\n")
 	} else {
 		sb.WriteString("Шаги: нет данных за период\n")
 	}
