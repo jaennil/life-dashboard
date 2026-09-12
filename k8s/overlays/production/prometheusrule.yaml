@@ -54,6 +54,19 @@ spec:
           annotations:
             summary: Life Dashboard sync errors detected ({{ $labels.source }})
             description: Connector {{ $labels.source }} failed {{ $value }} sync runs in the last hour.
+        # A section that answers and cannot be stored is the quietest failure of
+        # all: the sync reports success and the table simply stays empty, which
+        # reads exactly like a device that records nothing. Stress and PAI were
+        # fetched on every sync for months and stored never, and no counter here
+        # moved. This is that counter.
+        - alert: LifeDashboardSyncSectionUnusable
+          expr: sum by (source, section) (increase(life_dashboard_sync_section_unusable_total{namespace="life-dashboard",job="backend"}[1h])) >= 3
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Life Dashboard cannot read a section ({{ $labels.source }}/{{ $labels.section }})
+            description: Section {{ $labels.section }} of {{ $labels.source }} returned data that could not be stored {{ $value }} times in the last hour.
         # The failure that actually costs data is silence: a source that keeps
         # trying and never succeeds. That never fired an alert before.
         - alert: LifeDashboardSyncStalled
