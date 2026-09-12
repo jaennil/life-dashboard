@@ -270,6 +270,13 @@ func renderLocationOverviewText(title string, data AILocationOverviewData) strin
 				sb.WriteString(fmt.Sprintf("  - %s с %s, ещё там\n", label, visit.From))
 				continue
 			}
+			if visit.Minutes == 0 {
+				// Arrival and departure at the same second is how a visit that had
+				// already started when tracking began is stored. Saying "12:36-12:36"
+				// would report a stay of no length instead of an unknown one.
+				sb.WriteString(fmt.Sprintf("  - %s: ушёл в %s, время прихода неизвестно\n", label, visit.To))
+				continue
+			}
 			sb.WriteString(fmt.Sprintf("  - %s: %s-%s (%s)\n", label, visit.From, visit.To, formatAIDuration(visit.Minutes)))
 		}
 	}

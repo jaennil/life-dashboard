@@ -87,3 +87,22 @@ func TestAIPlaceLabelFallsBackToTheKind(t *testing.T) {
 		t.Errorf("unnamed other = %q", got)
 	}
 }
+
+func TestRenderLocationOverviewMarksAnUnknownArrival(t *testing.T) {
+	// Real shape from the first day of tracking: iOS reported a departure for a
+	// visit whose start it never saw, and the row stores both at the same second.
+	rendered := renderLocationOverviewText("=== МЕСТОПОЛОЖЕНИЕ ===", AILocationOverviewData{
+		TrackedDays: 1, TotalVisits: 1,
+		RecentDays: []AILocationDay{{
+			Date:   "2026-09-12",
+			Visits: []AILocationVisit{{Place: "Белопольского", Kind: placeKindOther, From: "12:36", To: "12:36", Minutes: 0}},
+		}},
+	})
+
+	if !strings.Contains(rendered, "ушёл в 12:36, время прихода неизвестно") {
+		t.Fatalf("an unknown arrival was not marked:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "12:36-12:36") {
+		t.Fatalf("a stay of no length was reported as a fact:\n%s", rendered)
+	}
+}
