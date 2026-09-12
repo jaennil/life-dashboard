@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -199,15 +200,15 @@ func (z *ZeppConnector) storeStress(ctx context.Context, userID string, raw json
 		return 0, nil
 	}
 
-	stamp := zeppUnixTime(item.Timestamp)
+	stamp := zeppUnixTime(item.Timestamp.int64())
 	metrics := []zeppMetric{
-		{"stress_avg", float64(item.Avg), "score"},
-		{"stress_min", float64(item.Min), "score"},
-		{"stress_max", float64(item.Max), "score"},
-		{"stress_relaxed_share", float64(item.Relax), "%"},
-		{"stress_normal_share", float64(item.Normal), "%"},
-		{"stress_medium_share", float64(item.Medium), "%"},
-		{"stress_high_share", float64(item.High), "%"},
+		{"stress_avg", item.Avg.float(), "score"},
+		{"stress_min", item.Min.float(), "score"},
+		{"stress_max", item.Max.float(), "score"},
+		{"stress_relaxed_share", item.Relax.float(), "%"},
+		{"stress_normal_share", item.Normal.float(), "%"},
+		{"stress_medium_share", item.Medium.float(), "%"},
+		{"stress_high_share", item.High.float(), "%"},
 	}
 
 	saved := 0
@@ -232,15 +233,15 @@ func (z *ZeppConnector) storePAI(ctx context.Context, userID string, raw json.Ra
 		return 0, nil
 	}
 
-	stamp := zeppUnixTime(item.Timestamp)
+	stamp := zeppUnixTime(item.Timestamp.int64())
 	metrics := []zeppMetric{
-		{"pai_total", item.TotalPAI, "score"},
-		{"pai_daily", item.DailyPAI, "score"},
-		{"pai_low_zone", item.LowZone, "score"},
-		{"pai_medium_zone", item.MedZone, "score"},
-		{"pai_high_zone", item.HighZone, "score"},
-		{"max_heart_rate", float64(item.MaxHR), "bpm"},
-		{"resting_heart_rate", float64(item.RestHR), "bpm"},
+		{"pai_total", item.TotalPAI.float(), "score"},
+		{"pai_daily", item.DailyPAI.float(), "score"},
+		{"pai_low_zone", item.LowZone.float(), "score"},
+		{"pai_medium_zone", item.MedZone.float(), "score"},
+		{"pai_high_zone", item.HighZone.float(), "score"},
+		{"max_heart_rate", item.MaxHR.float(), "bpm"},
+		{"resting_heart_rate", item.RestHR.float(), "bpm"},
 	}
 
 	saved := 0
@@ -261,17 +262,38 @@ func (z *ZeppConnector) storeOxygen(ctx context.Context, userID string, raw json
 	if err := json.Unmarshal(raw, &item); err != nil {
 		return 0, err
 	}
-	value, ok := zeppOxygenValue(item)
-	if !ok || item.Timestamp == 0 {
+	if item.Timestamp == 0 {
 		return 0, nil
 	}
 
-	stamp := zeppUnixTime(item.Timestamp)
-	metric := zeppMetric{"spo2", value, "%"}
-	if err := z.upsertMetric(ctx, userID, stamp, metric, map[string]any{"zepp_sub_type": item.SubType}); err != nil {
-		return 0, err
+	stamp := zeppUnixTime(item.Timestamp.int64())
+	meta := map[string]any{"zepp_sub_type": item.SubType}
+
+	saved := 0
+	// A spot reading is a saturation percentage, taken when the band is asked for
+	// one. It is the only thing here that may be called spo2.
+	if value, ok := zeppOxygenValue(item); ok {
+		if err := z.upsertMetric(ctx, userID, stamp, zeppMetric{"spo2", value, "%"}, meta); err != nil {
+			return saved, err
+		}
+		saved++
 	}
-	return 1, nil
+
+	// The overnight index is a different measurement in different units - dips
+	// per hour, not percent - so it gets its own name rather than being filed as
+	// a saturation nobody measured.
+	if strings.EqualFold(item.SubType, "odi") && item.ODINum > 0 {
+		for _, metric := range []zeppMetric{
+			{"oxygen_desaturation_index", item.ODI.float(), "events/h"},
+			{"oxygen_desaturation_events", item.ODINum.float(), "count"},
+		} {
+			if err := z.upsertMetric(ctx, userID, stamp, metric, meta); err != nil {
+				return saved, err
+			}
+			saved++
+		}
+	}
+	return saved, nil
 }
 
 func (z *ZeppConnector) upsertMetric(ctx context.Context, userID string, stamp time.Time, metric zeppMetric, meta map[string]any) error {

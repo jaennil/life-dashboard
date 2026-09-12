@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -106,33 +108,69 @@ type zeppEventsResponse struct {
 	Items []json.RawMessage `json:"items"`
 }
 
+// zeppNumber reads a number that may arrive quoted.
+//
+// The events API sends every field of these sections as a string - "avgStress":
+// "12" - while the daily summary sends the same kinds of value unquoted. A plain
+// numeric field therefore fails to decode and takes the whole item with it,
+// which is how stress and PAI were fetched on every sync for months and stored
+// exactly never.
+type zeppNumber float64
+
+func (n *zeppNumber) UnmarshalJSON(data []byte) error {
+	text := strings.TrimSpace(string(data))
+	if text == "null" || text == `""` || text == "" {
+		return nil
+	}
+	text = strings.Trim(text, `"`)
+	if text == "" {
+		return nil
+	}
+
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return fmt.Errorf("zepp number %q: %w", text, err)
+	}
+	*n = zeppNumber(value)
+	return nil
+}
+
+func (n zeppNumber) float() float64 { return float64(n) }
+func (n zeppNumber) int64() int64   { return int64(n) }
+
 type zeppStressItem struct {
-	Timestamp int64 `json:"timestamp"`
-	Min       int   `json:"minStress"`
-	Max       int   `json:"maxStress"`
-	Avg       int   `json:"avgStress"`
-	Relax     int   `json:"relaxProportion"`
-	Normal    int   `json:"normalProportion"`
-	Medium    int   `json:"mediumProportion"`
-	High      int   `json:"highProportion"`
+	Timestamp zeppNumber `json:"timestamp"`
+	Min       zeppNumber `json:"minStress"`
+	Max       zeppNumber `json:"maxStress"`
+	Avg       zeppNumber `json:"avgStress"`
+	Relax     zeppNumber `json:"relaxProportion"`
+	Normal    zeppNumber `json:"normalProportion"`
+	Medium    zeppNumber `json:"mediumProportion"`
+	High      zeppNumber `json:"highProportion"`
 }
 
 type zeppPAIItem struct {
-	Timestamp int64   `json:"timestamp"`
-	TotalPAI  float64 `json:"totalPai"`
-	DailyPAI  float64 `json:"dailyPai"`
-	MaxHR     int     `json:"maxHr"`
-	RestHR    int     `json:"restHr"`
-	LowZone   float64 `json:"lowZonePai"`
-	MedZone   float64 `json:"mediumZonePai"`
-	HighZone  float64 `json:"highZonePai"`
+	Timestamp zeppNumber `json:"timestamp"`
+	TotalPAI  zeppNumber `json:"totalPai"`
+	DailyPAI  zeppNumber `json:"dailyPai"`
+	MaxHR     zeppNumber `json:"maxHr"`
+	RestHR    zeppNumber `json:"restHr"`
+	LowZone   zeppNumber `json:"lowZonePai"`
+	MedZone   zeppNumber `json:"mediumZonePai"`
+	HighZone  zeppNumber `json:"highZonePai"`
 }
 
 type zeppOxygenItem struct {
-	Timestamp int64  `json:"timestamp"`
-	SubType   string `json:"subType"`
-	// Extra is a JSON document embedded as a string.
+	Timestamp zeppNumber `json:"timestamp"`
+	SubType   string     `json:"subType"`
+	// Extra is a JSON document embedded as a string, used by the spot readings
+	// the band takes when asked.
 	Extra string `json:"extra"`
+	// ODI is the overnight oxygen desaturation index: how many times an hour the
+	// blood oxygen dipped. It is what the API reports now that nobody presses the
+	// button, and it is a different measurement from a saturation percentage.
+	ODI    zeppNumber `json:"odi"`
+	ODINum zeppNumber `json:"odiNum"`
 }
 
 // zeppHeaders builds the client identification the API insists on. x-request-id
