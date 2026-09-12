@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"life-dashboard/internal/observability"
 )
 
 // zeppMetric is one value ready for the biometrics table.
@@ -165,6 +167,13 @@ func (z *ZeppConnector) storeSleep(ctx context.Context, userID string, dayStart 
 
 // ingestSection fetches one event type and hands each item to a storer. A failure
 // is logged and swallowed so one dead section cannot lose the others.
+//
+// The one case that is not swallowed quietly is a section the provider answered
+// and we then stored nothing from. A band that never recorded stress returns no
+// items, which is normal and silent; items that all fail to store mean our
+// reading of the payload is wrong. Those two used to look identical - an empty
+// table either way - which is how a decoding bug kept stress and PAI out of the
+// database for months without anyone noticing.
 func (z *ZeppConnector) ingestSection(
 	ctx context.Context,
 	userID string,
@@ -179,14 +188,24 @@ func (z *ZeppConnector) ingestSection(
 		return 0
 	}
 
-	saved := 0
+	saved, failed := 0, 0
 	for _, item := range items {
 		count, err := store(ctx, userID, item)
 		if err != nil {
+			failed++
 			z.logger.Warn().Err(err).Str("event_type", eventType).Msg("store zepp event failed")
 			continue
 		}
 		saved += count
+	}
+
+	if len(items) > 0 && saved == 0 {
+		observability.RecordUnusableSection(zeppSource, eventType)
+		z.logger.Error().
+			Str("event_type", eventType).
+			Int("items", len(items)).
+			Int("decode_failures", failed).
+			Msg("zepp section returned data but nothing could be stored")
 	}
 	return saved
 }

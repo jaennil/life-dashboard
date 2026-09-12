@@ -48,6 +48,18 @@ var (
 		[]string{"source", "trigger", "status"},
 	)
 
+	// A connector section that answers with data we cannot store is invisible in
+	// the sync counters: the sync itself succeeds, and the table just stays empty.
+	// This is the counter that tells those two apart.
+	syncSectionUnusableTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "life_dashboard",
+			Name:      "sync_section_unusable_total",
+			Help:      "Times a connector section returned data that could not be stored.",
+		},
+		[]string{"source", "section"},
+	)
+
 	syncDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "life_dashboard",
@@ -100,6 +112,12 @@ func HTTPMetricsMiddleware(next http.Handler) http.Handler {
 		httpRequestsTotal.With(labels).Inc()
 		httpRequestDuration.With(labels).Observe(time.Since(start).Seconds())
 	})
+}
+
+// RecordUnusableSection reports a section the provider answered and the
+// connector could make nothing of.
+func RecordUnusableSection(source, section string) {
+	syncSectionUnusableTotal.With(prometheus.Labels{"source": source, "section": section}).Inc()
 }
 
 func RunSync(ctx context.Context, source, trigger string, fn func(context.Context) error) error {
