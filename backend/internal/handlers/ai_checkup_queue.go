@@ -228,6 +228,12 @@ func (h *AIHandler) generateCheckup(ctx context.Context, job checkupJob) (string
 		return "", err
 	}
 
+	// A report is a statement about now, so the providers it reads from are
+	// refreshed before it is written rather than left at whatever the last cron
+	// tick brought. Apple Health and Screen Time are pushed from the phone and
+	// cannot be pulled, so their freshness stays the phone's business.
+	h.prefetchToolSources(ctx, job.UserID, checkupPrefetchTools(), nil, checkupPrefetchPace)
+
 	dataContext, err := h.buildCheckupContext(ctx, job.UserID, window)
 	if err != nil {
 		// A missing section is worth reporting on anyway: the whole point of the

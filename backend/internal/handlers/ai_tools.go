@@ -62,7 +62,7 @@ func (h *AIHandler) buildChatContextWithProgress(ctx context.Context, userID, me
 
 	// Refresh before reading: a question about the balance should be answered
 	// with the balance as it is now.
-	h.prefetchToolSources(ctx, userID, toolCalls, progress)
+	h.prefetchToolSources(ctx, userID, toolCalls, progress, answerPrefetchPace)
 
 	run, err := h.runAITools(ctx, userID, h.chatToolExecutions(ctx, userID, toolCalls), progress)
 	if err != nil {

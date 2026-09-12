@@ -24,6 +24,19 @@ const (
 	aiPrefetchTotalBudget   = 20 * time.Second
 )
 
+// prefetchPace is how long a refresh may take. A question is answered while
+// someone waits, so it gets seconds; a report is written in the background and
+// can afford to wait for a slow provider.
+type prefetchPace struct {
+	total     time.Duration
+	perSource time.Duration
+}
+
+var (
+	answerPrefetchPace  = prefetchPace{total: aiPrefetchTotalBudget, perSource: aiPrefetchSourceTimeout}
+	checkupPrefetchPace = prefetchPace{total: 90 * time.Second, perSource: 60 * time.Second}
+)
+
 // aiConnectorSyncer pulls one source on demand. The AI side takes the interface
 // rather than the sync handler so it stays out of the connector wiring.
 type aiConnectorSyncer interface {
@@ -62,7 +75,7 @@ var aiToolSyncSources = map[aiToolName][]string{
 // Everything here is best effort. A provider that is slow, down or not connected
 // costs the answer nothing but the wait it was allowed, and the data already in
 // the database still answers the question.
-func (h *AIHandler) prefetchToolSources(ctx context.Context, userID string, tools []aiToolCall, progress func(aiProgressUpdate) error) {
+func (h *AIHandler) prefetchToolSources(ctx context.Context, userID string, tools []aiToolCall, progress func(aiProgressUpdate) error, pace prefetchPace) {
 	if h.syncer == nil {
 		return
 	}
@@ -78,7 +91,7 @@ func (h *AIHandler) prefetchToolSources(ctx context.Context, userID string, tool
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, aiPrefetchTotalBudget)
+	ctx, cancel := context.WithTimeout(ctx, pace.total)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -87,7 +100,7 @@ func (h *AIHandler) prefetchToolSources(ctx context.Context, userID string, tool
 		go func(source string) {
 			defer wg.Done()
 
-			sourceCtx, cancelSource := context.WithTimeout(ctx, aiPrefetchSourceTimeout)
+			sourceCtx, cancelSource := context.WithTimeout(ctx, pace.perSource)
 			defer cancelSource()
 
 			startedAt := time.Now()
@@ -155,4 +168,15 @@ func plannedSyncSources(tools []aiToolCall) []string {
 	}
 	sort.Strings(sources)
 	return sources
+}
+
+// checkupPrefetchTools is every tool a report reads, so a checkup refreshes all
+// of its sources rather than the handful a single question would have planned.
+func checkupPrefetchTools() []aiToolCall {
+	tools := make([]aiToolCall, 0, len(aiToolSyncSources))
+	for name := range aiToolSyncSources {
+		tools = append(tools, aiToolCall{Name: name})
+	}
+	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+	return tools
 }

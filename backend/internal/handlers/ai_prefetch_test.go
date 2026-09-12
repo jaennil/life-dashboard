@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -44,5 +45,38 @@ func TestEveryMappedSourceIsASyncableConnector(t *testing.T) {
 				t.Errorf("tool %s maps to unknown source %q", tool, source)
 			}
 		}
+	}
+}
+
+func TestCheckupPrefetchCoversEverySyncableSource(t *testing.T) {
+	// A report reads every section, so it refreshes every provider rather than
+	// the two or three a single question would have planned.
+	tools := checkupPrefetchTools()
+	if len(tools) != len(aiToolSyncSources) {
+		t.Fatalf("checkup prefetches %d tools, want %d", len(tools), len(aiToolSyncSources))
+	}
+
+	sources := plannedSyncSources(tools)
+	for _, want := range []string{"zenmoney", "hevy", "fatsecret", "vikunja", "todoist", "zepp"} {
+		if !slices.Contains(sources, want) {
+			t.Errorf("a checkup would not refresh %s: %v", want, sources)
+		}
+	}
+}
+
+func TestPrefetchPaceGivesAReportMoreRoomThanAQuestion(t *testing.T) {
+	// Someone is waiting for an answer; nobody is waiting for a report, and the
+	// slowest provider takes over a minute.
+	if checkupPrefetchPace.total <= answerPrefetchPace.total {
+		t.Errorf("checkup total %s is not more patient than an answer's %s",
+			checkupPrefetchPace.total, answerPrefetchPace.total)
+	}
+	if checkupPrefetchPace.perSource > checkupPrefetchPace.total {
+		t.Errorf("a single source may outlast the whole refresh: %s > %s",
+			checkupPrefetchPace.perSource, checkupPrefetchPace.total)
+	}
+	if answerPrefetchPace.perSource > answerPrefetchPace.total {
+		t.Errorf("a single source may outlast the whole refresh: %s > %s",
+			answerPrefetchPace.perSource, answerPrefetchPace.total)
 	}
 }
