@@ -160,6 +160,25 @@ type zeppPAIItem struct {
 	HighZone  zeppNumber `json:"highZonePai"`
 }
 
+// zeppReadinessEvent is the morning summary from the v2 events endpoint. The
+// same event on the v1 endpoint carries an undocumented hex blob instead.
+type zeppReadinessEvent struct {
+	Timestamp zeppNumber         `json:"timestamp"`
+	SubType   string             `json:"subType"`
+	Value     zeppReadinessValue `json:"value"`
+}
+
+type zeppReadinessValue struct {
+	Timestamp      zeppNumber `json:"timestamp"`
+	SleepHRV       zeppNumber `json:"sleepHRV"`
+	SleepRHR       zeppNumber `json:"sleepRHR"`
+	HRVBaseline    zeppNumber `json:"hrvBaseline"`
+	HRVScore       zeppNumber `json:"hrvScore"`
+	ReadinessScore zeppNumber `json:"rdnsScore"`
+	PhysicalScore  zeppNumber `json:"phyScore"`
+	MentalScore    zeppNumber `json:"mentScore"`
+}
+
 type zeppOxygenItem struct {
 	Timestamp zeppNumber `json:"timestamp"`
 	SubType   string     `json:"subType"`

@@ -85,6 +85,7 @@ func (z *ZeppConnector) Sync(ctx context.Context, userID string) error {
 	stress := z.ingestSection(ctx, userID, session, "all_day_stress", from, to, z.storeStress)
 	pai := z.ingestSection(ctx, userID, session, "PaiHealthInfo", from, to, z.storePAI)
 	oxygen := z.ingestSection(ctx, userID, session, "blood_oxygen", from, to, z.storeOxygen)
+	readiness := z.ingestSectionV2(ctx, userID, session, "readiness", "watch_score", from, to, z.storeReadiness)
 
 	z.logger.Info().
 		Str("user_id", userID).
@@ -97,6 +98,7 @@ func (z *ZeppConnector) Sync(ctx context.Context, userID string) error {
 		Int("stress", stress).
 		Int("pai", pai).
 		Int("spo2", oxygen).
+		Int("readiness", readiness).
 		Msg("zepp sync finished")
 	return nil
 }
@@ -171,6 +173,32 @@ func (z *ZeppConnector) fetchEvents(ctx context.Context, session zeppSession, ev
 	var payload zeppEventsResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("decode %s events: %w", eventType, err)
+	}
+	return payload.Items, nil
+}
+
+// fetchEventsV2 reads the newer events endpoint.
+//
+// The two are not interchangeable. The v1 path answers stress, PAI and the
+// oxygen clicks; the v2 path answers HRV, readiness and respiration, and returns
+// readiness as plain JSON where v1 returns the same event as an undocumented hex
+// blob. Both are needed, so both are here.
+func (z *ZeppConnector) fetchEventsV2(ctx context.Context, session zeppSession, eventType, subType string, from, to time.Time) ([]json.RawMessage, error) {
+	body, err := z.get(ctx, session, zeppAPIHost+"/v2/users/me/events", url.Values{
+		"eventType": {eventType},
+		"subType":   {subType},
+		"limit":     {fmt.Sprint(zeppEventPageLimit)},
+		"from":      {fmt.Sprint(from.UnixMilli())},
+		"to":        {fmt.Sprint(to.UnixMilli())},
+		"reverse":   {"1"},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var payload zeppEventsResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("decode %s/%s events: %w", eventType, subType, err)
 	}
 	return payload.Items, nil
 }

@@ -3,6 +3,7 @@ package connectors
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 // Every payload below is a verbatim capture from the live account, trimmed only
@@ -110,5 +111,67 @@ func TestZeppNumberHandlesTheEmptyCases(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(`{"a":"не число"}`), &broken); err == nil {
 		t.Fatal("an unparsable number was accepted")
+	}
+}
+
+// A verbatim readiness event from the v2 endpoint, with the values checked
+// against the seven days the app showed on screen.
+const liveReadinessEvent = `{"userId":"8725027931","eventType":"readiness","subType":"watch_score",
+	"timestamp":1789198620000,"value":{"skinTempBaseLine":32767,"afibBaseLine":0,"mentBaseLine":89,
+	"deviceId":"C369A9FFFEE85BA2","ahiScore":100,"algVer":4,"phyScore":84,"afibInsight":255,
+	"hrvBaseline":80,"timestamp":1789160400000,"hrvScore":84,"phyBaseline":83,"rhrBaseline":54,
+	"sleepHRV":86,"sleepRHR":55,"rdnsScore":87,"mentScore":92,"skinTempScore":255,"afibScore":255,
+	"rhrScore":84,"status":0}}`
+
+func TestZeppReadinessCarriesTheHRVTheAppShows(t *testing.T) {
+	var event zeppReadinessEvent
+	if err := json.Unmarshal([]byte(liveReadinessEvent), &event); err != nil {
+		t.Fatalf("live readiness payload did not decode: %v", err)
+	}
+
+	// 86 ms is what the app displayed for this night.
+	if got := event.Value.SleepHRV.float(); got != 86 {
+		t.Errorf("sleepHRV = %v, want 86", got)
+	}
+	if got := event.Value.HRVBaseline.float(); got != 80 {
+		t.Errorf("hrv baseline = %v, want 80", got)
+	}
+	if got := event.Value.SleepRHR.float(); got != 55 {
+		t.Errorf("sleep resting hr = %v, want 55", got)
+	}
+	if got := event.Value.ReadinessScore.float(); got != 87 {
+		t.Errorf("readiness score = %v, want 87", got)
+	}
+}
+
+func TestZeppReadingIsRealRejectsSentinels(t *testing.T) {
+	// The band fills what it did not measure rather than omitting it. A skin
+	// temperature of 32767 and a score of 255 are both "no data", and storing
+	// either would put nonsense in the history.
+	for _, sentinel := range []float64{0, 255, 32767} {
+		if zeppReadingIsReal(sentinel) {
+			t.Errorf("%v was accepted as a measurement", sentinel)
+		}
+	}
+	for _, real := range []float64{1, 54, 86, 100, 254} {
+		if !zeppReadingIsReal(real) {
+			t.Errorf("%v was rejected as a measurement", real)
+		}
+	}
+}
+
+func TestZeppReadinessStampLandsOnTheNightItDescribes(t *testing.T) {
+	var event zeppReadinessEvent
+	if err := json.Unmarshal([]byte(liveReadinessEvent), &event); err != nil {
+		t.Fatal(err)
+	}
+
+	// The inner timestamp is the start of the day the verdict is about; the
+	// outer one is the morning the watch synced it, which is a different day
+	// whenever the sync happens after midnight.
+	stamp := zeppReadinessStamp(event, event.Value)
+	wantDay := zeppUnixTime(1789160400000)
+	if stamp.Sub(wantDay) != 12*time.Hour {
+		t.Fatalf("stamp = %s, want midday of %s", stamp, wantDay)
 	}
 }

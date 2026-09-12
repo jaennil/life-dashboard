@@ -344,3 +344,105 @@ func firstPositive(values ...int) int {
 	}
 	return 0
 }
+
+// ingestSectionV2 is ingestSection against the newer events endpoint, which
+// needs a subType alongside the event type.
+func (z *ZeppConnector) ingestSectionV2(
+	ctx context.Context,
+	userID string,
+	session zeppSession,
+	eventType, subType string,
+	from, to time.Time,
+	store func(context.Context, string, json.RawMessage) (int, error),
+) int {
+	items, err := z.fetchEventsV2(ctx, session, eventType, subType, from, to)
+	if err != nil {
+		z.logger.Warn().Err(err).Str("event_type", eventType).Str("sub_type", subType).
+			Msg("zepp event section failed")
+		return 0
+	}
+
+	saved, failed := 0, 0
+	for _, item := range items {
+		count, err := store(ctx, userID, item)
+		if err != nil {
+			failed++
+			z.logger.Warn().Err(err).Str("event_type", eventType).Msg("store zepp event failed")
+			continue
+		}
+		saved += count
+	}
+
+	if len(items) > 0 && saved == 0 {
+		observability.RecordUnusableSection(zeppSource, eventType)
+		z.logger.Error().
+			Str("event_type", eventType).
+			Str("sub_type", subType).
+			Int("items", len(items)).
+			Int("decode_failures", failed).
+			Msg("zepp section returned data but nothing could be stored")
+	}
+	return saved
+}
+
+// storeReadiness records the morning verdict the band forms about the night.
+//
+// sleepHRV is the number the app shows as the day's heart rate variability - it
+// matched the app exactly on every one of the seven days it was checked against -
+// and it is the only place HRV appears in this API at all.
+func (z *ZeppConnector) storeReadiness(ctx context.Context, userID string, raw json.RawMessage) (int, error) {
+	var event zeppReadinessEvent
+	if err := json.Unmarshal(raw, &event); err != nil {
+		return 0, err
+	}
+
+	value := event.Value
+	stamp := zeppReadinessStamp(event, value)
+	if stamp.IsZero() {
+		return 0, nil
+	}
+
+	metrics := []zeppMetric{
+		{"hrv", value.SleepHRV.float(), "ms"},
+		{"hrv_baseline", value.HRVBaseline.float(), "ms"},
+		{"hrv_score", value.HRVScore.float(), "score"},
+		{"readiness_score", value.ReadinessScore.float(), "score"},
+		{"physical_score", value.PhysicalScore.float(), "score"},
+		{"mental_score", value.MentalScore.float(), "score"},
+		{"sleep_resting_heart_rate", value.SleepRHR.float(), "bpm"},
+	}
+
+	saved := 0
+	for _, metric := range metrics {
+		// The band fills what it did not measure with sentinels rather than
+		// omitting it: 255 for a score, 32767 for skin temperature. Storing those
+		// would put a resting pulse of 255 into the history.
+		if !zeppReadingIsReal(metric.value) {
+			continue
+		}
+		if err := z.upsertMetric(ctx, userID, stamp, metric, nil); err != nil {
+			return saved, err
+		}
+		saved++
+	}
+	return saved, nil
+}
+
+// zeppReadingIsReal rejects the placeholders the band uses for "not measured".
+func zeppReadingIsReal(value float64) bool {
+	return value > 0 && value != 255 && value != 32767
+}
+
+// zeppReadinessStamp puts the verdict on the night it describes. The inner
+// timestamp is the start of that day; midday keeps DATE() on the same day under
+// either timezone, the way every other daily metric here is stored.
+func zeppReadinessStamp(event zeppReadinessEvent, value zeppReadinessValue) time.Time {
+	millis := value.Timestamp.int64()
+	if millis == 0 {
+		millis = event.Timestamp.int64()
+	}
+	if millis == 0 {
+		return time.Time{}
+	}
+	return zeppUnixTime(millis).Add(12 * time.Hour)
+}
