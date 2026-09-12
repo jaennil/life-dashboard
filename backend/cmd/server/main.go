@@ -314,6 +314,10 @@ func main() {
 	aiHandler.StartCheckupWorker(inputWorkerCtx)
 	telegramHandler.StartTelegramWorker(inputWorkerCtx)
 
+	// The location handler serves both the public webhook and the places screen,
+	// so it is built before either group of routes.
+	locationWebhook := handlers.NewLocationWebhook(pool, log.Logger)
+
 	// Naming new places is a slow trickle against public map services, so it runs
 	// on its own timer rather than in the request the phone is waiting on.
 	placeNaming := handlers.NewPlaceNaming(pool,
@@ -502,6 +506,9 @@ func main() {
 		r.Post("/api/v1/productivity/tasks/{taskID}/complete", productivityTasksHandler.CompleteTask)
 		r.Get("/api/v1/productivity/vikunja/projects", productivityTasksHandler.GetVikunjaProjects)
 
+		r.Get("/api/v1/location/places", locationWebhook.GetLocationPlaces)
+		r.Put("/api/v1/location/places/{placeID}", locationWebhook.UpdateLocationPlace)
+
 		r.Get("/api/v1/weather", weatherHandler.GetWeather)
 
 		r.Get("/api/v1/ai/history", aiHandler.GetHistory)
@@ -541,7 +548,6 @@ func main() {
 	healthWebhookPublic := handlers.NewHealthWebhook(pool, log.Logger)
 	r.Post("/api/v1/webhook/health", healthWebhookPublic.ReceiveData)
 	screenTimeWebhook := handlers.NewScreenTimeWebhook(pool, log.Logger)
-	locationWebhook := handlers.NewLocationWebhook(pool, log.Logger)
 	r.Post("/api/v1/webhook/screentime", screenTimeWebhook.ReceiveData)
 	r.Post("/api/v1/webhook/overland", locationWebhook.ReceiveOverland)
 
