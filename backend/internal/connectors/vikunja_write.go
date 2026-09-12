@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -97,6 +98,63 @@ func (v *VikunjaConnector) Projects(ctx context.Context, userID string) ([]Vikun
 	// Map iteration order is random; the picker needs a stable list.
 	sort.Slice(refs, func(i, j int) bool { return vikunjaProjectRefLess(refs[i], refs[j]) })
 	return refs, nil
+}
+
+// ErrVikunjaProjectExists is returned instead of creating a second project with
+// a name the workspace already uses.
+var ErrVikunjaProjectExists = errors.New("project already exists")
+
+// CreateProject adds a project and mirrors it locally.
+//
+// A duplicate title is refused rather than created: two projects called "работа"
+// are indistinguishable everywhere a project is chosen by name, which is exactly
+// how a dictated task ends up in the wrong one.
+func (v *VikunjaConnector) CreateProject(ctx context.Context, userID, title string) (VikunjaProjectRef, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return VikunjaProjectRef{}, fmt.Errorf("project title is required")
+	}
+
+	creds, err := v.loadCredentials(ctx, userID)
+	if err != nil {
+		return VikunjaProjectRef{}, err
+	}
+
+	existing, err := v.fetchProjects(ctx, creds)
+	if err != nil {
+		return VikunjaProjectRef{}, fmt.Errorf("fetch vikunja projects: %w", err)
+	}
+	for id, project := range existing {
+		if strings.EqualFold(strings.TrimSpace(project.Title), title) {
+			return VikunjaProjectRef{
+				ID:       id,
+				Title:    strings.TrimSpace(project.Title),
+				Path:     vikunjaProjectPath(id, existing),
+				Archived: project.IsArchived,
+			}, ErrVikunjaProjectExists
+		}
+	}
+
+	body, err := v.write(ctx, creds, http.MethodPut, "/api/v1/projects", map[string]any{"title": title})
+	if err != nil {
+		return VikunjaProjectRef{}, fmt.Errorf("create vikunja project: %w", err)
+	}
+
+	var created vikunjaProject
+	if err := json.Unmarshal(body, &created); err != nil {
+		return VikunjaProjectRef{}, fmt.Errorf("decode created project: %w", err)
+	}
+
+	// The local mirror is what every project picker reads, so a project that only
+	// exists upstream is a project nobody can file into.
+	v.resyncAfterWrite(ctx, userID, "create project")
+
+	return VikunjaProjectRef{
+		ID:       created.ID,
+		Title:    strings.TrimSpace(created.Title),
+		Path:     strings.TrimSpace(created.Title),
+		Archived: created.IsArchived,
+	}, nil
 }
 
 // CreateTask adds a task to Vikunja and mirrors the result locally.
