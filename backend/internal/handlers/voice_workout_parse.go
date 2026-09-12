@@ -70,7 +70,11 @@ type voiceParsedTask struct {
 	Title string `json:"title"`
 	// Project is copied verbatim from the list in the prompt, the same rule the
 	// workout parse uses for template ids: an invented project cannot be filed.
-	Project     string             `json:"project"`
+	Project string `json:"project"`
+	// NewProject is set only when the phrase asks for a project to be created.
+	// Without it a paraphrased name would quietly become a new project instead of
+	// matching the existing one it meant.
+	NewProject  bool               `json:"new_project"`
 	Description string             `json:"description"`
 	Labels      []string           `json:"labels"`
 	DueAt       string             `json:"due_at"`
@@ -217,7 +221,7 @@ func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoo
 	sb.WriteString("\nДля еды формат такой:\n")
 	sb.WriteString(`{"domain":"food","exercises":[],"entries":[{"food_id":"...","serving_id":"...","name":"...","grams":70,"meal":"breakfast"}],"unmatched":["..."]}`)
 	sb.WriteString("\nДля задачи формат такой:\n")
-	sb.WriteString(`{"domain":"task","exercises":[],"entries":[],"task":{"title":"забрать запчасти","project":"citroen","description":"","due_at":"2026-09-05T12:00:00+03:00","priority":0,"repeat":null},"unmatched":[]}`)
+	sb.WriteString(`{"domain":"task","exercises":[],"entries":[],"task":{"title":"забрать запчасти","project":"citroen","new_project":false,"description":"","due_at":"2026-09-05T12:00:00+03:00","priority":0,"repeat":null},"unmatched":[]}`)
 	sb.WriteString("\nДля вопроса формат такой:\n")
 	sb.WriteString(`{"domain":"question","exercises":[],"entries":[],"task":null,"unmatched":[]}`)
 	sb.WriteString("\n\nСначала определи domain - о чём фраза:\n")
@@ -242,6 +246,7 @@ func buildVoiceParsePrompt(candidates []voiceExerciseCandidate, foods []voiceFoo
 	sb.WriteString("- labels заполняй только если метка названа вслух (\"с меткой дом\", \"пометь как срочное\"). Новые метки не выдумывай: несуществующая будет пропущена.\n")
 	sb.WriteString("- repeat заполняй только если сказано про повторение: \"каждый день\", \"раз в две недели\", \"каждый месяц\". unit - day, week или month, every - число. Иначе null.\n")
 	sb.WriteString("- \"каждую пятницу\" - это repeat {\"every\":1,\"unit\":\"week\"}, а ближайшую пятницу положи в due_at: интервал повтора считается от срока.\n")
+	sb.WriteString("- new_project ставь true только если пользователь прямо просит завести проект: \"создай проект ремонт\", \"в новый проект дача\". Тогда в project положи название нового проекта. Во всех остальных случаях new_project false, даже если подходящего проекта нет в списке.\n")
 	sb.WriteString("- Прошедшее дело - это не задача: \"купил хлеб\" не task.\n")
 	if len(projects) > 0 {
 		sb.WriteString("- project: скопируй строку из списка ниже целиком, если проект назван вслух или однозначно следует из дела. Не придумывай новых названий: если ничего не подходит, оставь пустую строку и задача уйдёт в проект по умолчанию.\n")

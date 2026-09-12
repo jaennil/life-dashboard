@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,8 +12,25 @@ import (
 )
 
 type fakeTaskWriter struct {
-	drafts []connectors.VikunjaTaskDraft
-	err    error
+	drafts          []connectors.VikunjaTaskDraft
+	err             error
+	createdProjects []string
+	projectID       int64
+	projectErr      error
+}
+
+func (f *fakeTaskWriter) CreateProject(_ context.Context, _ string, title string) (connectors.VikunjaProjectRef, error) {
+	f.createdProjects = append(f.createdProjects, title)
+	if f.projectErr != nil && !errors.Is(f.projectErr, connectors.ErrVikunjaProjectExists) {
+		return connectors.VikunjaProjectRef{}, f.projectErr
+	}
+	id := f.projectID
+	if id == 0 {
+		id = 77
+	}
+	// The real client returns the project it found alongside the sentinel, and a
+	// fake that dropped it would hide the whole point of that case.
+	return connectors.VikunjaProjectRef{ID: id, Title: title, Path: title}, f.projectErr
 }
 
 func (f *fakeTaskWriter) CreateTask(_ context.Context, _ string, draft connectors.VikunjaTaskDraft) (connectors.VikunjaTaskRef, error) {
@@ -281,5 +299,71 @@ func TestTaskRecurrenceRu(t *testing.T) {
 		if got := taskRecurrenceRu(given); got != want {
 			t.Fatalf("taskRecurrenceRu(%q) = %q, want %q", given, got, want)
 		}
+	}
+}
+
+func TestResolveDictatedProjectMatchesBeforeCreating(t *testing.T) {
+	projects := []taskProject{{ExternalID: "6", Name: "life", Path: "life"}}
+
+	// A name that matches is used even when the phrase asked for a new project:
+	// "создай проект life" twice should not leave two of them.
+	if id, create, note := resolveDictatedProject("life", true, projects); id != 6 || create || note != "" {
+		t.Errorf("existing project: id=%d create=%v note=%q", id, create, note)
+	}
+	if id, create, note := resolveDictatedProject("дача", true, projects); id != 0 || !create || note != "" {
+		t.Errorf("new project: id=%d create=%v note=%q", id, create, note)
+	}
+	// Nobody asked, so an unknown name is a misheard one.
+	id, create, note := resolveDictatedProject("дача", false, projects)
+	if id != 0 || create {
+		t.Errorf("a project was invented: id=%d create=%v", id, create)
+	}
+	if !strings.Contains(note, "не нашёл") {
+		t.Errorf("note = %q", note)
+	}
+}
+
+func TestCreateTaskProjectReportsWhatItDid(t *testing.T) {
+	writer := &fakeTaskWriter{projectID: 91}
+	handler := newTaskTestHandler(writer)
+	response := voiceWorkoutResponse{}
+
+	if id := handler.createTaskProject(context.Background(), "user-1", "дача", &response); id != 91 {
+		t.Fatalf("project id = %d", id)
+	}
+	if len(writer.createdProjects) != 1 || writer.createdProjects[0] != "дача" {
+		t.Fatalf("created projects = %v", writer.createdProjects)
+	}
+	if !strings.Contains(response.Message, "Создал проект \"дача\"") {
+		t.Fatalf("the new project was not reported back: %q", response.Message)
+	}
+}
+
+func TestCreateTaskProjectFallsBackWhenTheProviderRefuses(t *testing.T) {
+	// The task still has to be written: losing it because a project could not be
+	// made is the one outcome dictation cannot afford.
+	writer := &fakeTaskWriter{projectErr: errors.New("vikunja is down")}
+	handler := newTaskTestHandler(writer)
+	response := voiceWorkoutResponse{}
+
+	if id := handler.createTaskProject(context.Background(), "user-1", "дача", &response); id != 0 {
+		t.Fatalf("project id = %d, want the default project", id)
+	}
+	if !strings.Contains(strings.Join(response.Unmatched, "; "), "не создался") {
+		t.Fatalf("the failure was not reported: %v", response.Unmatched)
+	}
+}
+
+func TestCreateTaskProjectUsesAProjectThatAlreadyExists(t *testing.T) {
+	// The provider recognised the name even though the local mirror did not.
+	writer := &fakeTaskWriter{projectID: 6, projectErr: connectors.ErrVikunjaProjectExists}
+	handler := newTaskTestHandler(writer)
+	response := voiceWorkoutResponse{}
+
+	if id := handler.createTaskProject(context.Background(), "user-1", "life", &response); id != 6 {
+		t.Fatalf("project id = %d, want the existing project", id)
+	}
+	if response.Message != "" {
+		t.Fatalf("a project that already existed was announced as created: %q", response.Message)
 	}
 }

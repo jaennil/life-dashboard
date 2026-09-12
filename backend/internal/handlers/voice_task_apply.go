@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 type taskWriter interface {
 	CreateTask(ctx context.Context, userID string, draft connectors.VikunjaTaskDraft) (connectors.VikunjaTaskRef, error)
+	CreateProject(ctx context.Context, userID, title string) (connectors.VikunjaProjectRef, error)
 }
 
 // taskProject is one project the dictated task can be filed into, mirrored
@@ -143,15 +145,14 @@ func (h *VoiceWorkoutHandler) applyTask(ctx context.Context, userID, eventID str
 		if err != nil {
 			h.logger.Warn().Err(err).Str("user_id", userID).Msg("load task projects")
 		}
-		if project, ok := resolveTaskProject(named, projects); ok {
-			if id, err := strconv.ParseInt(project.ExternalID, 10, 64); err == nil {
-				draft.ProjectID = id
-			}
-		} else {
-			// Filing into the wrong project is worse than filing into the inbox,
-			// so an unrecognized name is reported rather than guessed at.
-			response.Unmatched = append(response.Unmatched, "проект \""+named+"\" не нашёл")
+		projectID, create, note := resolveDictatedProject(named, interpreted.Task.NewProject, projects)
+		if create {
+			projectID = h.createTaskProject(ctx, userID, named, response)
 		}
+		if note != "" {
+			response.Unmatched = append(response.Unmatched, note)
+		}
+		draft.ProjectID = projectID
 	}
 
 	if seconds, monthly, ok := taskRepeatSeconds(interpreted.Task.Repeat); ok {
@@ -289,4 +290,49 @@ func (h *VoiceWorkoutHandler) recordTaskID(ctx context.Context, eventID, taskID 
 		WHERE id = $1
 	`, eventID, encoded)
 	return err
+}
+
+// resolveDictatedProject decides where a dictated task goes.
+//
+// A name that matches is used. A name that does not is only created when the
+// phrase asked for that in so many words - otherwise it is a paraphrase of an
+// existing project, and creating it would leave two projects meaning the same
+// thing. A zero id means the provider's default project.
+func resolveDictatedProject(named string, newProject bool, projects []taskProject) (projectID int64, create bool, note string) {
+	if project, ok := resolveTaskProject(named, projects); ok {
+		id, err := strconv.ParseInt(project.ExternalID, 10, 64)
+		if err != nil {
+			return 0, false, ""
+		}
+		return id, false, ""
+	}
+	if newProject {
+		return 0, true, ""
+	}
+	// Filing into the wrong project is worse than filing into the inbox, so an
+	// unrecognized name is reported rather than guessed at.
+	return 0, false, "проект \"" + named + "\" не нашёл"
+}
+
+// createTaskProject creates the project a dictated task asked for, and reports
+// what happened either way: a task that quietly landed in the inbox because the
+// project could not be created is a task that will be looked for in the wrong
+// place. A zero id means the provider's default project.
+func (h *VoiceWorkoutHandler) createTaskProject(ctx context.Context, userID, title string, response *voiceWorkoutResponse) int64 {
+	project, err := h.task.CreateProject(ctx, userID, title)
+	switch {
+	case errors.Is(err, connectors.ErrVikunjaProjectExists):
+		// Already there under a name the matcher did not recognise; using it is
+		// still better than making a second one.
+		h.logger.Info().Str("user_id", userID).Str("project", title).Msg("dictated project already exists")
+	case err != nil:
+		h.logger.Error().Err(err).Str("user_id", userID).Str("project", title).Msg("create dictated project")
+		response.Unmatched = append(response.Unmatched, "проект \""+title+"\" не создался")
+		return 0
+	default:
+		h.logger.Info().Str("user_id", userID).Str("project", title).Int64("project_id", project.ID).
+			Msg("project created from a dictated task")
+		response.Message = strings.TrimSpace(response.Message + " Создал проект \"" + project.Title + "\".")
+	}
+	return project.ID
 }
