@@ -9,6 +9,7 @@ import {
   type CheckupSchedule,
   type CheckupSchedulePeriod,
   type HealthAPIKeyInfo,
+  type LocationPlace,
   type Integration,
   type TelegramStatus,
 } from '@/lib/api'
@@ -738,6 +739,150 @@ function LocationSection({ reloadKey }: { reloadKey: number }) {
   )
 }
 
+const PLACE_KIND_LABELS: Record<string, string> = {
+  home: 'дом',
+  work: 'работа',
+  other: 'прочее',
+}
+
+// Places name themselves from a map, and a map cannot tell a gym from the shop
+// below it when the phone is only sure to within a hundred metres. So the screen
+// exists for one thing: correcting a name once, after which every visit there is
+// already named.
+function PlacesSection() {
+  const [places, setPlaces] = useState<LocationPlace[]>([])
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState('')
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      setPlaces(await api.getLocationPlaces())
+      setError('')
+    } catch {
+      setError('Не удалось загрузить места')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  async function rename(place: LocationPlace, name: string) {
+    setEditing('')
+    if (name.trim() === (place.custom_name ?? '')) return
+    try {
+      await api.renameLocationPlace(place.id, name.trim())
+      await load()
+    } catch {
+      setError('Не удалось переименовать место')
+    }
+  }
+
+  if (loading) {
+    return <div className="h-24 animate-pulse rounded-2xl bg-muted/30" />
+  }
+
+  return (
+    <div>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-foreground">Места</h2>
+      <div className="flex flex-col gap-3 rounded-2xl border bg-card/90 p-5 shadow-sm">
+        {error ? <p className="text-xs text-rose-400">{error}</p> : null}
+
+        {places.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Пока пусто. Места появятся сами, когда телефон пришлёт первые визиты - iOS отмечает их,
+            когда ты где-то задерживаешься.
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Дом и работа определяются по времени суток. Название подставляется с карты, а если рядом
+              несколько заведений - ставится адрес: выбери нужное или впиши своё, это запомнится навсегда.
+            </p>
+            <ul className="flex flex-col divide-y">
+              {places.map(place => (
+                <li key={place.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {editing === place.id ? (
+                      <input
+                        autoFocus
+                        value={draft}
+                        onChange={event => setDraft(event.target.value)}
+                        onBlur={() => void rename(place, draft)}
+                        onKeyDown={event => {
+                          if (event.key === 'Enter') void rename(place, draft)
+                          if (event.key === 'Escape') setEditing('')
+                        }}
+                        placeholder="Как называть это место"
+                        className="min-w-48 flex-1 rounded-lg border bg-background px-2 py-1 text-sm outline-none focus:border-primary/60"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditing(place.id)
+                          setDraft(place.custom_name ?? '')
+                        }}
+                        className="text-sm font-medium text-foreground hover:text-primary"
+                      >
+                        {place.custom_name || place.name || 'Без названия'}
+                      </button>
+                    )}
+                    <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+                      {PLACE_KIND_LABELS[place.kind] ?? place.kind}
+                    </span>
+                    {place.custom_name ? (
+                      <span className="text-xs text-muted-foreground">своё название</span>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span>{place.visits} визит(ов)</span>
+                    <span>•</span>
+                    <span>{place.hours.toLocaleString('ru-RU')} ч</span>
+                    {place.last_seen ? (
+                      <>
+                        <span>•</span>
+                        <span>был {place.last_seen}</span>
+                      </>
+                    ) : null}
+                    {place.custom_name && place.name ? (
+                      <>
+                        <span>•</span>
+                        <span>с карты: {place.name}</span>
+                      </>
+                    ) : null}
+                  </div>
+
+                  {place.candidates.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {place.candidates.map(candidate => (
+                        <button
+                          key={candidate.name}
+                          type="button"
+                          onClick={() => void rename(place, candidate.name)}
+                          className="rounded-full border bg-card px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
+                          title={`${Math.round(candidate.distance_m)} м${candidate.kind ? `, ${candidate.kind}` : ''}`}
+                        >
+                          {candidate.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const SCHEDULE_LABELS: Record<CheckupSchedulePeriod, string> = {
   today: 'Каждый день',
   week: 'Каждую неделю',
@@ -1048,6 +1193,8 @@ export function Settings() {
         <AppleHealthSection onChanged={load} reloadKey={healthReloadKey} />
 
         <LocationSection reloadKey={healthReloadKey} />
+
+        <PlacesSection />
       </div>
 
       <CheckupDeliverySection />

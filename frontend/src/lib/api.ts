@@ -581,6 +581,26 @@ export interface InputJob {
   completed_at?: string
 }
 
+export interface LocationPlaceCandidate {
+  name: string
+  kind?: string
+  distance_m: number
+}
+
+export interface LocationPlace {
+  id: string
+  name: string
+  custom_name?: string
+  name_source?: string
+  kind: 'home' | 'work' | 'other' | string
+  latitude: number
+  longitude: number
+  visits: number
+  hours: number
+  last_seen?: string
+  candidates: LocationPlaceCandidate[]
+}
+
 export interface TelegramStatus {
   configured: boolean
   linked: boolean
@@ -730,6 +750,10 @@ export const api = {
     postJSON<QuickInputResponse>('/input', { text }),
   getInputJobs: () => get<InputJob[]>('/input/jobs'),
   getInputJob: (id: string) => get<InputJob>('/input/jobs/' + encodeURIComponent(id)),
+  getLocationPlaces: () => get<LocationPlace[]>('/location/places'),
+  renameLocationPlace: (id: string, customName: string) =>
+    putJSON<{ status: string }>(`/location/places/${id}`, { custom_name: customName }),
+
   getTelegramStatus: () => get<TelegramStatus>('/telegram'),
   createTelegramLink: () => postJSON<TelegramLink>('/telegram/link'),
   unlinkTelegram: () => deleteNoContent('/telegram/link'),
