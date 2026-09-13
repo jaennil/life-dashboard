@@ -103,9 +103,34 @@ func TestHevyCatalogueWaitsADayBetweenReads(t *testing.T) {
 		{"read a day ago", ago(24 * time.Hour), 0, true},
 		{"failed half an hour ago", ago(30 * time.Minute), 1, false},
 		{"failed two hours ago", ago(2 * time.Hour), 1, true},
+		{"failing all morning, waited four hours", ago(4 * time.Hour), 3, true},
+		{"failing all morning, waited three", ago(3 * time.Hour), 3, false},
+		{"failing all week", ago(23 * time.Hour), 40, false},
 	} {
 		if got := hevyCatalogueDue(test.lastRead, test.failures, now); got != test.want {
 			t.Errorf("%s: due = %v, want %v", test.name, got, test.want)
+		}
+	}
+}
+
+func TestHevyCatalogueBackoffStopsAtADay(t *testing.T) {
+	// A catalogue that has refused all day gets one attempt a day, not one an
+	// hour: it is a fixed list of movements, and the warning is the only thing
+	// the extra attempts produce.
+	for _, test := range []struct {
+		failures int
+		want     time.Duration
+	}{
+		{0, 24 * time.Hour},
+		{1, time.Hour},
+		{2, 2 * time.Hour},
+		{3, 4 * time.Hour},
+		{5, 16 * time.Hour},
+		{6, 24 * time.Hour},
+		{99, 24 * time.Hour},
+	} {
+		if got := hevyCatalogueWait(test.failures); got != test.want {
+			t.Errorf("after %d failures wait = %s, want %s", test.failures, got, test.want)
 		}
 	}
 }

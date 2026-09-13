@@ -37,8 +37,13 @@ const (
 	// are worth re-reading. They are a fixed list of movements and a handful of
 	// hand-written routines - once a day is already generous.
 	hevyCatalogueInterval = 24 * time.Hour
-	// hevyCatalogueRetry is the shorter wait after a failed read, so a stalled
-	// endpoint is tried again within the hour instead of the day.
+	// hevyCatalogueRetry is the wait after the first failed read. The endpoint
+	// stalls at random - twenty pages in a row answered in 750 ms each while the
+	// scheduled read of the same pages was timing out - so one failure is worth
+	// another try within the hour. Each further failure doubles the wait, up to
+	// the daily interval, because a catalogue that has refused all day is not
+	// going to yield to a twenty-fifth attempt, and 457 movements that do not
+	// change are not worth a warning an hour.
 	hevyCatalogueRetry = time.Hour
 )
 
@@ -250,16 +255,26 @@ func (h *HevyConnector) catalogueDue(ctx context.Context, userID string) bool {
 }
 
 // hevyCatalogueDue is the waiting rule on its own: a day between reads, an hour
-// after one that did not work.
+// after the first failure, doubling from there back up to the day.
 func hevyCatalogueDue(lastRead *time.Time, failures int, now time.Time) bool {
 	if lastRead == nil {
 		return true
 	}
-	wait := hevyCatalogueInterval
-	if failures > 0 {
-		wait = hevyCatalogueRetry
+	return now.Sub(*lastRead) >= hevyCatalogueWait(failures)
+}
+
+func hevyCatalogueWait(failures int) time.Duration {
+	if failures <= 0 {
+		return hevyCatalogueInterval
 	}
-	return now.Sub(*lastRead) >= wait
+	wait := hevyCatalogueRetry
+	for range failures - 1 {
+		wait *= 2
+		if wait >= hevyCatalogueInterval {
+			return hevyCatalogueInterval
+		}
+	}
+	return wait
 }
 
 // syncCatalogue reads the routines and the exercise catalogue and writes down
@@ -276,12 +291,17 @@ func (h *HevyConnector) syncCatalogue(ctx context.Context, userID, apiKey string
 		failed++
 	}
 
+	// The counter is how many reads in a row went wrong, not how many went wrong
+	// this time: it is what the backoff is measured in.
 	if _, err := h.db.Exec(ctx, `
 		INSERT INTO sync_state (source, user_id, last_synced_at, consecutive_failures, enabled, updated_at)
 		VALUES ($1, $2, NOW(), $3, FALSE, NOW())
 		ON CONFLICT (source, user_id) DO UPDATE SET
 			last_synced_at = EXCLUDED.last_synced_at,
-			consecutive_failures = EXCLUDED.consecutive_failures,
+			consecutive_failures = CASE
+				WHEN $3 = 0 THEN 0
+				ELSE sync_state.consecutive_failures + 1
+			END,
 			updated_at = EXCLUDED.updated_at
 	`, hevyCatalogueSource, userID, failed); err != nil {
 		h.logger.Warn().Err(err).Msg("record hevy catalogue checkpoint")
