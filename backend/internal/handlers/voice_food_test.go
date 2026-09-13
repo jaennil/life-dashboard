@@ -221,3 +221,52 @@ func TestPreferGramCapableServingsDoesNotDowngrade(t *testing.T) {
 		t.Fatalf("kept = %+v", kept)
 	}
 }
+
+func TestVoiceNameLooksCookedReadsTheProductName(t *testing.T) {
+	// Every name here is one from the diary.
+	for _, cooked := range []string{
+		"Макфа Макароны Отварные", "Макфа Вареные Макароны", "Бахетле Бедро Куриное Жареное",
+		"Ашан Куриная Грудка Вареная", "Мистраль Гречка Отварная", "Курица на пару",
+	} {
+		if !voiceNameLooksCooked(cooked) {
+			t.Errorf("%q was not recognised as cooked", cooked)
+		}
+	}
+	for _, raw := range []string{
+		"Петелинка Куриное Филе", "Barilla Макароны", "ВкусВилл Стрипсы Куриные", "Ашан Маффин",
+	} {
+		if voiceNameLooksCooked(raw) {
+			t.Errorf("%q was taken for cooked", raw)
+		}
+	}
+}
+
+func TestCookedWeightWarningNamesOnlyTheMismatched(t *testing.T) {
+	// The chicken was described fried and stored against a raw product: that is
+	// the entry worth a warning. The pasta found its cooked variant, so it is not.
+	entries := []voiceParsedEntry{
+		{Name: "Петелинка Куриное Филе", Cooked: true},
+		{Name: "Макфа Макароны Отварные", Cooked: true},
+		{Name: "Ашан Маффин"},
+	}
+
+	warning := cookedWeightWarning(entries)
+	if !strings.Contains(warning, "Петелинка Куриное Филе") {
+		t.Fatalf("the mismatched entry is not named: %q", warning)
+	}
+	for _, absent := range []string{"Макфа", "Маффин"} {
+		if strings.Contains(warning, absent) {
+			t.Errorf("%q should not be warned about: %q", absent, warning)
+		}
+	}
+}
+
+func TestCookedWeightWarningStaysSilentWhenItShould(t *testing.T) {
+	if got := cookedWeightWarning(nil); got != "" {
+		t.Errorf("empty entries produced %q", got)
+	}
+	// Nothing was described as cooked, so a raw product is exactly right.
+	if got := cookedWeightWarning([]voiceParsedEntry{{Name: "Петелинка Куриное Филе"}}); got != "" {
+		t.Errorf("a raw entry produced %q", got)
+	}
+}

@@ -51,6 +51,30 @@ type voiceParsedEntry struct {
 	Units     *float64 `json:"units"`
 	Grams     *float64 `json:"grams"`
 	Meal      string   `json:"meal"`
+	// Cooked marks a portion the person described as prepared - fried, boiled,
+	// baked. It matters because they are stating the weight of the cooked food
+	// while the catalogue entry is usually the raw one, and the two are not the
+	// same amount: chicken loses water, pasta takes it on.
+	Cooked bool `json:"cooked"`
+}
+
+// voiceCookedMarkers are the words that make a product a different product. The
+// list is matched against both what was said and what the catalogue calls the
+// item, so a spoken "жареная" can find "Бедро Куриное Жареное".
+var voiceCookedMarkers = []string{
+	"варен", "варён", "отварн", "жарен", "жарён", "запечен", "запечён",
+	"приготовл", "готов", "тушен", "тушён", "гриль", "на пару", "паровые",
+}
+
+// voiceNameLooksCooked reports whether a product name already says it is cooked.
+func voiceNameLooksCooked(name string) bool {
+	lowered := strings.ToLower(name)
+	for _, marker := range voiceCookedMarkers {
+		if strings.Contains(lowered, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 var (

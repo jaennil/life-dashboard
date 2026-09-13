@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"life-dashboard/internal/connectors"
@@ -67,6 +68,12 @@ func (h *VoiceWorkoutHandler) applyFood(ctx context.Context, userID, eventID str
 	}
 
 	response.Food = summarizeFoodEntries(written, interpreted.Foods)
+	if warning := cookedWeightWarning(written); warning != "" {
+		// Not an "did not understand": the entry is written and usable. It is a
+		// number that will read as smaller or larger than what was actually eaten,
+		// and the person is the only one who can decide what to do about it.
+		response.Food += "\n" + warning
+	}
 	response.Unmatched = unmatched
 	if len(written) > 0 {
 		response.Message = "Записал в дневник питания."
@@ -86,4 +93,24 @@ func (h *VoiceWorkoutHandler) recordFoodEntryIDs(ctx context.Context, eventID st
 		WHERE id = $1
 	`, eventID, encoded)
 	return err
+}
+
+// cookedWeightWarning names the entries whose weight was given for cooked food
+// and stored against a product that is not cooked.
+//
+// The direction of the error depends on the food - meat sheds water, grains take
+// it on - so the warning says that the two weights differ rather than pretending
+// to know by how much.
+func cookedWeightWarning(entries []voiceParsedEntry) string {
+	mismatched := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Cooked && !voiceNameLooksCooked(entry.Name) {
+			mismatched = append(mismatched, entry.Name)
+		}
+	}
+	if len(mismatched) == 0 {
+		return ""
+	}
+	return "Вес готового записан против сырого продукта (" + strings.Join(mismatched, ", ") +
+		") - в дневнике он не равен съеденному, поправь в приложении."
 }
