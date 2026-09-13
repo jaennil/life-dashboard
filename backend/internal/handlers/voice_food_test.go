@@ -481,20 +481,3 @@ func TestCookedWeightWarningIsQuietForFoodThatKeepsItsWeight(t *testing.T) {
 		}
 	}
 }
-
-func TestFryingOilNoteOnlyWhenTheOilIsMissing(t *testing.T) {
-	converted := []voiceParsedEntry{{Name: "Петелинка Куриное Филе", Cooked: true, CookForm: "meat", RawGrams: kg(476)}}
-	if note := fryingOilNote("340 г жареной курицы", converted); note == "" {
-		t.Error("no note for a fried portion logged as the raw product")
-	}
-	// Boiled: nothing went into the pan.
-	if note := fryingOilNote("450 г варёных макарон", converted); note != "" {
-		t.Errorf("noted oil for boiled food: %s", note)
-	}
-	// The cooked catalogue entry may already carry the oil of whoever typed it in,
-	// so the note would be guessing about someone else's pan.
-	asCooked := []voiceParsedEntry{{Name: "Бахетле Бедро Куриное Жареное", Cooked: true}}
-	if note := fryingOilNote("340 г жареной курицы", asCooked); note != "" {
-		t.Errorf("noted oil for a cooked catalogue entry: %s", note)
-	}
-}

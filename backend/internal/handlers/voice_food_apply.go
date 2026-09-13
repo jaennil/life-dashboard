@@ -20,7 +20,7 @@ type foodWriter interface {
 // through the day, and confirming each would be worse than the occasional wrong
 // entry - especially since food_entry.delete works, so a mistake is one command
 // away from gone.
-func (h *VoiceWorkoutHandler) applyFood(ctx context.Context, userID, eventID, text string, interpreted voiceInterpretation, response *voiceWorkoutResponse) {
+func (h *VoiceWorkoutHandler) applyFood(ctx context.Context, userID, eventID string, interpreted voiceInterpretation, response *voiceWorkoutResponse) {
 	now := time.Now()
 	kept, rejected := validateParsedEntries(interpreted.Entries, interpreted.Foods, now)
 	unmatched := append(append([]string{}, interpreted.Unmatched...), rejected...)
@@ -68,9 +68,6 @@ func (h *VoiceWorkoutHandler) applyFood(ctx context.Context, userID, eventID, te
 	}
 
 	response.Food = summarizeFoodEntries(written, interpreted.Foods)
-	if note := fryingOilNote(text, written); note != "" {
-		response.Food += "\n" + note
-	}
 	if warning := cookedWeightWarning(written); warning != "" {
 		// Not an "did not understand": the entry is written and usable. It is a
 		// number that will read as smaller or larger than what was actually eaten,
@@ -96,25 +93,6 @@ func (h *VoiceWorkoutHandler) recordFoodEntryIDs(ctx context.Context, eventID st
 		WHERE id = $1
 	`, eventID, encoded)
 	return err
-}
-
-// fryingOilNote says that the oil is missing from a fried portion.
-//
-// A weight converted back to the raw product buys the manufacturer's numbers and
-// loses whatever went into the pan - a spoonful of oil is about 120 kcal that
-// nothing in the entry accounts for. The note does not guess the amount: how
-// much oil a person uses is not in the phrase, and inventing it would undo the
-// precision the conversion was for.
-func fryingOilNote(phrase string, entries []voiceParsedEntry) string {
-	if !phraseMentionsFrying(phrase) {
-		return ""
-	}
-	for _, entry := range entries {
-		if entry.RawGrams != nil {
-			return "Масло от жарки не учтено: записан сырой продукт."
-		}
-	}
-	return ""
 }
 
 // cookedWeightWarning names the entries whose weight was given for cooked food
