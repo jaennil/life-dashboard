@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/rs/zerolog"
 	authmw "life-dashboard/internal/middleware"
 )
 
@@ -176,13 +177,27 @@ func (h *AIHandler) StartCheckupWorker(ctx context.Context) {
 	}()
 }
 
+// shutdownAware picks the level a queue failure deserves.
+//
+// Stopping the process cancels whatever the worker was holding, and every one of
+// those cancellations used to be logged as an error: one evening of six deploys
+// left seventeen of them, all reading like the checkup queue was broken. A real
+// failure has to be findable, so shutdown gets debug and everything else keeps
+// error.
+func (h *AIHandler) shutdownAware(err error) *zerolog.Event {
+	if errors.Is(err, context.Canceled) {
+		return h.logger.Debug()
+	}
+	return h.logger.Error()
+}
+
 func (h *AIHandler) processNextCheckupJob(workerCtx context.Context) bool {
 	job, err := h.claimCheckupJob(workerCtx)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false
 	}
 	if err != nil {
-		h.logger.Error().Err(err).Msg("claim checkup job")
+		h.shutdownAware(err).Err(err).Msg("claim checkup job")
 		return false
 	}
 
@@ -192,7 +207,7 @@ func (h *AIHandler) processNextCheckupJob(workerCtx context.Context) bool {
 
 	if generateErr == nil {
 		if err := h.completeCheckupJob(workerCtx, job.ID, content); err != nil {
-			h.logger.Error().Err(err).Str("job_id", job.ID).Msg("complete checkup job")
+			h.shutdownAware(err).Err(err).Str("job_id", job.ID).Msg("complete checkup job")
 		}
 		return true
 	}
@@ -201,14 +216,14 @@ func (h *AIHandler) processNextCheckupJob(workerCtx context.Context) bool {
 		delay := checkupJobBackoff[job.Attempts-1]
 		h.logger.Warn().Err(generateErr).Str("job_id", job.ID).Dur("retry_in", delay).Msg("checkup attempt failed")
 		if err := h.retryCheckupJob(workerCtx, job.ID, generateErr.Error(), delay); err != nil {
-			h.logger.Error().Err(err).Str("job_id", job.ID).Msg("retry checkup job")
+			h.shutdownAware(err).Err(err).Str("job_id", job.ID).Msg("retry checkup job")
 		}
 		return true
 	}
 
-	h.logger.Error().Err(generateErr).Str("job_id", job.ID).Msg("checkup job failed")
+	h.shutdownAware(generateErr).Err(generateErr).Str("job_id", job.ID).Msg("checkup job failed")
 	if err := h.failCheckupJob(workerCtx, job.ID, generateErr.Error()); err != nil {
-		h.logger.Error().Err(err).Str("job_id", job.ID).Msg("fail checkup job")
+		h.shutdownAware(err).Err(err).Str("job_id", job.ID).Msg("fail checkup job")
 	}
 	return true
 }
@@ -324,7 +339,7 @@ func (h *AIHandler) processNextCheckupNotification(ctx context.Context) bool {
 		return false
 	}
 	if err != nil {
-		h.logger.Error().Err(err).Msg("claim checkup notification")
+		h.shutdownAware(err).Err(err).Msg("claim checkup notification")
 		return false
 	}
 

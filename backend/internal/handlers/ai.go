@@ -505,7 +505,7 @@ func (h *AIHandler) complete(ctx context.Context, operation string, messages []C
 
 	resp, err := client.Do(apiReq)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("ai api request")
+		h.shutdownAware(err).Err(err).Msg("ai api request")
 		return "", errAIUnavailable
 	}
 	defer resp.Body.Close()
@@ -590,7 +590,7 @@ func (h *AIHandler) completeStream(ctx context.Context, operation string, messag
 
 	resp, err := client.Do(apiReq)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("ai stream request")
+		h.shutdownAware(err).Err(err).Msg("ai stream request")
 		return "", errAIUnavailable
 	}
 	defer resp.Body.Close()
