@@ -69,7 +69,7 @@ func (h *VoiceWorkoutHandler) applyFood(ctx context.Context, userID, eventID str
 	response.Food = summarizeFoodEntries(written, interpreted.Foods)
 	response.Unmatched = unmatched
 	if len(written) > 0 {
-		response.Message = "Записал в дневник."
+		response.Message = "Записал в дневник питания."
 	}
 }
 
