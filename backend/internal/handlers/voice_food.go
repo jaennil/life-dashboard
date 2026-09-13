@@ -134,8 +134,15 @@ func (h *VoiceWorkoutHandler) loadFoodCandidates(ctx context.Context, userID str
 			       i.calories,
 			       i.number_of_units,
 			       d.date,
+			       -- The same serving is written down differently from day to day:
+			       -- "1 :custom:100г, 100 g" one time and a bare "1 serving" the
+			       -- next. Only the first spells out the weight, so it wins over the
+			       -- newer one - otherwise a food logged in grams all week comes back
+			       -- as "не смог перевести граммы в порцию".
 			       ROW_NUMBER() OVER (
-			           PARTITION BY i.food_id, i.serving_id ORDER BY d.date DESC
+			           PARTITION BY i.food_id, i.serving_id
+			           ORDER BY (i.serving_description ~ '[0-9]\s*g([^a-z]|$)') DESC NULLS LAST,
+			                    d.date DESC
 			       ) AS recency,
 			       COUNT(*) OVER (PARTITION BY i.food_id, i.serving_id) AS times
 			FROM nutrition_items i
