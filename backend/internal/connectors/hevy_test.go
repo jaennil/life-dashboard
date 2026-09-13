@@ -3,6 +3,7 @@ package connectors
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestHevyFlexibleStringUnmarshal(t *testing.T) {
@@ -81,5 +82,30 @@ func TestHevyRoutineResponseDecodesNumericSupersetID(t *testing.T) {
 	}
 	if got := decoded.Routines[0].Exercises[0].SupersetID.String(); got != "42" {
 		t.Fatalf("got superset_id %q want %q", got, "42")
+	}
+}
+
+func TestHevyCatalogueWaitsADayBetweenReads(t *testing.T) {
+	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	ago := func(d time.Duration) *time.Time {
+		at := now.Add(-d)
+		return &at
+	}
+
+	for _, test := range []struct {
+		name     string
+		lastRead *time.Time
+		failures int
+		want     bool
+	}{
+		{"never read", nil, 0, true},
+		{"read an hour ago", ago(time.Hour), 0, false},
+		{"read a day ago", ago(24 * time.Hour), 0, true},
+		{"failed half an hour ago", ago(30 * time.Minute), 1, false},
+		{"failed two hours ago", ago(2 * time.Hour), 1, true},
+	} {
+		if got := hevyCatalogueDue(test.lastRead, test.failures, now); got != test.want {
+			t.Errorf("%s: due = %v, want %v", test.name, got, test.want)
+		}
 	}
 }

@@ -27,6 +27,21 @@ const (
 	hevyRoutinePageSize = 1
 )
 
+const (
+	// hevyCatalogueSource is the checkpoint for the parts of Hevy that are not
+	// workouts. It is a sync_state row and not a scheduled source: nothing looks
+	// for a job by this name, and it is stored disabled so that it stays out of
+	// the integrations screen and out of the freshness list the AI reads.
+	hevyCatalogueSource = "hevy_catalogue"
+	// hevyCatalogueInterval is how often the routines and the exercise catalogue
+	// are worth re-reading. They are a fixed list of movements and a handful of
+	// hand-written routines - once a day is already generous.
+	hevyCatalogueInterval = 24 * time.Hour
+	// hevyCatalogueRetry is the shorter wait after a failed read, so a stalled
+	// endpoint is tried again within the hour instead of the day.
+	hevyCatalogueRetry = time.Hour
+)
+
 // ---- API response types ----
 
 type hevyWorkoutsResponse struct {
@@ -197,15 +212,80 @@ func (h *HevyConnector) Sync(ctx context.Context, userID string) error {
 	// while every workout came through - the alert said the connector was broken
 	// when the data it exists for was arriving. A warning keeps the breakage
 	// visible without lying about the sync.
-	if err := h.syncRoutines(ctx, userID, apiKey); err != nil {
-		h.logger.Warn().Err(err).Msg("sync routines failed")
-	}
-
-	if err := h.syncExerciseTemplates(ctx, userID, apiKey); err != nil {
-		h.logger.Warn().Err(err).Msg("sync exercise templates failed")
+	//
+	// They are also expensive: 457 exercises read ten at a time and routines read
+	// one at a time, because larger pages answer 200 and then stall. Doing that
+	// every quarter of an hour spent the whole minute the prefetch is allowed and
+	// produced two thirds of everything the log had to say in a day, for a list of
+	// movements that does not change.
+	if h.catalogueDue(ctx, userID) {
+		h.syncCatalogue(ctx, userID, apiKey)
 	}
 
 	return h.updateLastSync(ctx, userID)
+}
+
+// catalogueDue reports whether the routines and the exercise catalogue are worth
+// reading on this run.
+//
+// The prefetch never reads them: it exists to make the answer current, and what
+// makes an answer about training current is the workouts.
+func (h *HevyConnector) catalogueDue(ctx context.Context, userID string) bool {
+	if GetSyncTrigger(ctx) == SyncTriggerPrefetch {
+		return false
+	}
+
+	var lastRead *time.Time
+	var failures int
+	err := h.db.QueryRow(ctx, `
+		SELECT last_synced_at, consecutive_failures FROM sync_state
+		WHERE source = $1 AND user_id = $2
+	`, hevyCatalogueSource, userID).Scan(&lastRead, &failures)
+	if err != nil {
+		// The checkpoint cannot be read at all, so the catalogue may be missing
+		// entirely, which is worse than one slow sync.
+		return true
+	}
+	return hevyCatalogueDue(lastRead, failures, time.Now())
+}
+
+// hevyCatalogueDue is the waiting rule on its own: a day between reads, an hour
+// after one that did not work.
+func hevyCatalogueDue(lastRead *time.Time, failures int, now time.Time) bool {
+	if lastRead == nil {
+		return true
+	}
+	wait := hevyCatalogueInterval
+	if failures > 0 {
+		wait = hevyCatalogueRetry
+	}
+	return now.Sub(*lastRead) >= wait
+}
+
+// syncCatalogue reads the routines and the exercise catalogue and writes down
+// that it tried, so a stalling endpoint is retried on the hour rather than every
+// time the scheduler comes round.
+func (h *HevyConnector) syncCatalogue(ctx context.Context, userID, apiKey string) {
+	failed := 0
+	if err := h.syncRoutines(ctx, userID, apiKey); err != nil {
+		h.logger.Warn().Err(err).Msg("sync routines failed")
+		failed++
+	}
+	if err := h.syncExerciseTemplates(ctx, userID, apiKey); err != nil {
+		h.logger.Warn().Err(err).Msg("sync exercise templates failed")
+		failed++
+	}
+
+	if _, err := h.db.Exec(ctx, `
+		INSERT INTO sync_state (source, user_id, last_synced_at, consecutive_failures, enabled, updated_at)
+		VALUES ($1, $2, NOW(), $3, FALSE, NOW())
+		ON CONFLICT (source, user_id) DO UPDATE SET
+			last_synced_at = EXCLUDED.last_synced_at,
+			consecutive_failures = EXCLUDED.consecutive_failures,
+			updated_at = EXCLUDED.updated_at
+	`, hevyCatalogueSource, userID, failed); err != nil {
+		h.logger.Warn().Err(err).Msg("record hevy catalogue checkpoint")
+	}
 }
 
 // syncFull fetches all workouts via paginated /v1/workouts
