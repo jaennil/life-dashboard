@@ -7,18 +7,19 @@ import (
 )
 
 type Config struct {
-	Server     ServerConfig     `mapstructure:"server"`
-	Database   DatabaseConfig   `mapstructure:"database"`
-	Auth       AuthConfig       `mapstructure:"auth"`
-	AI         AIConfig         `mapstructure:"ai"`
-	Log        LogConfig        `mapstructure:"log"`
-	Sentry     SentryConfig     `mapstructure:"sentry"`
-	WebPush    WebPushConfig    `mapstructure:"web_push"`
-	Telegram   TelegramConfig   `mapstructure:"telegram"`
-	Connectors ConnectorsConfig `mapstructure:"connectors"`
-	Weather    WeatherConfig    `mapstructure:"weather"`
-	Location   LocationConfig   `mapstructure:"location"`
-	Unleash    UnleashConfig    `mapstructure:"unleash"`
+	Server        ServerConfig        `mapstructure:"server"`
+	Database      DatabaseConfig      `mapstructure:"database"`
+	Auth          AuthConfig          `mapstructure:"auth"`
+	AI            AIConfig            `mapstructure:"ai"`
+	Log           LogConfig           `mapstructure:"log"`
+	Sentry        SentryConfig        `mapstructure:"sentry"`
+	WebPush       WebPushConfig       `mapstructure:"web_push"`
+	Telegram      TelegramConfig      `mapstructure:"telegram"`
+	Connectors    ConnectorsConfig    `mapstructure:"connectors"`
+	Weather       WeatherConfig       `mapstructure:"weather"`
+	Location      LocationConfig      `mapstructure:"location"`
+	HomeAssistant HomeAssistantConfig `mapstructure:"home_assistant"`
+	Unleash       UnleashConfig       `mapstructure:"unleash"`
 }
 
 type WebPushConfig struct {
@@ -91,6 +92,16 @@ type MFPConfig struct {
 	SessionCookie string `mapstructure:"session_cookie"`
 	AccessToken   string `mapstructure:"access_token"`
 	UserID        string `mapstructure:"user_id"`
+}
+
+// HomeAssistantConfig points at the Home Assistant that holds the phone's own
+// readings. Empty token means the connector stays off.
+type HomeAssistantConfig struct {
+	BaseURL string `mapstructure:"base_url"`
+	Token   string `mapstructure:"token"`
+	// MobileApp is the notify service of the phone, used to ask it to report
+	// before its readings are collected.
+	MobileApp string `mapstructure:"mobile_app"`
 }
 
 // LocationConfig points the place naming at map services. Empty means the
@@ -247,6 +258,12 @@ func Load() (*Config, error) {
 	viper.BindEnv("connectors.mfp.session_cookie", "MFP_SESSION_COOKIE")
 	viper.BindEnv("connectors.mfp.access_token", "MFP_ACCESS_TOKEN")
 	viper.BindEnv("connectors.mfp.user_id", "MFP_USER_ID")
+
+	viper.BindEnv("home_assistant.base_url", "HOME_ASSISTANT_URL")
+	viper.BindEnv("home_assistant.token", "HOME_ASSISTANT_TOKEN")
+	viper.BindEnv("home_assistant.mobile_app", "HOME_ASSISTANT_MOBILE_APP")
+	viper.SetDefault("home_assistant.base_url", "http://home-assistant.home-assistant.svc.cluster.local:8123")
+	viper.SetDefault("home_assistant.mobile_app", "mobile_app_iphone")
 
 	viper.BindEnv("location.overpass_url", "OVERPASS_URL")
 	viper.BindEnv("location.nominatim_url", "NOMINATIM_URL")

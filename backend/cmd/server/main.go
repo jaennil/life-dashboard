@@ -156,6 +156,17 @@ func main() {
 		log.Info().Msg("todoist connector enabled (token-only, no OAuth)")
 	}
 
+	// The phone's own readings - blood oxygen, respiration, steps - can only be
+	// pulled through Home Assistant, which already runs the companion app.
+	homeAssistant := connectors.NewHomeAssistant(pool, cfg.HomeAssistant.BaseURL,
+		cfg.HomeAssistant.Token, cfg.HomeAssistant.MobileApp, log.Logger)
+	if homeAssistant.Configured() {
+		activeConnectors = append(activeConnectors, homeAssistant)
+		log.Info().Msg("home assistant connector enabled")
+	} else {
+		log.Info().Msg("home assistant connector disabled: no token")
+	}
+
 	vikunja := connectors.NewVikunja(pool, log.Logger)
 	activeConnectors = append(activeConnectors, vikunja)
 	log.Info().Msg("vikunja connector enabled")
@@ -447,6 +458,7 @@ func main() {
 			"xiaomi_scale":    true,
 			"ios_screentime":  true,
 			"zepp":            true,
+			"home_assistant":  homeAssistant.Configured(),
 		}
 		oauthConfiguredMap := map[string]bool{
 			"strava":          cfg.Connectors.Strava.ClientID != "" && cfg.Connectors.Strava.ClientSecret != "",
