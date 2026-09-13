@@ -172,3 +172,52 @@ func TestSummarizeFoodEntriesShowsExplicitGrams(t *testing.T) {
 		t.Fatalf("summary = %q", summary)
 	}
 }
+
+func gramServing(grams float64) *float64 { return &grams }
+
+func TestPreferGramCapableServingsKeepsTheWeighableOne(t *testing.T) {
+	// Both rows are the same pasta, logged against two different servings. Only
+	// one of them can answer "450 г".
+	candidates := []voiceFoodCandidate{
+		{FoodID: "1", ServingID: "a", Name: "Barilla Макароны", ServingDescription: "1 serving Barilla Макароны"},
+		{FoodID: "1", ServingID: "b", Name: "Barilla Макароны", ServingDescription: "1 :custom:100г, 100 g", ServingGrams: gramServing(100)},
+		{FoodID: "2", ServingID: "c", Name: "Петелинка Куриное Филе", ServingGrams: gramServing(100)},
+	}
+
+	kept := preferGramCapableServings(candidates)
+	if len(kept) != 2 {
+		t.Fatalf("kept %d candidates, want one per food: %+v", len(kept), kept)
+	}
+	if kept[0].ServingID != "b" {
+		t.Errorf("kept the serving without a weight: %+v", kept[0])
+	}
+	// The order of foods is the order they arrived in, which is most-used first.
+	if kept[1].FoodID != "2" {
+		t.Errorf("food order changed: %+v", kept)
+	}
+}
+
+func TestPreferGramCapableServingsKeepsTheFirstWhenNeitherHasWeight(t *testing.T) {
+	// Nothing to choose between them, so the most-used one stays.
+	candidates := []voiceFoodCandidate{
+		{FoodID: "1", ServingID: "a", Name: "Кофе"},
+		{FoodID: "1", ServingID: "b", Name: "Кофе"},
+	}
+	kept := preferGramCapableServings(candidates)
+	if len(kept) != 1 || kept[0].ServingID != "a" {
+		t.Fatalf("kept = %+v", kept)
+	}
+}
+
+func TestPreferGramCapableServingsDoesNotDowngrade(t *testing.T) {
+	// A weighable serving already kept must not be replaced by a later one
+	// without a weight.
+	candidates := []voiceFoodCandidate{
+		{FoodID: "1", ServingID: "a", ServingGrams: gramServing(100)},
+		{FoodID: "1", ServingID: "b"},
+	}
+	kept := preferGramCapableServings(candidates)
+	if len(kept) != 1 || kept[0].ServingID != "a" {
+		t.Fatalf("kept = %+v", kept)
+	}
+}

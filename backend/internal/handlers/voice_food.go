@@ -164,7 +164,44 @@ func (h *VoiceWorkoutHandler) loadFoodCandidates(ctx context.Context, userID str
 		}
 		candidates = append(candidates, c)
 	}
-	return candidates, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return preferGramCapableServings(candidates), nil
+}
+
+// preferGramCapableServings keeps one serving per food, choosing the one that
+// carries a weight.
+//
+// The same food is logged against several servings over time - "1 serving" one
+// day, "100 г" another - and each becomes its own candidate. A serving with a
+// weight can express both a spoken weight and a spoken portion; a serving
+// without one can only do portions. Offering both invites the model to pick the
+// weaker one, which is how "450 г варёных макарон" came back as "не смог
+// перевести граммы в порцию" for a food logged in grams all week.
+func preferGramCapableServings(candidates []voiceFoodCandidate) []voiceFoodCandidate {
+	best := make(map[string]int, len(candidates))
+	kept := make([]voiceFoodCandidate, 0, len(candidates))
+
+	for _, candidate := range candidates {
+		position, seen := best[candidate.FoodID]
+		if !seen {
+			best[candidate.FoodID] = len(kept)
+			kept = append(kept, candidate)
+			continue
+		}
+		// The list arrives most-used first, so the incumbent only loses when it
+		// cannot do something the newcomer can.
+		if hasServingGrams(kept[position]) || !hasServingGrams(candidate) {
+			continue
+		}
+		kept[position] = candidate
+	}
+	return kept
+}
+
+func hasServingGrams(candidate voiceFoodCandidate) bool {
+	return candidate.ServingGrams != nil && *candidate.ServingGrams > 0
 }
 
 // mealForTime guesses the meal from the clock, which is what keeps the phrase
