@@ -1381,7 +1381,11 @@ func formatAIJournalEntry(entry aiJournalEntry) string {
 func formatAIJournalEntryWithLimit(entry aiJournalEntry, contentLimit int) string {
 	line := fmt.Sprintf("  %s: %s", entry.Date.Format("02.01.2006"), strings.TrimSpace(entry.Title))
 	if strings.TrimSpace(entry.Title) == "" {
-		line = fmt.Sprintf("  %s: (без названия)", entry.Date.Format("02.01.2006"))
+		// A dictated thought has no title and never will. Saying where it came
+		// from is more use than saying it has no name: a phrase said out loud on
+		// the way somewhere is not the same kind of entry as a page written on
+		// purpose.
+		line = fmt.Sprintf("  %s: %s", entry.Date.Format("02.01.2006"), aiJournalSourceLabel(entry.Source))
 	}
 	if entry.Mood != nil {
 		line += fmt.Sprintf(" (настроение: %d/10)", *entry.Mood)
@@ -1389,14 +1393,37 @@ func formatAIJournalEntryWithLimit(entry aiJournalEntry, contentLimit int) strin
 	if len(entry.Tags) > 0 {
 		line += " [" + strings.Join(entry.Tags, ", ") + "]"
 	}
-	content := strings.TrimSpace(entry.Content)
-	if contentLimit > 0 && len(content) > contentLimit {
-		content = content[:contentLimit] + "..."
-	}
+	content := truncateRunes(strings.TrimSpace(entry.Content), contentLimit)
 	if content != "" {
 		line += "\n    " + strings.ReplaceAll(content, "\n", "\n    ")
 	}
 	return line
+}
+
+// aiJournalSourceLabel names an entry that has no title of its own.
+func aiJournalSourceLabel(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case voiceNoteSource:
+		return "(надиктовано)"
+	case "":
+		return "(без названия)"
+	default:
+		return "(без названия, " + source + ")"
+	}
+}
+
+// truncateRunes cuts text to a length in characters rather than bytes. Cyrillic
+// takes two bytes per letter, so a byte cut lands inside a letter and leaves a
+// broken one behind.
+func truncateRunes(text string, limit int) string {
+	if limit <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "..."
 }
 
 func writeAIJournalEntries(sb *strings.Builder, entries []aiJournalEntry) {
@@ -1433,12 +1460,16 @@ func writeAIJournalEntriesWithinBudget(sb *strings.Builder, entries []aiJournalE
 
 func (h *AIHandler) loadAIJournalEntries(ctx context.Context, userID string, days, limit int) ([]aiJournalEntry, error) {
 	since := aiNow().AddDate(0, 0, -days)
+	// Every text column here is nullable, and a single NULL used to abort the
+	// whole read: one dictated note without a title took the Notion entries down
+	// with it and the section reported itself unavailable.
 	rows, err := h.db.Query(ctx, `
-		SELECT date, title, content, tags, mood, COALESCE(source, '')
+		SELECT COALESCE(date, created_at::date), COALESCE(title, ''), COALESCE(content, ''),
+		       COALESCE(tags, '{}'), mood, COALESCE(source, '')
 		FROM journal_entries
 		WHERE user_id = $1
-			AND date >= $2
-		ORDER BY date DESC, updated_at DESC
+			AND COALESCE(date, created_at::date) >= $2
+		ORDER BY COALESCE(date, created_at::date) DESC, updated_at DESC
 		LIMIT $3
 	`, userID, since, limit)
 	if err != nil {
@@ -1449,19 +1480,21 @@ func (h *AIHandler) loadAIJournalEntries(ctx context.Context, userID string, day
 	var entries []aiJournalEntry
 	for rows.Next() {
 		var entry aiJournalEntry
-		if rows.Scan(&entry.Date, &entry.Title, &entry.Content, &entry.Tags, &entry.Mood, &entry.Source) == nil {
-			entries = append(entries, entry)
+		if err := rows.Scan(&entry.Date, &entry.Title, &entry.Content, &entry.Tags, &entry.Mood, &entry.Source); err != nil {
+			return nil, fmt.Errorf("scan journal entry: %w", err)
 		}
+		entries = append(entries, entry)
 	}
 	return entries, rows.Err()
 }
 
 func (h *AIHandler) loadAILatestJournalEntries(ctx context.Context, userID string, limit int) ([]aiJournalEntry, error) {
 	rows, err := h.db.Query(ctx, `
-		SELECT date, title, content, tags, mood, COALESCE(source, '')
+		SELECT COALESCE(date, created_at::date), COALESCE(title, ''), COALESCE(content, ''),
+		       COALESCE(tags, '{}'), mood, COALESCE(source, '')
 		FROM journal_entries
 		WHERE user_id = $1
-		ORDER BY date DESC, updated_at DESC
+		ORDER BY COALESCE(date, created_at::date) DESC, updated_at DESC
 		LIMIT $2
 	`, userID, limit)
 	if err != nil {

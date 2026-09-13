@@ -100,6 +100,7 @@ type voiceWorkoutResponse struct {
 	// Answer carries the reply to a dictated question. It is the one domain that
 	// gives something back instead of recording something.
 	Answer        string `json:"answer,omitempty"`
+	Note          string `json:"note,omitempty"`
 	Task          string `json:"task,omitempty"`
 	HevyWorkoutID string `json:"hevy_workout_id,omitempty"`
 	PushError     string `json:"push_error,omitempty"`
@@ -238,6 +239,8 @@ func (h *VoiceWorkoutHandler) processText(ctx context.Context, userID, eventID s
 			h.applyTask(ctx, userID, eventID, interpreted, &response)
 		case interpreted.Domain == voiceDomainQuestion:
 			domainErr = h.answerQuestion(ctx, userID, spoken, &response)
+		case interpreted.Domain == voiceDomainNote:
+			h.applyNote(ctx, userID, eventID, text, &response)
 		default:
 			if reply, known := voiceDomainReplies[interpreted.Domain]; known {
 				response.Message = reply

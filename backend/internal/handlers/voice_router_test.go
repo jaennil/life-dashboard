@@ -41,14 +41,14 @@ func TestResolveVoiceDomainStaysUnknownWithoutContext(t *testing.T) {
 func TestUnimplementedDomainsHaveAReply(t *testing.T) {
 	// A recognized-but-unwired domain must say so rather than fall through
 	// silently, otherwise a dictated note looks accepted.
-	for _, domain := range []string{voiceDomainNote, voiceDomainWeight} {
+	for _, domain := range []string{voiceDomainWeight} {
 		if voiceDomainReplies[domain] == "" {
 			t.Errorf("domain %q has no reply", domain)
 		}
 	}
 	// Workout and food are implemented: they report what they actually did, and a
 	// canned "not supported" line would contradict the write that just happened.
-	for _, domain := range []string{voiceDomainWorkout, voiceDomainFood, voiceDomainTask} {
+	for _, domain := range []string{voiceDomainWorkout, voiceDomainFood, voiceDomainTask, voiceDomainNote} {
 		if voiceDomainReplies[domain] != "" {
 			t.Errorf("implemented domain %q still carries a not-supported reply", domain)
 		}
@@ -77,14 +77,31 @@ func TestComposeVoiceDisplayShowsWorkoutAndFinish(t *testing.T) {
 }
 
 func TestComposeVoiceDisplayShowsRoutingMessage(t *testing.T) {
+	// A domain that is recognised but has nowhere to write still has to say so,
+	// or the phone shows a transcript and nothing else.
 	got := composeVoiceDisplay(voiceWorkoutResponse{
-		Heard:   "надо купить кроссовки",
-		Domain:  voiceDomainNote,
-		Message: voiceDomainReplies[voiceDomainNote],
+		Heard:   "кажется, я похудел",
+		Domain:  voiceDomainWeight,
+		Message: voiceDomainReplies[voiceDomainWeight],
 	})
 
-	if !strings.Contains(got, "Дневник пока не подключён") {
+	if !strings.Contains(got, "приходит с весов") {
 		t.Fatalf("display = %q", got)
+	}
+}
+
+func TestComposeVoiceDisplayConfirmsAJournalEntry(t *testing.T) {
+	got := composeVoiceDisplay(voiceWorkoutResponse{
+		Heard:  "сегодня наконец разобрался с местоположением",
+		Domain: voiceDomainNote,
+		Note:   "Записал в дневник.",
+	})
+
+	if !strings.Contains(got, "Записал в дневник") {
+		t.Fatalf("display = %q", got)
+	}
+	if strings.Contains(got, "Ничего не разобрал") {
+		t.Fatalf("a stored note was reported as nothing understood: %q", got)
 	}
 }
 

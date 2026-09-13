@@ -149,7 +149,7 @@ func buildAIToolPlannerPrompt(message, recentHistory string) string {
 	sb.WriteString("- routine_overview: Hevy routines/шаблоны с плановыми упражнениями и весами; args: limit\n")
 	sb.WriteString("- habit_overview: привычки и рутины (Life Dashboard / Habitify / Todoist) с дневными статусами за период; args: days\n")
 	sb.WriteString("- nutrition_overview: калории, макросы и конкретные съеденные продукты за период; args: days\n")
-	sb.WriteString("- journal_overview: заметки и записи из Notion/дневника; args: days, limit\n")
+	sb.WriteString("- journal_overview: заметки и записи дневника, из Notion и надиктованные вслух; args: days, limit\n")
 	sb.WriteString("- calendar_overview: недавние и будущие события календаря; args: past_days, future_days, limit\n")
 	sb.WriteString("- screentime_overview: экранное время iPhone за период: часы в приложениях, топ приложений и топ сайтов; args: days\n")
 	sb.WriteString("- location_overview: где пользователь бывал: визиты по местам, время дома, на работе и в других местах; args: days\n")
@@ -902,12 +902,12 @@ func (h *AIHandler) appendNutritionOverviewTool(ctx context.Context, sb *strings
 }
 
 func (h *AIHandler) appendJournalOverviewTool(ctx context.Context, sb *strings.Builder, userID string, days, limit int) {
-	sb.WriteString(fmt.Sprintf("=== ЗАМЕТКИ ИЗ NOTION (%d дней, %d записей) ===\n", days, limit))
-	sb.WriteString("Это записи из Notion journal_entries. Если в текущем окне новых записей нет, ниже выводятся последние доступные заметки.\n")
+	sb.WriteString(fmt.Sprintf("=== ЗАМЕТКИ И ДНЕВНИК (%d дней, %d записей) ===\n", days, limit))
+	sb.WriteString("Это записи дневника: из Notion и надиктованные вслух. Если в текущем окне новых записей нет, ниже выводятся последние доступные заметки.\n")
 
 	entries, err := h.loadAIJournalEntries(ctx, userID, days, limit)
 	if err != nil {
-		sb.WriteString("Данные Notion-дневника временно недоступны.\n")
+		sb.WriteString("Данные дневника временно недоступны.\n")
 		return
 	}
 
