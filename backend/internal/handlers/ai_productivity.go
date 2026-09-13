@@ -297,7 +297,11 @@ func renderProductivityOverviewText(title string, data AIProductivityOverviewDat
 				}
 				line += "]"
 			}
-			line += fmt.Sprintf(" | p%d | %s", task.Priority, label)
+			// The provider's priority number is deliberately not written out. It
+			// went into the report as "разморозить p1-задачи", which is a code the
+			// person who reads the report does not use and cannot decipher. What
+			// the line is for is the state of the task, and that is the label.
+			line += " | " + label
 			if task.Labels != "" {
 				line += " | метки: " + task.Labels
 			}
