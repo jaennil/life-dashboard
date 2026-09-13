@@ -927,15 +927,15 @@ func (h *AIHandler) appendCheckupJournalContext(ctx context.Context, sb *strings
 // what the user meant and where it was routed, including the misroutes.
 func (h *AIHandler) appendDictatedPhrases(ctx context.Context, sb *strings.Builder, userID string, window checkupWindow) {
 	rows, err := h.db.Query(ctx, `
-		SELECT COALESCE(payload->>'text', ''), COALESCE(payload->>'domain', ''), created_at
+		SELECT COALESCE(payload->>'text', ''), COALESCE(payload->>'domain', ''), ingested_at
 		FROM raw_events
 		WHERE user_id = $1
 			AND source = 'voice'
 			AND event_type = 'phrase'
-			AND created_at >= $2
-			AND created_at <= $3
+			AND ingested_at >= $2
+			AND ingested_at <= $3
 			AND COALESCE(payload->>'text', '') <> ''
-		ORDER BY created_at DESC
+		ORDER BY ingested_at DESC
 		LIMIT $4
 	`, userID, window.Start, window.End, checkupDictatedPhraseLimit)
 	if err != nil {
