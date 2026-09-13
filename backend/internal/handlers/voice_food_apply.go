@@ -105,7 +105,7 @@ func (h *VoiceWorkoutHandler) recordFoodEntryIDs(ctx context.Context, eventID st
 func cookedWeightWarning(entries []voiceParsedEntry) string {
 	mismatched := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Cooked && entry.RawGrams == nil && !voiceNameLooksCooked(entry.Name) {
+		if entry.Cooked && !cookYieldKnown(entry.CookForm) && !voiceNameLooksCooked(entry.Name) {
 			mismatched = append(mismatched, entry.Name)
 		}
 	}

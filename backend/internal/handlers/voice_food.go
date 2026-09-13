@@ -92,9 +92,22 @@ var voiceRawYields = map[string]float64{
 	"rice":      0.34,
 	"buckwheat": 0.45,
 	"legume":    0.4,
-	// Vegetables hold their weight through boiling, so there is nothing to convert
-	// - the entry is here to say so rather than to leave the model guessing.
+	// These hold their weight through cooking, so there is nothing to convert.
+	// They are in the table anyway: a known factor of one is what tells the
+	// warning below that the weight is fine as spoken.
 	"vegetable": 1,
+	"egg":       1,
+}
+
+// cookYieldKnown reports whether the kind of food is one the table knows what to
+// do with, including the ones it knowingly leaves alone.
+func cookYieldKnown(form string) bool {
+	_, known := voiceRawYields[normalizeCookForm(form)]
+	return known
+}
+
+func normalizeCookForm(form string) string {
+	return strings.ToLower(strings.TrimSpace(form))
 }
 
 // voiceCookedMarkers are the words that make a product a different product. The
@@ -537,7 +550,7 @@ func rawWeightOf(grams float64, entry voiceParsedEntry, candidate voiceFoodCandi
 	if !entry.Cooked || voiceNameLooksCooked(candidate.Name) {
 		return 0, false
 	}
-	factor, known := voiceRawYields[strings.ToLower(strings.TrimSpace(entry.CookForm))]
+	factor, known := voiceRawYields[normalizeCookForm(entry.CookForm)]
 	if !known || factor == 1 {
 		return 0, false
 	}

@@ -444,7 +444,7 @@ func TestValidateEntriesSkipsTheConversionItCannotMake(t *testing.T) {
 
 func TestCookedWeightWarningStaysSilentAfterAConversion(t *testing.T) {
 	converted := []voiceParsedEntry{
-		{Name: "Петелинка Куриное Филе", Cooked: true, RawGrams: kg(476)},
+		{Name: "Петелинка Куриное Филе", Cooked: true, CookForm: "meat", RawGrams: kg(476)},
 	}
 	if warning := cookedWeightWarning(converted); warning != "" {
 		t.Errorf("warned about a converted entry: %s", warning)
@@ -464,6 +464,17 @@ func TestSummarizeShowsBothWeightsAfterAConversion(t *testing.T) {
 	for _, want := range []string{"340 г готового", "476 г сырого", "476 ккал"} {
 		if !strings.Contains(summary, want) {
 			t.Errorf("summary missing %q: %s", want, summary)
+		}
+	}
+}
+
+func TestCookedWeightWarningIsQuietForFoodThatKeepsItsWeight(t *testing.T) {
+	// Boiled eggs and boiled vegetables weigh what they weighed. Warning about
+	// them would be noise on every entry that says "варёные".
+	for _, form := range []string{"egg", "vegetable"} {
+		entries := []voiceParsedEntry{{Name: "Окей Яйцо Куриное", Cooked: true, CookForm: form}}
+		if warning := cookedWeightWarning(entries); warning != "" {
+			t.Errorf("cook_form %q warned: %s", form, warning)
 		}
 	}
 }
