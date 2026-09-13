@@ -42,7 +42,7 @@ type integrationMeta struct {
 	countQuery  string
 }
 
-var knownIntegrations = []string{"strava", "hevy", "apple_health", "habitify", "todoist", "vikunja", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion", "xiaomi_scale", "ios_screentime", "zepp"}
+var knownIntegrations = []string{"strava", "hevy", "apple_health", "habitify", "todoist", "vikunja", "zenmoney", "myfitnesspal", "fatsecret", "google_calendar", "notion", "xiaomi_scale", "ios_screentime", "zepp", "home_assistant"}
 
 var personalIntegrations = map[string]bool{
 	"strava":          true,
@@ -141,6 +141,14 @@ var integrationMeta_ = map[string]integrationMeta{
 		displayName: "Xiaomi Scale S400",
 		description: "Состав тела: вес, жир, мышцы, вода, кости, импеданс",
 		countQuery:  "SELECT COUNT(*) FROM biometrics WHERE source='xiaomi_scale' AND user_id = $1",
+	},
+	// Deliberately absent from personalIntegrations: the credentials are one
+	// instance-wide token in the environment rather than something each user
+	// connects for themselves.
+	"home_assistant": {
+		displayName: "Home Assistant",
+		description: "Показания телефона: кислород в крови, дыхание, шаги из Apple Health",
+		countQuery:  "SELECT COUNT(*) FROM biometrics WHERE source='home_assistant' AND user_id = $1",
 	},
 	"zepp": {
 		displayName: "Zepp / Amazfit",
