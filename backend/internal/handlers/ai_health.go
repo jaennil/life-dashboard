@@ -105,22 +105,6 @@ func (h *AIHandler) appendHealthContextInRange(ctx context.Context, sb *strings.
 		sb.WriteString("Пульс покоя: нет данных за период\n")
 	}
 
-	var avgHRV float64
-	var hrvCount int
-	h.db.QueryRow(ctx, `
-		SELECT COALESCE(AVG(value), 0), COUNT(*)
-		FROM biometrics
-		WHERE user_id = $1
-			AND metric_type = 'hrv'
-			AND timestamp >= $2
-			AND timestamp < $3
-	`, userID, start, end).Scan(&avgHRV, &hrvCount)
-	if hrvCount > 0 {
-		sb.WriteString(fmt.Sprintf("HRV: среднее %.0f ms\n", avgHRV))
-	} else {
-		sb.WriteString("HRV: нет данных за период\n")
-	}
-
 	var activeEnergy float64
 	var activeEnergyDays int
 	h.db.QueryRow(ctx, `
@@ -158,6 +142,7 @@ func (h *AIHandler) appendHealthContextInRange(ctx context.Context, sb *strings.
 
 	h.appendSleepStages(ctx, sb, userID, start, end)
 	h.appendHeartRateDetail(ctx, sb, userID, start, end)
+	h.appendRecoveryContext(ctx, sb, userID, start, end)
 	h.appendBodyComposition(ctx, sb, userID, start, end)
 	h.appendWalkingQuality(ctx, sb, userID, start, end)
 }
