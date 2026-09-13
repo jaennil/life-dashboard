@@ -366,3 +366,18 @@ func TestFoodNameAffinityMatchesAcrossRussianEndings(t *testing.T) {
 		t.Errorf("milk scored %d for a phrase that never mentions it", affinity)
 	}
 }
+
+func TestValidateEntriesKeepsTheCookedFlag(t *testing.T) {
+	// Without this the warning about a cooked weight on a raw product can never
+	// fire: the flag is set by the model and dropped in validation.
+	entries := []voiceParsedEntry{
+		{FoodID: "6754762", ServingID: "1", Grams: kg(200), Cooked: true},
+	}
+	kept, _ := validateParsedEntries(entries, foodTestCandidates, time.Date(2026, 9, 13, 13, 0, 0, 0, time.UTC))
+	if len(kept) != 1 {
+		t.Fatalf("kept %d entries", len(kept))
+	}
+	if !kept[0].Cooked {
+		t.Error("the cooked flag was dropped")
+	}
+}

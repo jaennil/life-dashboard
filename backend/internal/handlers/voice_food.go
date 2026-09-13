@@ -477,6 +477,10 @@ func validateParsedEntries(parsed []voiceParsedEntry, candidates []voiceFoodCand
 			Units:     &value,
 			Grams:     entry.Grams,
 			Meal:      resolveMeal(entry.Meal, at),
+			// Carried over deliberately: it is what tells the person their weight
+			// of cooked food went against a raw product, and dropping it here made
+			// that warning silently unreachable.
+			Cooked: entry.Cooked,
 		})
 	}
 	return kept, rejected
