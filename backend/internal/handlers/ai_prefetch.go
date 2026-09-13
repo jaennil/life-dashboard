@@ -65,7 +65,7 @@ var aiToolSyncSources = map[aiToolName][]string{
 	aiToolNutritionOverview:    {"fatsecret"},
 	aiToolJournalOverview:      {"notion"},
 	aiToolCalendarOverview:     {"google_calendar"},
-	aiToolHealthOverview:       {"zepp", "xiaomi_scale"},
+	aiToolHealthOverview:       {"zepp", "xiaomi_scale", "home_assistant"},
 }
 
 // prefetchToolSources refreshes the providers the planned tools read from, so a

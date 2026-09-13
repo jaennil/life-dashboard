@@ -37,7 +37,7 @@ func TestEveryMappedSourceIsASyncableConnector(t *testing.T) {
 	known := map[string]bool{
 		"zenmoney": true, "todoist": true, "vikunja": true, "strava": true,
 		"hevy": true, "habitify": true, "fatsecret": true, "notion": true,
-		"google_calendar": true, "zepp": true, "xiaomi_scale": true,
+		"google_calendar": true, "zepp": true, "xiaomi_scale": true, "home_assistant": true,
 	}
 	for tool, sources := range aiToolSyncSources {
 		for _, source := range sources {

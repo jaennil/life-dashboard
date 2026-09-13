@@ -72,6 +72,7 @@ const ICONS: Record<string, string> = {
   google_calendar: '📅',
   notion: '📓',
   xiaomi_scale: '⚖️',
+  home_assistant: '🏠',
 }
 
 function fmtCount(n: number, name: string) {
