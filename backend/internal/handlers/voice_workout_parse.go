@@ -330,7 +330,7 @@ func (h *VoiceWorkoutHandler) parsePhrase(ctx context.Context, userID, text stri
 	// Both catalogues travel in the one call. Classifying first and parsing second
 	// would double the wait of someone standing at a machine, and the extra input
 	// costs a fraction of a kopeck on the parse model.
-	foods, err := h.loadFoodCandidates(ctx, userID)
+	foods, err := h.loadFoodCandidates(ctx, userID, text)
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("load food candidates")
 	}

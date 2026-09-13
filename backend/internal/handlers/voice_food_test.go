@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -268,5 +270,99 @@ func TestCookedWeightWarningStaysSilentWhenItShould(t *testing.T) {
 	// Nothing was described as cooked, so a raw product is exactly right.
 	if got := cookedWeightWarning([]voiceParsedEntry{{Name: "Петелинка Куриное Филе"}}); got != "" {
 		t.Errorf("a raw entry produced %q", got)
+	}
+}
+
+// filler stands in for the hundreds of foods the account has logged that the
+// phrase says nothing about.
+func filler(count int) []voiceFoodCandidate {
+	foods := make([]voiceFoodCandidate, 0, count)
+	for i := range count {
+		foods = append(foods, voiceFoodCandidate{
+			FoodID:    strconv.Itoa(1000 + i),
+			ServingID: "s",
+			Name:      "Творог " + strconv.Itoa(i) + "%",
+		})
+	}
+	return foods
+}
+
+func namesOf(candidates []voiceFoodCandidate) []string {
+	names := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		names = append(names, candidate.Name)
+	}
+	return names
+}
+
+func TestRankFoodCandidatesBringsTheSpokenFoodIntoTheShortlist(t *testing.T) {
+	// The real shape of the failure: the raw pasta is eaten five times and sits at
+	// the front, the boiled one twice and sits past the cut. Frequency alone sent
+	// only the raw product to the model, so "варёных макарон" could not match
+	// anything else.
+	candidates := append([]voiceFoodCandidate{
+		{FoodID: "1", ServingID: "a", Name: "Barilla Макароны"},
+	}, filler(200)...)
+	candidates = append(candidates,
+		voiceFoodCandidate{FoodID: "2", ServingID: "b", Name: "Макфа Макароны Отварные"},
+		voiceFoodCandidate{FoodID: "3", ServingID: "c", Name: "Ашан Куриная Грудка Вареная"},
+		voiceFoodCandidate{FoodID: "4", ServingID: "d", Name: "Петелинка Куриное Филе"})
+
+	shortlist := rankFoodCandidatesForPhrase("450 г варёных макарон и 340 г жареной курицы", candidates, 80)
+
+	if len(shortlist) != 80 {
+		t.Fatalf("shortlist of %d, want 80", len(shortlist))
+	}
+	for _, want := range []string{
+		"Макфа Макароны Отварные", "Ашан Куриная Грудка Вареная",
+		"Barilla Макароны", "Петелинка Куриное Филе",
+	} {
+		if !slices.Contains(namesOf(shortlist), want) {
+			t.Errorf("%q missing from the shortlist", want)
+		}
+	}
+	// The cooked ones are what the phrase asked for, so they lead.
+	leading := namesOf(shortlist[:2])
+	for _, want := range []string{"Макфа Макароны Отварные", "Ашан Куриная Грудка Вареная"} {
+		if !slices.Contains(leading, want) {
+			t.Errorf("%q is not among the first candidates: %v", want, leading)
+		}
+	}
+}
+
+func TestRankFoodCandidatesKeepsFrequencyOrderForAnUnrelatedPhrase(t *testing.T) {
+	// A workout phrase carries the food catalogue too. Nothing in it matches, and
+	// the model must still get the familiar foods, most-eaten first.
+	candidates := append([]voiceFoodCandidate{
+		{FoodID: "1", ServingID: "a", Name: "Молоко 3,2%"},
+	}, filler(200)...)
+
+	shortlist := rankFoodCandidatesForPhrase("жим лежа 5 подходов по 80 кг", candidates, 80)
+
+	if len(shortlist) != 80 || shortlist[0].Name != "Молоко 3,2%" {
+		t.Fatalf("shortlist = %v", namesOf(shortlist)[:3])
+	}
+	if shortlist[1].Name != "Творог 0%" {
+		t.Errorf("frequency order broken: %v", namesOf(shortlist)[:3])
+	}
+}
+
+func TestRankFoodCandidatesLeavesAShortListAlone(t *testing.T) {
+	candidates := []voiceFoodCandidate{{FoodID: "1", Name: "Банан"}, {FoodID: "2", Name: "Молоко 3,2%"}}
+	if got := rankFoodCandidatesForPhrase("съел банан", candidates, 80); len(got) != 2 {
+		t.Fatalf("shortlist = %v", namesOf(got))
+	}
+}
+
+func TestFoodNameAffinityMatchesAcrossRussianEndings(t *testing.T) {
+	spoken := foodMatchTokens("450 г варёных макарон и 340 г жареной курицы")
+	if affinity := foodNameAffinity(spoken, "Макфа Макароны Отварные"); affinity == 0 {
+		t.Errorf("pasta scored nothing")
+	}
+	if affinity := foodNameAffinity(spoken, "Петелинка Куриное Филе"); affinity == 0 {
+		t.Errorf("chicken scored nothing")
+	}
+	if affinity := foodNameAffinity(spoken, "Молоко 3,2%"); affinity != 0 {
+		t.Errorf("milk scored %d for a phrase that never mentions it", affinity)
 	}
 }

@@ -4,13 +4,21 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // voiceFoodCandidateLimit bounds the food shortlist offered to the model.
 const voiceFoodCandidateLimit = 80
+
+// voiceFoodCatalogueLimit bounds what is read out of the diary before the
+// shortlist is cut. The account has hundreds of foods and only eighty fit in the
+// prompt, so the cut has to be made against the phrase - reading only the eighty
+// most frequent means the words actually spoken never get a chance to be found.
+const voiceFoodCatalogueLimit = 600
 
 // Meals FatSecret accepts. A diary entry cannot be created without one.
 const (
@@ -121,10 +129,15 @@ func inferVoiceServing(description string) (float64, float64) {
 	return units, 0
 }
 
-// loadFoodCandidates builds the shortlist from the diary: every food the account
-// has logged, with the serving it was logged against and the quantity it usually
-// takes.
-func (h *VoiceWorkoutHandler) loadFoodCandidates(ctx context.Context, userID string) ([]voiceFoodCandidate, error) {
+// loadFoodCandidates builds the shortlist from the diary: the foods the account
+// has logged, with the serving they were logged against and the quantity they
+// usually take.
+//
+// The phrase decides which of them travel to the model. Frequency alone put
+// "Barilla Макароны" in the prompt and left "Макфа Макароны Отварные" out of it,
+// so a dictated "варёные макароны" could only ever match the raw product - the
+// cooked one was never on the list to choose from.
+func (h *VoiceWorkoutHandler) loadFoodCandidates(ctx context.Context, userID, phrase string) ([]voiceFoodCandidate, error) {
 	rows, err := h.db.Query(ctx, `
 		WITH logged AS (
 			SELECT i.food_id,
@@ -162,7 +175,7 @@ func (h *VoiceWorkoutHandler) loadFoodCandidates(ctx context.Context, userID str
 		WHERE logged.recency = 1
 		ORDER BY logged.times DESC, logged.food_name
 		LIMIT $2
-	`, userID, voiceFoodCandidateLimit)
+	`, userID, voiceFoodCatalogueLimit)
 	if err != nil {
 		return nil, fmt.Errorf("load food candidates: %w", err)
 	}
@@ -198,7 +211,137 @@ func (h *VoiceWorkoutHandler) loadFoodCandidates(ctx context.Context, userID str
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return preferGramCapableServings(candidates), nil
+	return rankFoodCandidatesForPhrase(phrase, preferGramCapableServings(candidates), voiceFoodCandidateLimit), nil
+}
+
+// rankFoodCandidatesForPhrase puts the foods the phrase is about at the front of
+// the shortlist and cuts it to what fits in the prompt.
+//
+// Everything that scores nothing keeps its place behind them, most-eaten first,
+// so a phrase whose words match nothing - or one that is not about food at all -
+// still leaves the model the familiar catalogue it had before.
+func rankFoodCandidatesForPhrase(phrase string, candidates []voiceFoodCandidate, limit int) []voiceFoodCandidate {
+	if limit <= 0 || len(candidates) <= limit {
+		return candidates
+	}
+
+	spoken := foodMatchTokens(phrase)
+	cookedSaid := phraseMentionsCooked(phrase)
+
+	type ranked struct {
+		candidate voiceFoodCandidate
+		score     int
+		position  int
+	}
+	scored := make([]ranked, 0, len(candidates))
+	for i, candidate := range candidates {
+		score := foodNameAffinity(spoken, candidate.Name)
+		if score > 0 && cookedSaid && voiceNameLooksCooked(candidate.Name) {
+			// "Отварные" shares no prefix with "варёных" and "жареная" shares none
+			// with "гриль", so the words that name the cooking cannot be matched
+			// like the rest. They are the whole reason the right product is a
+			// different product, so they are scored separately.
+			score += 2
+		}
+		scored = append(scored, ranked{candidate: candidate, score: score, position: i})
+	}
+
+	sort.SliceStable(scored, func(a, b int) bool {
+		if scored[a].score != scored[b].score {
+			return scored[a].score > scored[b].score
+		}
+		return scored[a].position < scored[b].position
+	})
+
+	kept := make([]voiceFoodCandidate, 0, limit)
+	for _, item := range scored[:limit] {
+		kept = append(kept, item.candidate)
+	}
+	return kept
+}
+
+// foodStopWords are the words a food phrase is made of that say nothing about
+// which product it is.
+var foodStopWords = map[string]bool{
+	"грамм": true, "грамма": true, "граммов": true, "грамов": true,
+	"штук": true, "штуки": true, "штука": true, "порция": true, "порции": true,
+	"съел": true, "съела": true, "поел": true, "ещё": true, "еще": true,
+	"было": true, "утром": true, "днем": true, "вечером": true, "сегодня": true,
+}
+
+// foodMatchTokens reduces a phrase to the words worth looking for in a product
+// name. Short words carry no product in them and would match everything.
+func foodMatchTokens(phrase string) []string {
+	fields := strings.FieldsFunc(normalizeFoodText(phrase), func(r rune) bool {
+		return !unicode.IsLetter(r)
+	})
+	tokens := make([]string, 0, len(fields))
+	seen := make(map[string]bool, len(fields))
+	for _, field := range fields {
+		if len([]rune(field)) < 4 || foodStopWords[field] || seen[field] {
+			continue
+		}
+		seen[field] = true
+		tokens = append(tokens, field)
+	}
+	return tokens
+}
+
+// foodNameAffinity scores how much of the phrase a product name accounts for.
+//
+// The match is by prefix because Russian inflects the ending and the catalogue
+// does not agree with speech about it: "курицы" has to find "Куриное", "макарон"
+// has to find "Макароны".
+func foodNameAffinity(spoken []string, name string) int {
+	if len(spoken) == 0 {
+		return 0
+	}
+	nameTokens := foodMatchTokens(name)
+	total := 0
+	for _, token := range spoken {
+		best := 0
+		for _, nameToken := range nameTokens {
+			if affinity := tokenAffinity(token, nameToken); affinity > best {
+				best = affinity
+			}
+		}
+		total += best
+	}
+	return total
+}
+
+func tokenAffinity(spoken, name string) int {
+	if spoken == name {
+		return 3
+	}
+	switch shared := commonPrefixRunes(spoken, name); {
+	case shared >= 5:
+		return 2
+	case shared >= 4:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func commonPrefixRunes(a, b string) int {
+	first, second := []rune(a), []rune(b)
+	shared := 0
+	for shared < len(first) && shared < len(second) && first[shared] == second[shared] {
+		shared++
+	}
+	return shared
+}
+
+// phraseMentionsCooked reports whether the person said the food was prepared.
+func phraseMentionsCooked(phrase string) bool {
+	return voiceNameLooksCooked(phrase)
+}
+
+// normalizeFoodText folds case and the letter that Russian writes both ways, so
+// that a dictated "варёных" and a catalogue "Вареные" are the same word.
+func normalizeFoodText(text string) string {
+	return strings.ReplaceAll(strings.ToLower(text), "ё", "е")
 }
 
 // preferGramCapableServings keeps one serving per food, choosing the one that
