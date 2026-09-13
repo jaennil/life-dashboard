@@ -321,12 +321,15 @@ func TestRankFoodCandidatesBringsTheSpokenFoodIntoTheShortlist(t *testing.T) {
 			t.Errorf("%q missing from the shortlist", want)
 		}
 	}
-	// The cooked ones are what the phrase asked for, so they lead.
-	leading := namesOf(shortlist[:2])
-	for _, want := range []string{"Макфа Макароны Отварные", "Ашан Куриная Грудка Вареная"} {
-		if !slices.Contains(leading, want) {
-			t.Errorf("%q is not among the first candidates: %v", want, leading)
-		}
+	// The raw product of a food leads its own cooked entries: it is what a spoken
+	// cooked weight gets converted into. The cooked ones stay on the list behind
+	// it, for the foods that have nothing raw behind them.
+	position := func(name string) int { return slices.Index(namesOf(shortlist), name) }
+	if position("Barilla Макароны") > position("Макфа Макароны Отварные") {
+		t.Errorf("the cooked pasta outranks the dry one: %v", namesOf(shortlist)[:4])
+	}
+	if position("Петелинка Куриное Филе") > position("Ашан Куриная Грудка Вареная") {
+		t.Errorf("the boiled chicken outranks the raw one: %v", namesOf(shortlist)[:4])
 	}
 }
 

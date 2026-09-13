@@ -281,11 +281,12 @@ func rankFoodCandidatesForPhrase(phrase string, candidates []voiceFoodCandidate,
 	for i, candidate := range candidates {
 		score := foodNameAffinity(spoken, candidate.Name)
 		if score > 0 && cookedSaid && voiceNameLooksCooked(candidate.Name) {
-			// "Отварные" shares no prefix with "варёных" and "жареная" shares none
-			// with "гриль", so the words that name the cooking cannot be matched
-			// like the rest. They are the whole reason the right product is a
-			// different product, so they are scored separately.
-			score += 2
+			// A catalogue entry that is itself cooked drops behind the raw product
+			// of the same food: the raw one carries the manufacturer's numbers and
+			// is what a cooked weight gets converted into. It stays on the list
+			// though - a ready meal has nothing raw behind it, and then it is the
+			// only thing that can be logged.
+			score = max(score-1, 1)
 		}
 		scored = append(scored, ranked{candidate: candidate, score: score, position: i})
 	}
@@ -325,6 +326,13 @@ func foodMatchTokens(phrase string) []string {
 		if len([]rune(field)) < 4 || foodStopWords[field] || seen[field] {
 			continue
 		}
+		// How the food was cooked says nothing about which product it is - the
+		// same pasta is "Отварные" in one entry and dry in another. Scoring those
+		// words would rank a stranger's cooked entry above the packaged product
+		// the weight is meant to be converted into.
+		if voiceNameLooksCooked(field) {
+			continue
+		}
 		seen[field] = true
 		tokens = append(tokens, field)
 	}
@@ -354,15 +362,18 @@ func foodNameAffinity(spoken []string, name string) int {
 	return total
 }
 
+// tokenAffinity scores one word against one word. The steps are two apart so
+// that the one-point demotion of a cooked entry can break a tie without pushing
+// it below a food the phrase never mentioned.
 func tokenAffinity(spoken, name string) int {
 	if spoken == name {
-		return 3
+		return 6
 	}
 	switch shared := commonPrefixRunes(spoken, name); {
 	case shared >= 5:
-		return 2
+		return 4
 	case shared >= 4:
-		return 1
+		return 2
 	default:
 		return 0
 	}
