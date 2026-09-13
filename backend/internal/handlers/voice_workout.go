@@ -234,7 +234,7 @@ func (h *VoiceWorkoutHandler) processText(ctx context.Context, userID, eventID s
 		var domainErr error
 		switch {
 		case interpreted.Domain == voiceDomainFood:
-			h.applyFood(ctx, userID, eventID, interpreted, &response)
+			h.applyFood(ctx, userID, eventID, text, interpreted, &response)
 		case interpreted.Domain == voiceDomainTask:
 			h.applyTask(ctx, userID, eventID, interpreted, &response)
 		case interpreted.Domain == voiceDomainQuestion:

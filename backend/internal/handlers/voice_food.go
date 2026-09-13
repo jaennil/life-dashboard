@@ -118,6 +118,22 @@ var voiceCookedMarkers = []string{
 	"приготовл", "готов", "тушен", "тушён", "гриль", "на пару", "паровые",
 }
 
+// voiceFryingMarkers are the words that mean fat went into the pan. Boiling and
+// steaming add nothing to a portion; frying does, and the raw product a fried
+// weight is converted into cannot know about it.
+var voiceFryingMarkers = []string{"жарен", "жарён", "жарк", "обжар", "фри"}
+
+// phraseMentionsFrying reports whether the person said the food was fried.
+func phraseMentionsFrying(phrase string) bool {
+	lowered := strings.ToLower(phrase)
+	for _, marker := range voiceFryingMarkers {
+		if strings.Contains(lowered, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // voiceNameLooksCooked reports whether a product name already says it is cooked.
 func voiceNameLooksCooked(name string) bool {
 	lowered := strings.ToLower(name)
