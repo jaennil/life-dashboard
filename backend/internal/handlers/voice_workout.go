@@ -391,15 +391,43 @@ func (h *VoiceWorkoutHandler) countUtterances(ctx context.Context, sessionID str
 // close in openOrResumeSession only fires when the next phrase arrives, which
 // may be days later or never, so the sweep is what actually bounds a session.
 func (h *VoiceWorkoutHandler) CloseIdleSessions(ctx context.Context) (int, error) {
-	rows, err := h.db.Exec(ctx, `
+	rows, err := h.db.Query(ctx, `
 		UPDATE voice_workout_sessions
 		SET status = 'finished', finished_at = last_utterance_at, updated_at = NOW()
 		WHERE status = 'open' AND last_utterance_at < NOW() - $1::interval
+		RETURNING id, user_id
 	`, voiceWorkoutIdleTimeout.String())
 	if err != nil {
 		return 0, err
 	}
-	return int(rows.RowsAffected()), nil
+
+	type closedSession struct{ id, userID string }
+	closed := make([]closedSession, 0)
+	for rows.Next() {
+		var session closedSession
+		if err := rows.Scan(&session.id, &session.userID); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		closed = append(closed, session)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	// Closing the session is not the point - writing the workout down is. Saying
+	// "закончить тренировку" out loud used to be the only way anything reached
+	// Hevy, and forgetting the phrase silently threw the workout away: three
+	// exercises dictated and recognised on the eleventh, and the report a week
+	// later said there had been no training at all. Silence ends the session; it
+	// does not undo it.
+	for _, session := range closed {
+		var response voiceWorkoutResponse
+		h.pushSession(ctx, session.userID, session.id, &response)
+	}
+
+	return len(closed), nil
 }
 
 // normalizeVoiceText tidies dictated text. It leans on the Screen Time
