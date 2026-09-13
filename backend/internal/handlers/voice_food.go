@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -64,6 +65,36 @@ type voiceParsedEntry struct {
 	// while the catalogue entry is usually the raw one, and the two are not the
 	// same amount: chicken loses water, pasta takes it on.
 	Cooked bool `json:"cooked"`
+	// CookForm says what kind of food it is for the purpose of that conversion.
+	// The model names the food; the factor lives here, in one table, so the same
+	// phrase converts the same way every time.
+	CookForm string `json:"cook_form,omitempty"`
+	// RawGrams is what the conversion produced and what is actually logged. Grams
+	// stays as it was spoken, so the notification can show both numbers.
+	RawGrams *float64 `json:"-"`
+}
+
+// voiceRawYields turns a weight of cooked food into the weight of the raw
+// product it was made from.
+//
+// The packaged raw product is the trustworthy end of this: its numbers come off
+// the wrapper. A "варёные макароны" entry in the catalogue is someone's hand
+// typing, and the two the account already has disagree with each other by 17%.
+// So the weight is converted and the manufacturer's product is what gets logged.
+//
+// The factors are the usual kitchen yields: meat and poultry lose about 30% of
+// their weight, fish about 20%, pasta and grains take on water two to three
+// times over.
+var voiceRawYields = map[string]float64{
+	"meat":      1.4,
+	"fish":      1.25,
+	"pasta":     0.4,
+	"rice":      0.34,
+	"buckwheat": 0.45,
+	"legume":    0.4,
+	// Vegetables hold their weight through boiling, so there is nothing to convert
+	// - the entry is here to say so rather than to leave the model guessing.
+	"vegetable": 1,
 }
 
 // voiceCookedMarkers are the words that make a product a different product. The
@@ -451,12 +482,18 @@ func validateParsedEntries(parsed []voiceParsedEntry, candidates []voiceFoodCand
 		}
 
 		units := entry.Units
+		var rawGrams *float64
 		if entry.Grams != nil {
 			if *entry.Grams <= 0 || *entry.Grams > voiceMaxFoodGrams || candidate.ServingGrams == nil || *candidate.ServingGrams <= 0 {
 				rejected = append(rejected, candidate.Name+" (не смог перевести граммы в порцию)")
 				continue
 			}
-			converted := *entry.Grams / *candidate.ServingGrams
+			grams := *entry.Grams
+			if raw, ok := rawWeightOf(grams, entry, candidate); ok {
+				grams = raw
+				rawGrams = &raw
+			}
+			converted := grams / *candidate.ServingGrams
 			units = &converted
 		}
 		if units == nil || *units <= 0 {
@@ -476,6 +513,8 @@ func validateParsedEntries(parsed []voiceParsedEntry, candidates []voiceFoodCand
 			Name:      candidate.Name,
 			Units:     &value,
 			Grams:     entry.Grams,
+			RawGrams:  rawGrams,
+			CookForm:  entry.CookForm,
 			Meal:      resolveMeal(entry.Meal, at),
 			// Carried over deliberately: it is what tells the person their weight
 			// of cooked food went against a raw product, and dropping it here made
@@ -484,6 +523,31 @@ func validateParsedEntries(parsed []voiceParsedEntry, candidates []voiceFoodCand
 		})
 	}
 	return kept, rejected
+}
+
+// rawWeightOf converts a spoken weight of cooked food into the weight of the
+// raw product the entry is written against.
+//
+// It only fires when all three things line up: the person said the food was
+// cooked, named a kind of food with a known yield, and the product chosen is the
+// raw one. A ready meal - shawarma, lasagne, a sandwich - is weighed as sold and
+// has nothing raw behind it, and a catalogue entry that already says "Отварные"
+// is cooked on both sides of the sum.
+func rawWeightOf(grams float64, entry voiceParsedEntry, candidate voiceFoodCandidate) (float64, bool) {
+	if !entry.Cooked || voiceNameLooksCooked(candidate.Name) {
+		return 0, false
+	}
+	factor, known := voiceRawYields[strings.ToLower(strings.TrimSpace(entry.CookForm))]
+	if !known || factor == 1 {
+		return 0, false
+	}
+	// Rounded to whole grams: the factor is a kitchen average, and a converted
+	// weight printed to four decimals would claim a precision it does not have.
+	converted := math.Round(grams * factor)
+	if converted <= 0 || converted > voiceMaxFoodGrams {
+		return 0, false
+	}
+	return converted, true
 }
 
 // voiceMaxFoodUnits catches a misheard quantity: fifty servings of anything is a
@@ -507,7 +571,15 @@ func summarizeFoodEntries(entries []voiceParsedEntry, candidates []voiceFoodCand
 		line := entry.Name
 		if entry.Units != nil {
 			if entry.Grams != nil {
-				line += fmt.Sprintf(": %s г", formatUnits(*entry.Grams))
+				// Both weights are shown when they differ: the one that was spoken is
+				// the only thing the person can check the entry against, and the one
+				// that was logged is the only thing that explains the calories.
+				if entry.RawGrams != nil {
+					line += fmt.Sprintf(": %s г готового = %s г сырого",
+						formatUnits(*entry.Grams), formatUnits(*entry.RawGrams))
+				} else {
+					line += fmt.Sprintf(": %s г", formatUnits(*entry.Grams))
+				}
 			} else {
 				line += fmt.Sprintf(": %s", formatUnits(*entry.Units))
 				if serving := servings[entry.FoodID+"/"+entry.ServingID]; serving != "" {

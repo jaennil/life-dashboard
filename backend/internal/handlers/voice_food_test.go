@@ -381,3 +381,89 @@ func TestValidateEntriesKeepsTheCookedFlag(t *testing.T) {
 		t.Error("the cooked flag was dropped")
 	}
 }
+
+var rawChicken = voiceFoodCandidate{
+	FoodID: "8825547", ServingID: "1", Name: "Петелинка Куриное Филе",
+	ServingDescription: "3 :custom:3s  x 100г, 300 g", ServingGrams: kg(100), CaloriesPerServing: kg(100),
+}
+
+var boiledChicken = voiceFoodCandidate{
+	FoodID: "8305446", ServingID: "2", Name: "Ашан Куриная Грудка Вареная",
+	ServingGrams: kg(100), CaloriesPerServing: kg(140),
+}
+
+func TestValidateEntriesLogsCookedWeightAsRaw(t *testing.T) {
+	// 340 г жареной курицы is 476 г of the breast that went into the pan, and the
+	// breast is the one whose numbers came off the wrapper.
+	entries := []voiceParsedEntry{
+		{FoodID: "8825547", ServingID: "1", Grams: kg(340), Cooked: true, CookForm: "meat"},
+	}
+	kept, rejected := validateParsedEntries(entries, []voiceFoodCandidate{rawChicken}, time.Date(2026, 9, 13, 21, 0, 0, 0, time.UTC))
+	if len(kept) != 1 {
+		t.Fatalf("kept %d entries, rejected %v", len(kept), rejected)
+	}
+	if kept[0].RawGrams == nil || *kept[0].RawGrams != 476 {
+		t.Fatalf("raw grams = %v, want 476", kept[0].RawGrams)
+	}
+	if *kept[0].Units != 4.76 {
+		t.Errorf("units = %v, want 4.76", *kept[0].Units)
+	}
+	// The spoken weight survives: it is what the person can check the entry by.
+	if kept[0].Grams == nil || *kept[0].Grams != 340 {
+		t.Errorf("spoken grams = %v", kept[0].Grams)
+	}
+}
+
+func TestValidateEntriesLeavesACookedProductAlone(t *testing.T) {
+	// Nothing to convert: both the weight and the product are of cooked food.
+	entries := []voiceParsedEntry{
+		{FoodID: "8305446", ServingID: "2", Grams: kg(340), Cooked: true, CookForm: "meat"},
+	}
+	kept, _ := validateParsedEntries(entries, []voiceFoodCandidate{boiledChicken}, time.Now())
+	if len(kept) != 1 || kept[0].RawGrams != nil {
+		t.Fatalf("converted a cooked product: %+v", kept)
+	}
+	if *kept[0].Units != 3.4 {
+		t.Errorf("units = %v, want 3.4", *kept[0].Units)
+	}
+}
+
+func TestValidateEntriesSkipsTheConversionItCannotMake(t *testing.T) {
+	// A ready meal weighed as sold, or a food the model could not name: the weight
+	// goes in as spoken and the warning is what covers it.
+	for _, form := range []string{"", "vegetable", "плов"} {
+		entries := []voiceParsedEntry{
+			{FoodID: "8825547", ServingID: "1", Grams: kg(340), Cooked: true, CookForm: form},
+		}
+		kept, _ := validateParsedEntries(entries, []voiceFoodCandidate{rawChicken}, time.Now())
+		if len(kept) != 1 || kept[0].RawGrams != nil {
+			t.Fatalf("cook_form %q converted to %+v", form, kept)
+		}
+	}
+}
+
+func TestCookedWeightWarningStaysSilentAfterAConversion(t *testing.T) {
+	converted := []voiceParsedEntry{
+		{Name: "Петелинка Куриное Филе", Cooked: true, RawGrams: kg(476)},
+	}
+	if warning := cookedWeightWarning(converted); warning != "" {
+		t.Errorf("warned about a converted entry: %s", warning)
+	}
+	unconverted := []voiceParsedEntry{{Name: "Петелинка Куриное Филе", Cooked: true}}
+	if warning := cookedWeightWarning(unconverted); warning == "" {
+		t.Error("no warning for a cooked weight that stayed unconverted")
+	}
+}
+
+func TestSummarizeShowsBothWeightsAfterAConversion(t *testing.T) {
+	entries := []voiceParsedEntry{
+		{FoodID: "8825547", ServingID: "1", Name: "Петелинка Куриное Филе",
+			Units: kg(4.76), Grams: kg(340), RawGrams: kg(476), Meal: mealDinner},
+	}
+	summary := summarizeFoodEntries(entries, []voiceFoodCandidate{rawChicken})
+	for _, want := range []string{"340 г готового", "476 г сырого", "476 ккал"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("summary missing %q: %s", want, summary)
+		}
+	}
+}

@@ -96,7 +96,8 @@ func (h *VoiceWorkoutHandler) recordFoodEntryIDs(ctx context.Context, eventID st
 }
 
 // cookedWeightWarning names the entries whose weight was given for cooked food
-// and stored against a product that is not cooked.
+// and stored against a product that is not cooked, and that no yield factor
+// could convert - an unfamiliar kind of food, or one the model did not name.
 //
 // The direction of the error depends on the food - meat sheds water, grains take
 // it on - so the warning says that the two weights differ rather than pretending
@@ -104,7 +105,7 @@ func (h *VoiceWorkoutHandler) recordFoodEntryIDs(ctx context.Context, eventID st
 func cookedWeightWarning(entries []voiceParsedEntry) string {
 	mismatched := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Cooked && !voiceNameLooksCooked(entry.Name) {
+		if entry.Cooked && entry.RawGrams == nil && !voiceNameLooksCooked(entry.Name) {
 			mismatched = append(mismatched, entry.Name)
 		}
 	}
