@@ -52,12 +52,16 @@ spec:
             # a second reason: it throttles per account and a stable source
             # address is worth more than a rotating one.
             #
-            # Measured from the node against the real API paths, 14.09.2026:
-            # api.notion.com and api.telegram.org do not connect at all without
-            # the proxy, and only they need it. Everything else answers its own
-            # codes - todoist 200 with the real token, calendar 401, zepp 401,
-            # xiaomi sts 200 - and every hour on the proxy is an hour of sharing
-            # xray's health: one bad afternoon stalled six connectors at once.
+            # Measured from the node against the real API paths, 14.09.2026.
+            # Two hosts genuinely need the proxy, for different reasons:
+            # api.telegram.org never connects at all - fifteen seconds and a
+            # timeout, blocked on the way - while api.notion.com connects in
+            # 0.18s and answers 403 with a Cloudflare page even to the real
+            # token, because Notion does not serve this country. Everything else
+            # answers its own codes directly - todoist 200 with the real token,
+            # calendar 401, zepp 401, xiaomi sts 200 - and every hour spent on
+            # the proxy is an hour of sharing xray's health: one bad afternoon
+            # stalled six connectors at once.
             #
             # dubrovskih.ru is the home domain - vikunja, home assistant and this
             # app itself all answer from this node. The private ranges above do
