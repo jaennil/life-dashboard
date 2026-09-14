@@ -105,13 +105,20 @@ spec:
             # prompt took 2.6s without it and 10.2s with it.
             - name: AI_REASONING_EFFORT
               value: high
-            # Turning a dictated phrase into exercises is extraction, not
-            # reasoning. Measured on the same phrase against the live API: the
-            # checkup model spent 43s and 2.02 RUB, the fast one 0.14 RUB with no
-            # thinking tokens and the same answer. Waiting 43 seconds at a machine
-            # is what makes the difference matter.
+            # Extraction still needs a model that can read a list. The fast one
+            # was cheaper - 0.14 RUB against 2.02 - and gave the same answer on a
+            # workout, but on food it could not: asked for "300 г варёной курицы"
+            # against a shortlist whose first six entries were all plain chicken,
+            # it answered "Милти Филе Индейки В Беконе С Жареным Картофелем" once
+            # and "ВкусВилл Молоко 3,2%" the next time, and in production simply
+            # refused. The same prompt on this model picks the chicken fillet and
+            # fills in cooked and cook_form, in seconds.
+            #
+            # The wait no longer costs what it did either: phrases go through a
+            # queue and the answer arrives as a notification, so nobody stands at
+            # a machine watching it.
             - name: AI_PARSE_MODEL
-              value: deepseek-v4-flash
+              value: deepseek-v4-pro
             - name: AI_PARSE_REASONING_EFFORT
               value: low
 
