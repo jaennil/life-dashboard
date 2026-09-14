@@ -69,11 +69,15 @@ spec:
             description: Section {{ $labels.section }} of {{ $labels.source }} returned data that could not be stored {{ $value }} times in the last hour.
         # The failure that actually costs data is silence: a source that keeps
         # trying and never succeeds. That never fired an alert before.
+        # Measured against the time of the last success, not against a count of
+        # runs. A counter lives in the process: after a deploy it appears already
+        # at one, Prometheus never saw the zero before it, and increase() reads
+        # zero over any window - so six deploys in a day raised five alerts about
+        # connectors that were syncing every hour. The timestamp comes from the
+        # database and outlives the pod.
         - alert: LifeDashboardSyncStalled
           expr: |
-            sum by (source) (increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",status="success"}[6h])) == 0
-            and
-            sum by (source) (increase(life_dashboard_sync_runs_total{namespace="life-dashboard",job="backend",trigger!="prefetch"}[6h])) > 0
+            time() - life_dashboard_sync_last_success_timestamp_seconds{namespace="life-dashboard",job="backend"} > 6 * 3600
           for: 15m
           labels:
             severity: warning

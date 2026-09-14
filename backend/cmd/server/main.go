@@ -121,6 +121,10 @@ func main() {
 	defer pool.Close()
 	log.Info().Msg("database connected")
 
+	// Read from the database on scrape, so a restart does not look like a stalled
+	// connector to anything watching.
+	observability.RegisterSyncFreshness(pool, log.Logger)
+
 	migrateURL := "pgx5://" + cfg.Database.URL[len("postgres://"):]
 	if err := retryStartup(ctx, startupBudget, startupInterval, func() error {
 		m, err := migrate.New("file://migrations", migrateURL)
