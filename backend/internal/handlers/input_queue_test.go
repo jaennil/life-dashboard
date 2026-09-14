@@ -72,3 +72,27 @@ func TestInputJobRetryDelayStaysInsideTheTable(t *testing.T) {
 		}
 	}
 }
+
+func TestStallRetriesOutlastAnOutage(t *testing.T) {
+	// The AI host was unreachable from this network for forty minutes. Two
+	// attempts six minutes apart threw away a dictated meal; the ladder now
+	// reaches past the outage.
+	var total time.Duration
+	for attempt := 1; attempt <= inputJobMaxStallAttempts-1; attempt++ {
+		total += inputJobRetryDelay(attempt, errAIUnavailable)
+	}
+	if total < time.Hour {
+		t.Errorf("retries give up after %s, which is shorter than an outage", total)
+	}
+}
+
+func TestUpstreamErrorsGiveUpEarlierThanStalls(t *testing.T) {
+	// A provider that answers "no" will answer "no" again; a provider that cannot
+	// be reached is a network that comes back.
+	if inputJobMaxAttempts(errAIUpstream) >= inputJobMaxAttempts(errAIUnavailable) {
+		t.Error("an upstream error is retried as stubbornly as a stall")
+	}
+	if inputJobMaxAttempts(fmt.Errorf("wrapped: %w", errAIUpstream)) != inputJobMaxUpstreamAttempts {
+		t.Error("a wrapped upstream error lost its class")
+	}
+}

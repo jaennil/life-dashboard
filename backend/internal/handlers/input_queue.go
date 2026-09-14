@@ -14,7 +14,13 @@ import (
 )
 
 const (
-	inputJobMaxAttempts = 3
+	// How many times a phrase is worth trying. A provider that answers with an
+	// error is unlikely to change its mind, so those give up early; a provider
+	// that cannot be reached is a network that comes back, and the phrase is
+	// worth holding on to - a dictated meal dropped after seven minutes is a meal
+	// the person has to remember and type by hand.
+	inputJobMaxUpstreamAttempts = 3
+	inputJobMaxStallAttempts    = 5
 	inputJobLease       = 7 * time.Minute
 	inputJobPoll        = 2 * time.Second
 	// The extraction model normally answers in seconds. Waiting five minutes for
@@ -33,8 +39,19 @@ const (
 // is retried while the phone is still in hand.
 var (
 	inputJobUpstreamBackoff = [...]time.Duration{time.Hour, 3 * time.Hour}
-	inputJobStallBackoff    = [...]time.Duration{time.Minute, 5 * time.Minute}
+	// The tail is long enough to sit out an outage: the AI host was unreachable
+	// from this network for forty minutes, and two attempts six minutes apart
+	// threw the phrase away while it was still true.
+	inputJobStallBackoff = [...]time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, 40 * time.Minute}
 )
+
+// inputJobMaxAttempts is how many tries this failure deserves.
+func inputJobMaxAttempts(err error) int {
+	if errors.Is(err, errAIUpstream) {
+		return inputJobMaxUpstreamAttempts
+	}
+	return inputJobMaxStallAttempts
+}
 
 func inputJobRetryDelay(attempts int, err error) time.Duration {
 	table := inputJobStallBackoff[:]
@@ -220,7 +237,7 @@ func (h *VoiceWorkoutHandler) processNextInputJob(workerCtx context.Context) boo
 	// errVoiceAnswerFailed.
 	retryable := (response.ParseError != "" || errors.Is(processErr, context.DeadlineExceeded)) &&
 		!errors.Is(processErr, errVoiceAnswerFailed)
-	if retryable && job.Attempts < inputJobMaxAttempts {
+	if retryable && job.Attempts < inputJobMaxAttempts(processErr) {
 		delay := inputJobRetryDelay(job.Attempts, processErr)
 		h.logger.Info().Str("job_id", job.ID).Dur("retry_in", delay).Err(processErr).Msg("input job will retry")
 		if err := h.retryInputJob(workerCtx, job.ID, processErr.Error(), delay); err != nil {
@@ -352,6 +369,12 @@ func (h *VoiceWorkoutHandler) claimInputJob(ctx context.Context) (inputJob, erro
 				WHERE earlier.user_id = j.user_id
 				  AND (earlier.created_at, earlier.id) < (j.created_at, j.id)
 				  AND earlier.status IN ('queued', 'processing')
+				  -- Order is kept only among phrases said close together, which is
+				  -- what the guard is for: sets dictated between two exercises must
+				  -- not swap places. An older phrase still stuck in retries is no
+				  -- longer part of that flow, and letting it hold the queue meant one
+				  -- unreachable provider froze every later phrase for hours.
+				  AND earlier.created_at > NOW() - INTERVAL '10 minutes'
 			  )
 			ORDER BY j.created_at, j.id
 			FOR UPDATE SKIP LOCKED
