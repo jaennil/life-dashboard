@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Power, ShieldCheck, ShieldOff, ExternalLink } from 'lucide-react'
 import { PageHeader } from '@/components/PageHeader'
@@ -906,6 +906,9 @@ function CheckupDeliverySection() {
   const [linking, setLinking] = useState(false)
   const [error, setError] = useState('')
   const [savedAt, setSavedAt] = useState('')
+  const saveTimerRef = useRef<number | undefined>(undefined)
+  const pendingRef = useRef<CheckupSchedule[] | null>(null)
+  const revisionRef = useRef(0)
 
   const loadStatus = useCallback(async () => {
     const next = await api.getTelegramStatus()
@@ -926,6 +929,17 @@ function CheckupDeliverySection() {
       })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(saveTimerRef.current)
+      const unsaved = pendingRef.current
+      if (unsaved) {
+        pendingRef.current = null
+        void api.saveCheckupSchedules(unsaved).catch(() => {})
+      }
+    }
   }, [])
 
   async function handleLink() {
@@ -961,22 +975,39 @@ function CheckupDeliverySection() {
     }
   }
 
-  function patchSchedule(period: CheckupSchedulePeriod, patch: Partial<CheckupSchedule>) {
-    setSchedules(prev => prev.map(item => (item.period === period ? { ...item, ...patch } : item)))
-    setSavedAt('')
-  }
-
-  async function handleSave() {
+  // The schedule saves itself. There used to be a button, and a report arrived at
+  // the old time because the new one was typed and never submitted - which is the
+  // whole failure mode of a settings form whose changes look applied on screen.
+  const saveSchedules = useCallback(async (next: CheckupSchedule[], revision: number) => {
     setSaving(true)
     setError('')
     try {
-      setSchedules(await api.saveCheckupSchedules(schedules))
+      const saved = await api.saveCheckupSchedules(next)
+      // Only adopt the server's copy while it is still the latest word: a change
+      // made during the request must not be overwritten by its response.
+      if (revisionRef.current === revision) setSchedules(saved)
       setSavedAt(new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сохранить расписание.')
     } finally {
-      setSaving(false)
+      if (revisionRef.current === revision) setSaving(false)
     }
+  }, [])
+
+  function patchSchedule(period: CheckupSchedulePeriod, patch: Partial<CheckupSchedule>) {
+    const next = schedules.map(item => (item.period === period ? { ...item, ...patch } : item))
+    setSchedules(next)
+    setSavedAt('')
+
+    // Typing a time walks through intermediate values - 2, 23, 23:5 - and each
+    // one would be its own request. The pause is what turns them into one save.
+    const revision = ++revisionRef.current
+    window.clearTimeout(saveTimerRef.current)
+    pendingRef.current = next
+    saveTimerRef.current = window.setTimeout(() => {
+      pendingRef.current = null
+      void saveSchedules(next, revision)
+    }, 600)
   }
 
   return (
@@ -1078,15 +1109,13 @@ function CheckupDeliverySection() {
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving || schedules.length === 0}
-              className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
-            >
-              {saving ? 'Сохраняю...' : 'Сохранить расписание'}
-            </button>
-            {savedAt ? <span className="text-xs text-muted-foreground">Сохранено в {savedAt}</span> : null}
+            {saving ? (
+              <span className="text-xs text-muted-foreground">Сохраняю...</span>
+            ) : savedAt ? (
+              <span className="text-xs text-muted-foreground">Сохранено в {savedAt}</span>
+            ) : (
+              <span className="text-xs text-muted-foreground">Изменения сохраняются сами</span>
+            )}
             {!status?.linked && schedules.some(schedule => schedule.enabled) ? (
               <span className="text-xs text-amber-300">Чат не привязан - отчёты будут только в приложении.</span>
             ) : null}
