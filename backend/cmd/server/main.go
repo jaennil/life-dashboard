@@ -121,9 +121,7 @@ func main() {
 	defer pool.Close()
 	log.Info().Msg("database connected")
 
-	// Read from the database on scrape, so a restart does not look like a stalled
-	// connector to anything watching.
-	observability.RegisterSyncFreshness(pool, log.Logger)
+
 
 	migrateURL := "pgx5://" + cfg.Database.URL[len("postgres://"):]
 	if err := retryStartup(ctx, startupBudget, startupInterval, func() error {
@@ -279,6 +277,15 @@ func main() {
 	// refreshes providers through it before answering a question.
 	syncHandler := handlers.NewSync(pool, activeConnectors, log.Logger)
 	aiHandler.UseSyncer(syncHandler)
+
+	// Published from the database at scrape time, so a restart cannot look like a
+	// stalled connector - and labelled by whether this process is the one doing
+	// the fetching, so a quiet phone cannot either.
+	polledSources := make([]string, 0, len(activeConnectors))
+	for _, conn := range activeConnectors {
+		polledSources = append(polledSources, conn.Name())
+	}
+	observability.RegisterSyncFreshness(pool, polledSources, log.Logger)
 
 	sched := scheduler.New(log.Logger)
 	for index, conn := range activeConnectors {

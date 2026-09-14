@@ -22,19 +22,31 @@ import (
 // metric is built from it rather than from anything held in memory.
 type syncFreshnessCollector struct {
 	db     *pgxpool.Pool
+	polled map[string]bool
 	logger zerolog.Logger
 	desc   *prometheus.Desc
 }
 
 // RegisterSyncFreshness publishes life_dashboard_sync_last_success_timestamp_seconds.
-func RegisterSyncFreshness(db *pgxpool.Pool, logger zerolog.Logger) {
+//
+// polled lists the sources this process goes out and fetches on a timer. The
+// rest arrive when the phone decides to send them - location, screen time, the
+// health export - and for those a long silence is a quiet evening, not a
+// failure. The mode label is what lets an alert tell the two apart instead of
+// carrying a list of names that would rot.
+func RegisterSyncFreshness(db *pgxpool.Pool, polled []string, logger zerolog.Logger) {
+	set := make(map[string]bool, len(polled))
+	for _, source := range polled {
+		set[source] = true
+	}
 	collector := &syncFreshnessCollector{
 		db:     db,
+		polled: set,
 		logger: logger,
 		desc: prometheus.NewDesc(
 			"life_dashboard_sync_last_success_timestamp_seconds",
 			"Unix time of the last successful sync of a source, across users.",
-			[]string{"source"},
+			[]string{"source", "mode"},
 			nil,
 		),
 	}
@@ -70,7 +82,11 @@ func (c *syncFreshnessCollector) Collect(ch chan<- prometheus.Metric) {
 			c.logger.Warn().Err(err).Msg("scan sync freshness")
 			return
 		}
-		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, epoch, source)
+		mode := "pushed"
+		if c.polled[source] {
+			mode = "polled"
+		}
+		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, epoch, source, mode)
 	}
 	if err := rows.Err(); err != nil {
 		c.logger.Warn().Err(err).Msg("read sync freshness")

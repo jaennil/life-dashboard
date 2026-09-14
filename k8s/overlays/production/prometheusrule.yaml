@@ -75,9 +75,13 @@ spec:
         # zero over any window - so six deploys in a day raised five alerts about
         # connectors that were syncing every hour. The timestamp comes from the
         # database and outlives the pod.
+        #
+        # Only the sources this app fetches itself. Location, screen time and the
+        # health export arrive when the phone sends them, and six quiet hours
+        # there is an evening at home, not a broken connector.
         - alert: LifeDashboardSyncStalled
           expr: |
-            time() - life_dashboard_sync_last_success_timestamp_seconds{namespace="life-dashboard",job="backend"} > 6 * 3600
+            time() - life_dashboard_sync_last_success_timestamp_seconds{namespace="life-dashboard",job="backend",mode="polled"} > 6 * 3600
           for: 15m
           labels:
             severity: warning
