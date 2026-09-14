@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSplitTelegramMessageKeepsShortReportsWhole(t *testing.T) {
@@ -145,5 +148,31 @@ func TestIsTelegramParseError(t *testing.T) {
 		if isTelegramParseError(err) {
 			t.Fatalf("unexpectedly treated %v as a parse failure", err)
 		}
+	}
+}
+
+func TestTelegramErrorNeverCarriesTheToken(t *testing.T) {
+	// The token sits in the path of every Telegram URL, so a plain transport
+	// error prints it. It reached the log store this way, six times in a morning,
+	// from nothing worse than a timeout.
+	const token = "8000000000:AAHsecretsecretsecretsecretsecretsec"
+
+	client := &telegramClient{
+		// A port nothing listens on: the request fails inside the transport, which
+		// is the path that used to print the URL.
+		baseURL: "http://127.0.0.1:1",
+		token:   token,
+		http:    &http.Client{Timeout: 2 * time.Second},
+	}
+
+	err := client.call(context.Background(), "getUpdates", map[string]any{"timeout": 1}, nil)
+	if err == nil {
+		t.Fatal("expected the call to fail")
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Errorf("the token is in the error: %s", err)
+	}
+	if !strings.Contains(err.Error(), "getUpdates") {
+		t.Errorf("the error no longer says what failed: %s", err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -531,6 +532,20 @@ func formatTelegramText(text string, asHTML bool) string {
 	return body
 }
 
+// telegramTransportError strips the request URL out of a network failure.
+//
+// The bot token lives in the path of every Telegram URL, and url.Error prints
+// the URL it failed on. So "telegram poll failed" carried the whole token into
+// the log line, and from there into the log store - six times in one morning,
+// from nothing worse than a timeout reaching api.telegram.org.
+func telegramTransportError(method string, err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return fmt.Errorf("telegram %s request failed: %w", method, urlErr.Err)
+	}
+	return fmt.Errorf("telegram %s request failed: %w", method, err)
+}
+
 func (c *telegramClient) call(ctx context.Context, method string, payload map[string]any, out any) error {
 	var body io.Reader
 	if payload != nil {
@@ -544,7 +559,7 @@ func (c *telegramClient) call(ctx context.Context, method string, payload map[st
 	endpoint := fmt.Sprintf("%s/bot%s/%s", c.baseURL, c.token, method)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
-		return err
+		return telegramTransportError(method, err)
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -552,7 +567,7 @@ func (c *telegramClient) call(ctx context.Context, method string, payload map[st
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return telegramTransportError(method, err)
 	}
 	defer resp.Body.Close()
 
