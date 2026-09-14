@@ -354,6 +354,19 @@ func main() {
 	}); err != nil {
 		log.Fatal().Err(err).Msg("failed to register checkup schedule job")
 	}
+	// Every quarter of an hour rather than on the deadline: the check is cheap,
+	// and a reminder that fires within fifteen minutes of the hour is on time
+	// while one that waits for the next hour is not.
+	mealReminder := handlers.NewMealReminder(pool, pushOptions, telegramHandler, log.Logger)
+	mealReminder.UseSyncer(syncHandler)
+	if err := sched.AddJob("0 */15 * * * *", "meal_reminders", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		mealReminder.Run(ctx)
+	}); err != nil {
+		log.Fatal().Err(err).Msg("failed to register meal reminder job")
+	}
+
 	if err := sched.AddJob("0 */10 * * * *", "voice_workout_idle_close", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
