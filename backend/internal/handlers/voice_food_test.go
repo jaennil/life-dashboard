@@ -481,3 +481,25 @@ func TestCookedWeightWarningIsQuietForFoodThatKeepsItsWeight(t *testing.T) {
 		}
 	}
 }
+
+func TestShortlistPrefersTheProductOverTheDishMadeOfIt(t *testing.T) {
+	// "300 г варёной курицы" put sandwiches at the top and the chicken itself at
+	// position thirty, so the model said it could not match anything. The word
+	// "курицей" sits inside a sandwich exactly as well as inside a fillet; what
+	// tells them apart is how much of the name the phrase leaves unsaid.
+	candidates := append([]voiceFoodCandidate{
+		{FoodID: "1", ServingID: "a", Name: "White Fox Пан с Курицей и Беконом"},
+		{FoodID: "2", ServingID: "b", Name: "ВкусВилл Сендвич Ролл с Курицей и Соусом Дзадзики"},
+		{FoodID: "3", ServingID: "c", Name: "Петелинка Куриное Филе"},
+	}, filler(200)...)
+
+	shortlist := rankFoodCandidatesForPhrase("300 г варёной курицы", candidates, 80)
+
+	if shortlist[0].Name != "Петелинка Куриное Филе" {
+		t.Errorf("shortlist starts with %q", shortlist[0].Name)
+	}
+	// The dishes stay on the list - a person does eat that sandwich - just behind.
+	if !slices.Contains(namesOf(shortlist), "White Fox Пан с Курицей и Беконом") {
+		t.Error("the dish fell off the shortlist entirely")
+	}
+}

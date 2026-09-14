@@ -286,7 +286,7 @@ func rankFoodCandidatesForPhrase(phrase string, candidates []voiceFoodCandidate,
 			// is what a cooked weight gets converted into. It stays on the list
 			// though - a ready meal has nothing raw behind it, and then it is the
 			// only thing that can be logged.
-			score = max(score-1, 1)
+			score = max(score-20, 1)
 		}
 		scored = append(scored, ranked{candidate: candidate, score: score, position: i})
 	}
@@ -339,16 +339,28 @@ func foodMatchTokens(phrase string) []string {
 	return tokens
 }
 
-// foodNameAffinity scores how much of the phrase a product name accounts for.
+// foodNameAffinity scores how much of the phrase a product name accounts for,
+// against how much of the name the phrase leaves unexplained.
 //
 // The match is by prefix because Russian inflects the ending and the catalogue
 // does not agree with speech about it: "курицы" has to find "Куриное", "макарон"
 // has to find "Макароны".
+//
+// The division is what separates a product from a dish that contains it. Said
+// plainly, "варёной курицы" matches the word "курицей" inside "ВкусВилл Сендвич
+// Ролл с Курицей и Соусом Дзадзики" exactly as well as inside "Петелинка Куриное
+// Филе" - and the sandwiches, being more frequent, filled the shortlist while the
+// chicken sat at position thirty. The sandwich is five words the person never
+// said; the fillet is two. Weighing the match against the length of the name is
+// what puts the plain product first.
 func foodNameAffinity(spoken []string, name string) int {
 	if len(spoken) == 0 {
 		return 0
 	}
 	nameTokens := foodMatchTokens(name)
+	if len(nameTokens) == 0 {
+		return 0
+	}
 	total := 0
 	for _, token := range spoken {
 		best := 0
@@ -359,21 +371,47 @@ func foodNameAffinity(spoken []string, name string) int {
 		}
 		total += best
 	}
-	return total
+	if total == 0 {
+		return 0
+	}
+	return total * 100 / foodNameWeight(name)
+}
+
+// foodNameWeight is how much name there is to explain, counting the little words
+// the matcher itself ignores.
+//
+// Those little words are what a dish is made of: "Пан с Курицей и Беконом" is a
+// sandwich precisely because of the "с" and the "и". Matching cannot use them -
+// nobody dictates prepositions - but counting them is what keeps a dish from
+// outranking the plain product on a single shared word.
+func foodNameWeight(name string) int {
+	words := strings.FieldsFunc(normalizeFoodText(name), func(r rune) bool {
+		return !unicode.IsLetter(r)
+	})
+	if len(words) == 0 {
+		return 1
+	}
+	return len(words)
 }
 
 // tokenAffinity scores one word against one word. The steps are two apart so
 // that the one-point demotion of a cooked entry can break a tie without pushing
 // it below a food the phrase never mentioned.
+// tokenAffinity scores one word against one word.
+//
+// The steps are close together on purpose. "Курицы" against "Курицей" shares
+// five letters and against "Куриное" only four, but both are the same bird, and
+// a wide gap between those two would let an accident of grammar decide which
+// product wins.
 func tokenAffinity(spoken, name string) int {
 	if spoken == name {
 		return 6
 	}
 	switch shared := commonPrefixRunes(spoken, name); {
 	case shared >= 5:
-		return 4
+		return 5
 	case shared >= 4:
-		return 2
+		return 4
 	default:
 		return 0
 	}
