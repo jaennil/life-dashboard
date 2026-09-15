@@ -61,13 +61,20 @@ func (c *syncFreshnessCollector) Collect(ch chan<- prometheus.Metric) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// The newest success across users. One account's abandoned row must not make
-	// a source look stale for the account that uses it.
+	// The newest success across users, and only users the scheduler still syncs.
+	//
+	// It stops after thirty days of no activity, so an abandoned account keeps a
+	// row that says "enabled" and a last sync from four months ago. Counting it
+	// raised an alert about a calendar nobody is waiting for while the calendar
+	// that is actually used had been switched off by hand an hour earlier.
 	rows, err := c.db.Query(ctx, `
-		SELECT source, EXTRACT(EPOCH FROM MAX(last_synced_at))
-		FROM sync_state
-		WHERE enabled = TRUE AND last_synced_at IS NOT NULL
-		GROUP BY source
+		SELECT s.source, EXTRACT(EPOCH FROM MAX(s.last_synced_at))
+		FROM sync_state s
+		JOIN users u ON u.id = s.user_id
+		WHERE s.enabled = TRUE
+		  AND s.last_synced_at IS NOT NULL
+		  AND u.last_active_at > NOW() - INTERVAL '30 days'
+		GROUP BY s.source
 	`)
 	if err != nil {
 		c.logger.Warn().Err(err).Msg("collect sync freshness")
