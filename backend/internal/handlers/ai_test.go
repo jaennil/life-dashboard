@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -544,5 +546,40 @@ func TestNewAITrimsBaseURLSlash(t *testing.T) {
 	h := NewAI(nil, AIOptions{BaseURL: "http://example.test:8000/"}, nil, nil, WebPushOptions{}, zerolog.Nop())
 	if h.opts.BaseURL != "http://example.test:8000" {
 		t.Fatalf("base url = %q", h.opts.BaseURL)
+	}
+}
+
+func TestUpstreamRetriesAFailedConnection(t *testing.T) {
+	// The provider never answered, so nothing can be duplicated by trying again -
+	// and on this network the second connection is usually the one that works.
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&attempts, 1) == 1 {
+			// Kill the connection the way a stalled handshake does: no response.
+			hijacked, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = hijacked.Close()
+			}
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "сколько я съел") {
+			t.Errorf("the retry lost the request body: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ответ"}}]}`))
+	}))
+	defer server.Close()
+
+	handler := &AIHandler{logger: zerolog.Nop(), opts: AIOptions{BaseURL: server.URL, Model: "test"}}
+	answer, err := handler.complete(context.Background(), "test", []ChatMessage{{Role: "user", Content: "сколько я съел"}})
+	if err != nil {
+		t.Fatalf("the call failed despite a working second attempt: %v", err)
+	}
+	if answer != "ответ" {
+		t.Errorf("answer = %q", answer)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 2 {
+		t.Errorf("attempts = %d, want 2", got)
 	}
 }

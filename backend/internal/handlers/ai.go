@@ -189,7 +189,16 @@ type aiProgressUpdate struct {
 }
 
 const (
-	aiUpstreamDialTimeout     = 5 * time.Second
+	aiUpstreamDialTimeout = 5 * time.Second
+	// The handshake gets longer than the dial because that is where this network
+	// stalls. Measured from the node, twenty handshakes in a row finished inside
+	// a fifth of a second, yet requests from the pod kept dying on "TLS handshake
+	// timeout" - the slow ones are rare and long, and five seconds turned a
+	// hiccup into a lost phrase.
+	aiUpstreamTLSTimeout = 20 * time.Second
+	// aiUpstreamRetryPause separates the two attempts: a stalled handshake leaves
+	// a connection nobody can use, and the pause lets the transport drop it.
+	aiUpstreamRetryPause      = time.Second
 	aiUpstreamDefaultTimeout  = 10 * time.Minute
 	aiUpstreamResponseLogSize = 512
 	aiJournalDefaultLimit     = 300
@@ -465,6 +474,37 @@ func buildAISystemPromptWithSections(now time.Time, dataContext string, sectionN
 %s`, strings.Join(sectionNames, ", "), formatAITimestampLocal(now, "02.01.2006 15:04"), dataContext)
 }
 
+// doUpstream sends the request and gives a failed connection one more go.
+//
+// Nothing has been read from the provider when the transport fails, so a repeat
+// cannot duplicate an answer - and the failure it repeats after is the one this
+// network produces: a handshake that stalls while the next one, on a fresh
+// connection, completes in a fifth of a second. Without the repeat every stall
+// costs a dictated phrase a minute in the queue, and sometimes the phrase.
+func (h *AIHandler) doUpstream(client *http.Client, req *http.Request, body []byte) (*http.Response, error) {
+	resp, err := client.Do(req)
+	if err == nil {
+		return resp, nil
+	}
+	if req.Context().Err() != nil {
+		// The caller gave up, or the process is stopping. A second attempt would
+		// fail the same way and only delay the shutdown.
+		return nil, err
+	}
+
+	h.logger.Warn().Err(err).Msg("ai upstream retry")
+	select {
+	case <-req.Context().Done():
+		return nil, err
+	case <-time.After(aiUpstreamRetryPause):
+	}
+
+	retry := req.Clone(req.Context())
+	retry.Body = io.NopCloser(bytes.NewReader(body))
+	retry.ContentLength = int64(len(body))
+	return client.Do(retry)
+}
+
 func (h *AIHandler) complete(ctx context.Context, operation string, messages []ChatMessage) (_ string, err error) {
 	start := time.Now()
 	defer func() {
@@ -498,12 +538,12 @@ func (h *AIHandler) complete(ctx context.Context, operation string, messages []C
 				Timeout:   aiUpstreamDialTimeout,
 				KeepAlive: 30 * time.Second,
 			}).DialContext,
-			TLSHandshakeTimeout:   aiUpstreamDialTimeout,
+			TLSHandshakeTimeout:   aiUpstreamTLSTimeout,
 			ResponseHeaderTimeout: h.upstreamTimeout(),
 		},
 	}
 
-	resp, err := client.Do(apiReq)
+	resp, err := h.doUpstream(client, apiReq, body)
 	if err != nil {
 		h.shutdownAware(err).Err(err).Msg("ai api request")
 		return "", errAIUnavailable
@@ -583,12 +623,12 @@ func (h *AIHandler) completeStream(ctx context.Context, operation string, messag
 				Timeout:   aiUpstreamDialTimeout,
 				KeepAlive: 30 * time.Second,
 			}).DialContext,
-			TLSHandshakeTimeout:   aiUpstreamDialTimeout,
+			TLSHandshakeTimeout:   aiUpstreamTLSTimeout,
 			ResponseHeaderTimeout: h.upstreamTimeout(),
 		},
 	}
 
-	resp, err := client.Do(apiReq)
+	resp, err := h.doUpstream(client, apiReq, body)
 	if err != nil {
 		h.shutdownAware(err).Err(err).Msg("ai stream request")
 		return "", errAIUnavailable
