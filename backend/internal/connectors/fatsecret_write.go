@@ -3,9 +3,11 @@ package connectors
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -124,6 +126,20 @@ func (c *FatSecretConnector) DeleteFoodEntry(ctx context.Context, userID, entryI
 
 // callAPI signs and sends one request, and treats the error document FatSecret
 // returns with a 200 as the error it is.
+// fatSecretTransportError drops the request URL out of a network failure.
+//
+// Every FatSecret URL is signed in the query string, so it carries the consumer
+// key, the user's access token and the signature. url.Error prints the URL it
+// failed on, and one timeout on food_entry.create put all three into the job
+// result, the notification on the phone and the log store.
+func fatSecretTransportError(method string, err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return fmt.Errorf("fatsecret %s request failed: %w", method, urlErr.Err)
+	}
+	return fmt.Errorf("fatsecret %s request failed: %w", method, err)
+}
+
 func (c *FatSecretConnector) callAPI(ctx context.Context, userID string, extra map[string]string) ([]byte, error) {
 	token, secret, err := c.getStoredTokens(ctx, userID)
 	if err != nil {
@@ -144,7 +160,7 @@ func (c *FatSecretConnector) callAPI(ctx context.Context, userID string, extra m
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fatSecretTransportError(extra["method"], err)
 	}
 	defer resp.Body.Close()
 

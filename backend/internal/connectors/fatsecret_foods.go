@@ -191,7 +191,7 @@ func (c *FatSecretConnector) fetchFoodHistory(ctx context.Context, token, secret
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fatSecretTransportError("foods.get_favorites", err)
 	}
 	defer resp.Body.Close()
 

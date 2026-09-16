@@ -160,7 +160,7 @@ func (c *FatSecretConnector) GetRequestToken(ctx context.Context) (string, strin
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", "", fmt.Errorf("request token: %w", err)
+		return "", "", fatSecretTransportError("oauth request_token", err)
 	}
 	defer resp.Body.Close()
 
@@ -212,7 +212,7 @@ func (c *FatSecretConnector) ExchangeToken(ctx context.Context, requestToken, ve
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("access token: %w", err)
+		return fatSecretTransportError("oauth access_token", err)
 	}
 	defer resp.Body.Close()
 
@@ -503,7 +503,7 @@ func (c *FatSecretConnector) syncProfile(ctx context.Context, userID, token, sec
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("profile request: %w", err)
+		return fatSecretTransportError("profile.get", err)
 	}
 	defer resp.Body.Close()
 
@@ -551,7 +551,7 @@ func (c *FatSecretConnector) syncDay(ctx context.Context, userID, token, secret 
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("api request: %w", err)
+		return fatSecretTransportError("food_entries.get", err)
 	}
 	defer resp.Body.Close()
 

@@ -2,6 +2,8 @@ package connectors
 
 import (
 	"encoding/json"
+	"errors"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -62,6 +64,27 @@ func TestOAuth1EscapeNeverProducesAPlus(t *testing.T) {
 	for _, input := range []string{"два слова", "a b c", "  ", "Snickers Сникерс Супер"} {
 		if got := oauth1Escape(input); strings.Contains(got, "+") {
 			t.Errorf("oauth1Escape(%q) = %q, still form-encoded", input, got)
+		}
+	}
+}
+
+func TestFatSecretErrorNeverCarriesTheSignedURL(t *testing.T) {
+	// Every FatSecret URL is signed in the query string, so it carries the
+	// consumer key, the access token and the signature. One timeout on
+	// food_entry.create put all three into the notification and the log store.
+	const secretish = "oauth_consumer_key=98d578e177854a3eb4c013345cb82c1c"
+	err := fatSecretTransportError("food_entry.create", &url.Error{
+		Op:  "Get",
+		URL: "https://platform.fatsecret.com/rest/server.api?" + secretish + "&oauth_token=08d19cd3&oauth_signature=znuJ",
+		Err: errors.New("context deadline exceeded (Client.Timeout exceeded while awaiting headers)"),
+	})
+
+	if strings.Contains(err.Error(), "oauth_") {
+		t.Errorf("credentials are still in the error: %s", err)
+	}
+	for _, want := range []string{"food_entry.create", "deadline exceeded"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error lost %q: %s", want, err)
 		}
 	}
 }
