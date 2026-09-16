@@ -1,8 +1,10 @@
 package connectors
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -85,6 +87,30 @@ func TestFatSecretErrorNeverCarriesTheSignedURL(t *testing.T) {
 	for _, want := range []string{"food_entry.create", "deadline exceeded"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error lost %q: %s", want, err)
+		}
+	}
+}
+
+func TestOnlyTransportFailuresAreWorthRepeating(t *testing.T) {
+	// A timeout may have delivered the write; a refusal is a decision.
+	repeatable := []error{
+		&url.Error{Op: "Get", URL: "https://platform.fatsecret.com/rest/server.api?x=1", Err: context.DeadlineExceeded},
+		fatSecretTransportError("food_entry.create", &url.Error{Err: errors.New("EOF")}),
+		context.DeadlineExceeded,
+	}
+	for _, err := range repeatable {
+		if !isFatSecretTransportFailure(err) {
+			t.Errorf("not treated as repeatable: %v", err)
+		}
+	}
+
+	final := []error{
+		errors.New("fatsecret error 8: Invalid signature"),
+		fmt.Errorf("create entry returned no id: {}"),
+	}
+	for _, err := range final {
+		if isFatSecretTransportFailure(err) {
+			t.Errorf("a refusal would be repeated: %v", err)
 		}
 	}
 }

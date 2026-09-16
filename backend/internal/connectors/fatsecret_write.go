@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 )
@@ -65,6 +67,82 @@ type fsDeleteEntryResponse struct {
 	Success fsValueString `json:"success"`
 }
 
+// isFatSecretTransportFailure reports whether the request died on the way rather
+// than being refused by the API. Only those are worth repeating: a refusal is a
+// decision and will be repeated identically.
+func isFatSecretTransportFailure(err error) bool {
+	var failure *fatSecretFailure
+	if errors.As(err, &failure) {
+		return true
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return true
+	}
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded)
+}
+
+// findFoodEntry looks for a draft that may already be in the diary, matching on
+// the day, the food, the serving and the quantity - the four things that make an
+// entry the same entry.
+func (c *FatSecretConnector) findFoodEntry(ctx context.Context, userID string, draft FoodEntryDraft) (string, error) {
+	body, err := c.callAPI(ctx, userID, map[string]string{
+		"method": "food_entries.get",
+		"date":   strconv.Itoa(daysSinceEpoch(draft.Date)),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	var decoded struct {
+		FoodEntries struct {
+			FoodEntry json.RawMessage `json:"food_entry"`
+		} `json:"food_entries"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return "", fmt.Errorf("decode day entries: %w", err)
+	}
+	if len(decoded.FoodEntries.FoodEntry) == 0 {
+		return "", nil
+	}
+
+	// One entry arrives as an object, several as an array.
+	var entries []struct {
+		FoodEntryID   fsValueString `json:"food_entry_id"`
+		FoodID        fsValueString `json:"food_id"`
+		ServingID     fsValueString `json:"serving_id"`
+		NumberOfUnits fsValueString `json:"number_of_units"`
+	}
+	if err := json.Unmarshal(decoded.FoodEntries.FoodEntry, &entries); err != nil {
+		var single struct {
+			FoodEntryID   fsValueString `json:"food_entry_id"`
+			FoodID        fsValueString `json:"food_id"`
+			ServingID     fsValueString `json:"serving_id"`
+			NumberOfUnits fsValueString `json:"number_of_units"`
+		}
+		if err := json.Unmarshal(decoded.FoodEntries.FoodEntry, &single); err != nil {
+			return "", fmt.Errorf("decode day entries: %w", err)
+		}
+		entries = append(entries, single)
+	}
+
+	for _, entry := range entries {
+		if entry.FoodID.Value != draft.FoodID || entry.ServingID.Value != draft.ServingID {
+			continue
+		}
+		units, err := strconv.ParseFloat(entry.NumberOfUnits.Value, 64)
+		if err != nil {
+			continue
+		}
+		// The provider rounds the quantity it echoes back, so the comparison is
+		// deliberately loose.
+		if math.Abs(units-draft.NumberOfUnits) < 0.05 {
+			return entry.FoodEntryID.Value, nil
+		}
+	}
+	return "", nil
+}
+
 // CreateFoodEntry writes one entry to the diary and returns its provider id.
 func (c *FatSecretConnector) CreateFoodEntry(ctx context.Context, userID string, draft FoodEntryDraft) (string, error) {
 	if draft.FoodID == "" || draft.ServingID == "" {
@@ -88,7 +166,26 @@ func (c *FatSecretConnector) CreateFoodEntry(ctx context.Context, userID string,
 
 	body, err := c.callAPI(ctx, userID, params)
 	if err != nil {
-		return "", err
+		// A write that never got an answer is not a write that never happened.
+		// This network drops about one connection in twenty, and the timeout
+		// arrives "while awaiting headers" - the entry may be in the diary
+		// already. So the day is re-read, and the write is repeated only if the
+		// entry is genuinely absent.
+		if !isFatSecretTransportFailure(err) {
+			return "", err
+		}
+		existing, lookupErr := c.findFoodEntry(ctx, userID, draft)
+		if lookupErr != nil {
+			return "", fmt.Errorf("%w (and the diary could not be re-read: %v)", err, lookupErr)
+		}
+		if existing != "" {
+			c.logger.Info().Str("entry_id", existing).Msg("food entry had been written before the timeout")
+			return existing, nil
+		}
+		body, err = c.callAPI(ctx, userID, params)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	var decoded fsCreateEntryResponse
@@ -126,18 +223,33 @@ func (c *FatSecretConnector) DeleteFoodEntry(ctx context.Context, userID, entryI
 
 // callAPI signs and sends one request, and treats the error document FatSecret
 // returns with a 200 as the error it is.
-// fatSecretTransportError drops the request URL out of a network failure.
+// fatSecretFailure is a request that died on the way rather than being refused.
 //
-// Every FatSecret URL is signed in the query string, so it carries the consumer
-// key, the user's access token and the signature. url.Error prints the URL it
-// failed on, and one timeout on food_entry.create put all three into the job
-// result, the notification on the phone and the log store.
+// It is its own type for two reasons. The URL has to go: every FatSecret URL is
+// signed in the query string, so it carries the consumer key, the access token
+// and the signature, and url.Error prints the URL it failed on - one timeout on
+// food_entry.create put all three into the job result, the notification on the
+// phone and the log store. And the fact that it was the transport has to stay,
+// because that is what makes the write worth checking and repeating; stripping
+// the URL by wrapping the inner error alone threw that away.
+type fatSecretFailure struct {
+	method string
+	err    error
+}
+
+func (e *fatSecretFailure) Error() string {
+	return "fatsecret " + e.method + " request failed: " + e.err.Error()
+}
+
+func (e *fatSecretFailure) Unwrap() error { return e.err }
+
 func fatSecretTransportError(method string, err error) error {
+	inner := err
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
-		return fmt.Errorf("fatsecret %s request failed: %w", method, urlErr.Err)
+		inner = urlErr.Err
 	}
-	return fmt.Errorf("fatsecret %s request failed: %w", method, err)
+	return &fatSecretFailure{method: method, err: inner}
 }
 
 func (c *FatSecretConnector) callAPI(ctx context.Context, userID string, extra map[string]string) ([]byte, error) {
