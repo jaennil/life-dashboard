@@ -119,3 +119,52 @@ func TestNormalizeCheckupSchedule(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckupScheduleAtMidnightStillFires(t *testing.T) {
+	// The report was moved to 23:59 and stopped arriving: the sweep runs every
+	// five minutes, so nothing looks at the clock during that one minute, and by
+	// 00:00 the slot has already become tomorrow's.
+	schedule := CheckupSchedule{Period: checkupPeriodToday, Hour: 23, Minute: 59, Enabled: true}
+
+	atMidnight := time.Date(2026, 9, 19, 0, 0, 0, 0, aiDisplayLocation)
+	scheduled, ok := checkupScheduleDue(schedule, atMidnight)
+	if !ok {
+		t.Fatal("a 23:59 report never comes due")
+	}
+	if scheduled.Day() != 18 || scheduled.Hour() != 23 || scheduled.Minute() != 59 {
+		t.Errorf("fired for %s, want the previous evening's slot", scheduled.Format("02.01 15:04"))
+	}
+
+	// And it is yesterday's slot only until the catch-up window closes.
+	lateMorning := time.Date(2026, 9, 19, 9, 0, 0, 0, aiDisplayLocation)
+	if _, ok := checkupScheduleDue(schedule, lateMorning); ok {
+		t.Error("last night's report would arrive over breakfast")
+	}
+}
+
+func TestWeeklyCheckupKeepsItsDayAcrossMidnight(t *testing.T) {
+	// Sunday 23:59, noticed at ten past midnight on Monday. The slot is still
+	// Sunday's, and checking the weekday against the clock would drop it.
+	sunday := 0
+	schedule := CheckupSchedule{Period: checkupPeriodWeek, Hour: 23, Minute: 59, Weekday: &sunday, Enabled: true}
+
+	monday := time.Date(2026, 9, 14, 0, 10, 0, 0, aiDisplayLocation) // 13.09.2026 is a Sunday
+	scheduled, ok := checkupScheduleDue(schedule, monday)
+	if !ok {
+		t.Fatal("the weekly report never comes due")
+	}
+	if scheduled.Weekday() != time.Sunday {
+		t.Errorf("fired for %s", scheduled.Weekday())
+	}
+}
+
+func TestCheckupScheduleRunsOnlyOncePerSlot(t *testing.T) {
+	// Yesterday's slot must not be re-run after it already has.
+	ran := time.Date(2026, 9, 18, 23, 59, 30, 0, aiDisplayLocation)
+	schedule := CheckupSchedule{Period: checkupPeriodToday, Hour: 23, Minute: 59, Enabled: true, LastRunAt: &ran}
+
+	atMidnight := time.Date(2026, 9, 19, 0, 5, 0, 0, aiDisplayLocation)
+	if _, ok := checkupScheduleDue(schedule, atMidnight); ok {
+		t.Error("the same slot fired twice")
+	}
+}

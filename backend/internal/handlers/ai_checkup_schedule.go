@@ -237,31 +237,44 @@ func (h *AIHandler) EnqueueDueCheckups(ctx context.Context, now time.Time) int {
 // checkupScheduleDue answers whether this schedule's moment has passed today
 // without having been served yet. Times are local to the dashboard's display
 // zone, which is what the hour in the settings means to the person who set it.
+// checkupScheduleDue answers whether this schedule has a slot waiting to be run.
+//
+// Yesterday's slot is considered too, and that is the whole point. The sweep
+// runs on a five-minute grid, so a report set for 23:59 has exactly one minute
+// in which it could be noticed - and no tick lands there. At midnight the day
+// rolls over, the slot becomes tomorrow's, and the three-hour catch-up looks
+// past it forever: a daily report moved to 23:59 stopped arriving altogether,
+// silently, for three days.
 func checkupScheduleDue(schedule CheckupSchedule, now time.Time) (time.Time, bool) {
 	local := now.In(aiDisplayLocation)
-	scheduled := time.Date(local.Year(), local.Month(), local.Day(),
-		schedule.Hour, schedule.Minute, 0, 0, aiDisplayLocation)
 
-	if local.Before(scheduled) {
-		return time.Time{}, false
-	}
-	if local.Sub(scheduled) > checkupScheduleCatchUp {
-		return time.Time{}, false
-	}
+	for _, day := range []time.Time{local, local.AddDate(0, 0, -1)} {
+		scheduled := time.Date(day.Year(), day.Month(), day.Day(),
+			schedule.Hour, schedule.Minute, 0, 0, aiDisplayLocation)
 
+		if local.Before(scheduled) || local.Sub(scheduled) > checkupScheduleCatchUp {
+			continue
+		}
+		// The weekday and the day of the month belong to the slot, not to the
+		// moment it is noticed: a Sunday report that fires at ten past midnight is
+		// still Sunday's.
+		if !checkupScheduleMatchesDay(schedule, scheduled) {
+			continue
+		}
+		if schedule.LastRunAt != nil && !schedule.LastRunAt.Before(scheduled) {
+			continue
+		}
+		return scheduled, true
+	}
+	return time.Time{}, false
+}
+
+func checkupScheduleMatchesDay(schedule CheckupSchedule, scheduled time.Time) bool {
 	switch schedule.Period {
 	case checkupPeriodWeek:
-		if schedule.Weekday == nil || int(local.Weekday()) != *schedule.Weekday {
-			return time.Time{}, false
-		}
+		return schedule.Weekday != nil && int(scheduled.Weekday()) == *schedule.Weekday
 	case checkupPeriodMonth:
-		if schedule.DayOfMonth == nil || local.Day() != *schedule.DayOfMonth {
-			return time.Time{}, false
-		}
+		return schedule.DayOfMonth != nil && scheduled.Day() == *schedule.DayOfMonth
 	}
-
-	if schedule.LastRunAt != nil && !schedule.LastRunAt.Before(scheduled) {
-		return time.Time{}, false
-	}
-	return scheduled, true
+	return true
 }
