@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -586,8 +587,39 @@ func (h *AIHandler) complete(ctx context.Context, operation string, messages []C
 		h.logger.Error().Msg("ai response content is empty")
 		return "", errAIBadResponse
 	}
+	if aiTextIsMangled(content) {
+		// Readable enough to store and useless to read. Treating it as a bad
+		// response is what gets it retried instead of delivered.
+		h.logger.Error().
+			Str("sample", truncateAIText(content, 200)).
+			Msg("ai response came back mangled")
+		return "", errAIBadResponse
+	}
 
 	return content, nil
+}
+
+// aiGluedDigit matches a Cyrillic letter with a digit stuck to it: "балл86",
+// "шаги9", "На20.09".
+var aiGluedDigit = regexp.MustCompile(`\p{Cyrillic}[0-9]`)
+
+// aiMangledThreshold is how many of those it takes to call the answer broken.
+//
+// Measured across the reports this account has received: four healthy ones, six
+// to eight thousand characters each, contain the pattern zero times. The one
+// that arrived with letters missing from every third word - "Короткий ито", "сон
+// сецчас стаильне7-ч" - contains it fifty-eight times. Five is far from either.
+const aiMangledThreshold = 5
+
+// aiTextIsMangled reports whether the provider returned text with characters
+// dropped out of it.
+//
+// It happens: the same model on the same prompt answers cleanly a day later, so
+// the answer is worth asking for again rather than passing on. The spaces that
+// vanish in front of numbers are the cheapest thing to count, and they disappear
+// together with the letters.
+func aiTextIsMangled(text string) bool {
+	return len(aiGluedDigit.FindAllStringIndex(text, aiMangledThreshold+1)) > aiMangledThreshold
 }
 
 func (h *AIHandler) completeStream(ctx context.Context, operation string, messages []ChatMessage, onDelta func(string) error) (_ string, err error) {

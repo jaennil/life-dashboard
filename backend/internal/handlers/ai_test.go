@@ -583,3 +583,27 @@ func TestUpstreamRetriesAFailedConnection(t *testing.T) {
 		t.Errorf("attempts = %d, want 2", got)
 	}
 }
+
+func TestMangledAnswerIsRecognised(t *testing.T) {
+	// The real report, as it arrived at midnight on the twentieth.
+	broken := "## 1. Короткий ито\nНа20.09.2026 данных за перио практиески не — деь толко начался. " +
+		"За вчерашний деь (19.09): сон 7,7 ч (балл86), шаги9 097, калории2 308 ккал, белк147 г, " +
+		"расхды29 112 ₽. Баланс вырос до52 137 ₽, актвных задач58 (из них31 давн висяща)."
+	if !aiTextIsMangled(broken) {
+		t.Error("the mangled report passed for a good one")
+	}
+
+	// The real report from four days earlier, which read perfectly.
+	healthy := "## 1. Короткий итог\nНа 22:00 16.09: резкое ухудшение сна — всего 2.6 ч (балл 67) " +
+		"против 8.8 ч (балл 86) вчера. Питание залогировано лишь частично — 1 898 ккал, белок 58 г " +
+		"при цели 3 500 ккал и 120 г белка. Шагов 9 097, расходы 29 112 ₽, баланс 52 137 ₽."
+	if aiTextIsMangled(healthy) {
+		t.Error("a good report was thrown away")
+	}
+
+	// A stray "Т34" or "ул. Ленина12" must not be enough to condemn an answer.
+	occasional := "Купил Актив5 и сходил на Т34, потом заехал в Пятёрочку5 за хлебом."
+	if aiTextIsMangled(occasional) {
+		t.Error("ordinary text with a few glued digits was rejected")
+	}
+}
