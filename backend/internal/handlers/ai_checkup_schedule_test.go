@@ -168,3 +168,25 @@ func TestCheckupScheduleRunsOnlyOncePerSlot(t *testing.T) {
 		t.Error("the same slot fired twice")
 	}
 }
+
+func TestSlotDecidesWhichDayTheReportIsAbout(t *testing.T) {
+	// The 23:59 report is collected at 00:00. Asking for "today" then produces a
+	// report about a day four minutes old - which is exactly what arrived: zero
+	// transactions and "день только начался".
+	slot := time.Date(2026, 9, 19, 23, 59, 0, 0, aiDisplayLocation)
+	atMidnight := time.Date(2026, 9, 20, 0, 0, 0, 0, aiDisplayLocation)
+	if got := checkupPeriodForSlot(checkupPeriodToday, slot, atMidnight); got != checkupPeriodYesterday {
+		t.Errorf("period = %q, want the day the slot belongs to", got)
+	}
+
+	// An evening slot collected the same evening is still about today.
+	evening := time.Date(2026, 9, 19, 22, 0, 0, 0, aiDisplayLocation)
+	if got := checkupPeriodForSlot(checkupPeriodToday, evening, evening.Add(2*time.Minute)); got != checkupPeriodToday {
+		t.Errorf("period = %q, want today", got)
+	}
+
+	// Weekly and monthly reports have their own windows and are left alone.
+	if got := checkupPeriodForSlot(checkupPeriodWeek, slot, atMidnight); got != checkupPeriodWeek {
+		t.Errorf("the weekly report was rewritten to %q", got)
+	}
+}

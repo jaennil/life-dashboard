@@ -203,9 +203,10 @@ func (h *AIHandler) EnqueueDueCheckups(ctx context.Context, now time.Time) int {
 
 	queued := 0
 	for _, item := range pending {
-		jobID, existing, err := h.enqueueCheckupJob(ctx, item.userID, item.period)
+		period := checkupPeriodForSlot(item.period, item.scheduled, now)
+		jobID, existing, err := h.enqueueCheckupJob(ctx, item.userID, period)
 		if err != nil {
-			h.logger.Error().Err(err).Str("user_id", item.userID).Str("period", item.period).Msg("enqueue scheduled checkup")
+			h.logger.Error().Err(err).Str("user_id", item.userID).Str("period", period).Msg("enqueue scheduled checkup")
 			continue
 		}
 
@@ -220,7 +221,7 @@ func (h *AIHandler) EnqueueDueCheckups(ctx context.Context, now time.Time) int {
 
 		h.logger.Info().
 			Str("user_id", item.userID).
-			Str("period", item.period).
+			Str("period", period).
 			Str("job_id", jobID).
 			Bool("already_running", existing).
 			Msg("scheduled checkup queued")
@@ -245,6 +246,25 @@ func (h *AIHandler) EnqueueDueCheckups(ctx context.Context, now time.Time) int {
 // rolls over, the slot becomes tomorrow's, and the three-hour catch-up looks
 // past it forever: a daily report moved to 23:59 stopped arriving altogether,
 // silently, for three days.
+// checkupPeriodForSlot names the day the report is about, which is the day the
+// slot belongs to and not the day it is collected on.
+//
+// A report set for 23:59 is noticed at 00:00, and asking for "today" then hands
+// back a day four minutes old: the first one out read "данных за период
+// практически нет — день только начался", with zero transactions, because it
+// was looking at the wrong day. The slot knows better.
+func checkupPeriodForSlot(period string, scheduled, now time.Time) string {
+	if period != checkupPeriodToday {
+		return period
+	}
+	local := now.In(aiDisplayLocation)
+	slot := scheduled.In(aiDisplayLocation)
+	if local.YearDay() == slot.YearDay() && local.Year() == slot.Year() {
+		return checkupPeriodToday
+	}
+	return checkupPeriodYesterday
+}
+
 func checkupScheduleDue(schedule CheckupSchedule, now time.Time) (time.Time, bool) {
 	local := now.In(aiDisplayLocation)
 
