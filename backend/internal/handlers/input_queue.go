@@ -21,8 +21,8 @@ const (
 	// the person has to remember and type by hand.
 	inputJobMaxUpstreamAttempts = 3
 	inputJobMaxStallAttempts    = 5
-	inputJobLease       = 7 * time.Minute
-	inputJobPoll        = 2 * time.Second
+	inputJobLease               = 7 * time.Minute
+	inputJobPoll                = 2 * time.Second
 	// The extraction model normally answers in seconds. Waiting five minutes for
 	// a connection that has stopped producing bytes only delays the useful retry.
 	inputJobAttemptBudget  = 90 * time.Second

@@ -904,6 +904,9 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 			SELECT title, currency, balance, type, in_balance
 			FROM accounts
 			WHERE balance != 0 AND user_id = $1 AND COALESCE(archived, FALSE) = FALSE
+			  -- The debt account is reported below, by person and by direction.
+			  -- Listed here it read as one account worth minus a hundred thousand.
+			  AND type <> 'debt'
 			ORDER BY in_balance DESC, balance DESC LIMIT 10
 		`, userID)
 		if err == nil {
@@ -921,6 +924,9 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 				}
 			}
 			rows.Close()
+		}
+		if debts, err := h.buildDebts(ctx, userID); err == nil {
+			sb.WriteString(renderDebtsText(debts))
 		}
 
 		var totalBalance, monthSpending, monthIncome float64

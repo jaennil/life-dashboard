@@ -24,6 +24,9 @@ type AIFinanceOverviewData struct {
 	UpcomingObligations      []FinanceObligation `json:"upcoming_obligations,omitempty"`
 	UpcomingObligationsTotal float64             `json:"upcoming_obligations_total,omitempty"`
 	ObligationWindowDays     int                 `json:"obligation_window_days,omitempty"`
+	// Debts sit outside the balance, so the balance alone overstates what is
+	// really the user's. They are reported as two sides, never as one sum.
+	Debts *AIDebtsData `json:"debts,omitempty"`
 }
 
 type AIFinanceTransaction struct {
@@ -136,8 +139,20 @@ func (h *AIHandler) buildFinanceOverviewInRange(ctx context.Context, userID stri
 	}
 
 	h.attachFinanceObligations(ctx, &data, userID)
+	h.attachFinanceDebts(ctx, &data, userID)
 
 	return data, nil
+}
+
+// attachFinanceDebts adds who owes what. Like obligations, a failure is left
+// silent: the rest of the overview still stands without it.
+func (h *AIHandler) attachFinanceDebts(ctx context.Context, data *AIFinanceOverviewData, userID string) {
+	debts, err := h.buildDebts(ctx, userID)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("load debts for ai context")
+		return
+	}
+	data.Debts = &debts
 }
 
 // attachFinanceObligations runs the same detection the finance page uses. A
@@ -224,6 +239,9 @@ func renderFinanceOverviewText(title string, data AIFinanceOverviewData) string 
 	var sb strings.Builder
 	sb.WriteString(title + "\n")
 	sb.WriteString(fmt.Sprintf("Текущий баланс: %.0f ₽\n", data.CurrentBalanceRub))
+	if data.Debts != nil {
+		sb.WriteString(renderDebtsText(*data.Debts))
+	}
 	sb.WriteString(fmt.Sprintf("За период: %d транзакций, расходы %.0f ₽, доходы %.0f ₽, net %.0f ₽\n",
 		data.TransactionCount, data.SpendingRub, data.IncomeRub, data.NetRub))
 
