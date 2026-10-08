@@ -62,8 +62,14 @@ func TestCheckupToolExecutionsOrder(t *testing.T) {
 	}
 
 	executions := handler.checkupToolExecutions(context.Background(), "user-1", window)
-	if len(executions) != 12 {
-		t.Fatalf("expected 12 executions, got %d", len(executions))
+	if len(executions) != 13 {
+		t.Fatalf("expected 13 executions, got %d", len(executions))
+	}
+	// Financial literacy is judged over its own six months, so like the daily
+	// series it does not claim the report window.
+	literacy := executions[len(executions)-1]
+	if literacy.Name != aiToolFinanceLiteracy || literacy.RequestedPeriod != "" {
+		t.Fatalf("expected finance literacy last and without a period, got %q %q", literacy.Name, literacy.RequestedPeriod)
 	}
 
 	// The daily series is the one execution that does not follow the report
@@ -131,6 +137,18 @@ func TestCheckupToolExecutionsOrder(t *testing.T) {
 		}
 		if executions[i].End == nil || !executions[i].End.Equal(window.End) {
 			t.Fatalf("expected execution %d end to be propagated", i)
+		}
+	}
+}
+
+func TestDailyCheckupSkipsFinanceLiteracy(t *testing.T) {
+	handler := &AIHandler{}
+	for _, period := range []string{checkupPeriodToday, checkupPeriodYesterday} {
+		executions := handler.checkupToolExecutions(context.Background(), "user-1", checkupWindow{RequestedPeriod: period})
+		for _, execution := range executions {
+			if execution.Name == aiToolFinanceLiteracy {
+				t.Fatalf("%s checkup must not judge financial habits", period)
+			}
 		}
 	}
 }

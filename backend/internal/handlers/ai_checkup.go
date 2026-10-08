@@ -234,6 +234,7 @@ func buildAICheckupPrompt(now time.Time, window checkupWindow, dataContext strin
 	sb.WriteString("Если по какой-то сфере данных нет, напиши это коротко и без воды.\n")
 	sb.WriteString("Если видна динамика веса, шагов, расходов, тренировок или питания — покажи её числами.\n")
 	sb.WriteString("В разделе про здоровье разбирай не только длительность сна, но и его структуру: глубокий сон, REM и пробуждения. Если есть состав тела с весов (жир, мышцы, вода, висцеральный жир), пиши про него отдельно от веса, потому что вес может стоять на месте при меняющемся составе.\n")
+	sb.WriteString("Если есть tool finance_literacy, в разделе про финансы дай оценку финансовой грамотности по его сигналам: сколько в норме, и для каждого не в норме - число и порог. Это окно полгода, не период отчёта; так и пиши. Месяц, помеченный как разовый (например ремонт), не выдавай за привычку.\n")
 	sb.WriteString("Экранное время разбирай по приложениям и сайтам, а не только суммой часов: важно, куда именно ушло время и как это соотносится с задачами и сном.\n")
 	sb.WriteString("\nПро раздел \"Зависимости и гипотезы\" отдельно, это главная содержательная часть отчёта:\n")
 	sb.WriteString("Ищи связи между сферами по daily_series: сон и траты, сон и шаги, тренировки и питание, экранное время и продуктивность, вес и калории, пульс покоя и нагрузка. Проверяй и сдвиг на день: плохой сон влияет на следующий день, а не на тот же.\n")
@@ -345,7 +346,7 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 		return data, nil
 	}
 
-	return []aiToolExecution{
+	executions := []aiToolExecution{
 		{
 			// Deliberately first and deliberately wider than the report window:
 			// this is the only section where the domains sit on the same rows, so
@@ -525,6 +526,12 @@ func (h *AIHandler) checkupToolExecutions(ctx context.Context, userID string, wi
 			},
 		},
 	}
+	// Financial habits move over months; judging them in a daily report would
+	// repeat the same verdict every evening.
+	if window.RequestedPeriod == checkupPeriodWeek || window.RequestedPeriod == checkupPeriodMonth {
+		executions = append(executions, h.financeLiteracyExecution(ctx, userID))
+	}
+	return executions
 }
 
 // appendDataFreshness tells the model which sources are actually current.
