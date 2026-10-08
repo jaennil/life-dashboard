@@ -55,6 +55,7 @@ func (h *AIHandler) UseSyncer(syncer aiConnectorSyncer) {
 var aiToolSyncSources = map[aiToolName][]string{
 	aiToolFinanceOverview:      {"zenmoney"},
 	aiToolRecentTransactions:   {"zenmoney"},
+	aiToolFinanceLiteracy:      {"zenmoney"},
 	aiToolProductivityOverview: {"vikunja", "todoist"},
 	aiToolActivityOverview:     {"strava"},
 	aiToolRecentActivities:     {"strava"},

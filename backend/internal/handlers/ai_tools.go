@@ -28,6 +28,7 @@ const (
 	aiToolCalendarOverview     aiToolName = "calendar_overview"
 	aiToolWeatherOverview      aiToolName = "weather_overview"
 	aiToolDailySeries          aiToolName = "daily_series"
+	aiToolFinanceLiteracy      aiToolName = "finance_literacy"
 )
 
 const (
@@ -140,6 +141,7 @@ func buildAIToolPlannerPrompt(message, recentHistory string) string {
 	sb.WriteString("Разрешённые tools:\n")
 	sb.WriteString("- finance_overview: баланс, доходы/расходы, агрегаты по финансам за период; args: days\n")
 	sb.WriteString("- recent_transactions: последние транзакции за период; args: days, limit\n")
+	sb.WriteString("- finance_literacy: оценка финансовой грамотности по данным за полгода: доля сбережений, подушка, деньги без процента, штрафы, регулярные платежи, долги; args: none\n")
 	sb.WriteString("- productivity_overview: Todoist задачи, просрочка, сделано за период, план на ближайшие дни; args: days\n")
 	sb.WriteString("- activity_overview: сводка по активностям за период; args: days\n")
 	sb.WriteString("- recent_activities: последние активности; args: days, limit\n")
@@ -161,6 +163,7 @@ func buildAIToolPlannerPrompt(message, recentHistory string) string {
 	sb.WriteString("- Для вопросов про Hevy routine, шаблон тренировки, сплит, плановые веса и план упражнений используй routine_overview; при сравнении плана с фактом добавь recent_workouts или workout_overview.\n")
 	sb.WriteString("- Для вопросов про привычки, чеклисты, зубы, душ, уход за лицом, умывание, встроенные рутины Life Dashboard и Habitify используй habit_overview.\n")
 	sb.WriteString("- Для вопросов про траты, баланс, расходы по категориям или подозрительные операции используй finance_overview; при вопросах про конкретные покупки/операции добавь recent_transactions.\n")
+	sb.WriteString("- Для вопросов про финансовую грамотность, подушку безопасности, сбережения, куда девать свободные деньги, долги и кредиты используй finance_literacy.\n")
 	sb.WriteString("- Для вопросов про задачи, overdue, что сделать сегодня, что висит давно, продуктивность и перегруз по Todoist используй productivity_overview.\n")
 	sb.WriteString("- Для бега, дистанции, активности и шагов используй activity_overview и при необходимости recent_activities.\n")
 	sb.WriteString("- Для вопросов про сон, пульс, HRV, вес, Apple Health, Zepp и шаги за день используй health_overview. Шаги из health_overview приоритетнее календаря и Strava.\n")
@@ -243,7 +246,7 @@ func sanitizeAIToolPlan(plan aiToolPlan) []aiToolCall {
 			call.PastDays = normalizeAIDays(call.PastDays, 7, 30)
 			call.FutureDays = normalizeAIDays(call.FutureDays, 30, 90)
 			call.Limit = normalizeAILimit(call.Limit, 20, 30)
-		case aiToolWeatherOverview:
+		case aiToolWeatherOverview, aiToolFinanceLiteracy:
 			call.Days = 0
 			call.Limit = 0
 			call.PastDays = 0
@@ -334,7 +337,7 @@ func isAllowedAITool(name aiToolName) bool {
 	switch name {
 	case aiToolFinanceOverview, aiToolRecentTransactions, aiToolProductivityOverview, aiToolActivityOverview, aiToolRecentActivities,
 		aiToolHealthOverview, aiToolWorkoutOverview, aiToolRecentWorkouts, aiToolRoutineOverview, aiToolHabitOverview, aiToolNutritionOverview, aiToolScreenTimeOverview, aiToolLocationOverview, aiToolJournalOverview,
-		aiToolCalendarOverview, aiToolWeatherOverview:
+		aiToolCalendarOverview, aiToolWeatherOverview, aiToolFinanceLiteracy:
 		return true
 	default:
 		return false
@@ -750,6 +753,8 @@ func (h *AIHandler) chatToolExecutions(ctx context.Context, userID string, tools
 					return nil
 				},
 			})
+		case aiToolFinanceLiteracy:
+			executions = append(executions, h.financeLiteracyExecution(ctx, userID))
 		}
 	}
 
