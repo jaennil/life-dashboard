@@ -1,4 +1,5 @@
 import type { Layout, LayoutItem } from 'react-grid-layout'
+import { stackInOneColumn } from './widget-grid-layout'
 
 export const DASHBOARD_WIDGETS = [
   'weather',
@@ -213,14 +214,13 @@ export function toResponsiveLayouts(layout: DashboardLayoutState): DashboardGrid
   return {
     lg: visible.map(widget => toGridItem(widget, DASHBOARD_GRID_COLS.lg)),
     md: packGridItems(visible, DASHBOARD_GRID_COLS.md),
-    sm: visible.map((widget, index) => ({
+    sm: stackInOneColumn(visible.map(widget => ({
       ...toGridItem(widget, DASHBOARD_GRID_COLS.sm),
       x: 0,
-      y: index * widget.h,
       w: 1,
       minW: 1,
       maxW: 1,
-    })),
+    }))),
   }
 }
 

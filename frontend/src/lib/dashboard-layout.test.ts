@@ -77,6 +77,14 @@ describe('dashboard layout model', () => {
     expect(layouts.sm.every(item => item.x === 0 && item.w === 1)).toBe(true)
   })
 
+  it('stacks the phone layout without overlaps', () => {
+    const layouts = toResponsiveLayouts(DEFAULT_DASHBOARD_LAYOUT)
+
+    expectNoOverlaps(layouts.sm)
+    const ys = layouts.sm.map(item => item.y)
+    expect(ys).toEqual([...ys].sort((a, b) => a - b))
+  })
+
   it('packs the default medium dashboard without staggered gaps', () => {
     const layouts = toResponsiveLayouts(DEFAULT_DASHBOARD_LAYOUT)
 

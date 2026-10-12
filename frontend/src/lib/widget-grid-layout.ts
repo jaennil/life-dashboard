@@ -176,14 +176,13 @@ export function toEditableResponsiveLayouts<TId extends string>({
   return {
     lg: visible.map(widget => toGridItem(widget, bounds, EDITABLE_WIDGET_GRID_COLS.lg)),
     md: packGridItems(visible, bounds, EDITABLE_WIDGET_GRID_COLS.md),
-    sm: visible.map((widget, index) => ({
+    sm: stackInOneColumn(visible.map(widget => ({
       ...toGridItem(widget, bounds, EDITABLE_WIDGET_GRID_COLS.sm),
       x: 0,
-      y: index * widget.h,
       w: 1,
       minW: 1,
       maxW: 1,
-    })),
+    }))),
   }
 }
 
@@ -245,4 +244,16 @@ export function setEditableWidgetHidden<TId extends string>({
       [id]: { ...normalized.widgets[id], hidden },
     },
   }
+}
+
+// stackInOneColumn places each item right under the one before it. Taking
+// index * own height instead put a short widget above a tall one that came
+// earlier, which is how the chat input ended up above the messages on phones.
+export function stackInOneColumn<T extends { y: number; h: number }>(items: T[]): T[] {
+  let y = 0
+  return items.map(item => {
+    const placed = { ...item, y }
+    y += item.h
+    return placed
+  })
 }

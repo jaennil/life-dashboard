@@ -92,6 +92,21 @@ describe('editable widget layout model', () => {
     expect(responsive.sm.every(item => item.x === 0 && item.w === 1)).toBe(true)
   })
 
+  it('stacks one column in order, each widget under the previous one', () => {
+    const layout = normalize({
+      widgets: {
+        alpha: { ...defaults.alpha, x: 0, y: 0, w: 12, h: 5 },
+        beta: { ...defaults.beta, x: 0, y: 5, w: 12, h: 8 },
+        gamma: { ...defaults.gamma, x: 0, y: 13, w: 12, h: 3 },
+      },
+    })
+
+    const sm = toEditableResponsiveLayouts({ ids, layout, bounds }).sm
+
+    expect(sm.map(item => [item.i, item.y])).toEqual([['alpha', 0], ['beta', 5], ['gamma', 13]])
+    expectNoOverlaps(sm)
+  })
+
   it('applies drag and resize updates while preserving hidden state', () => {
     const state = normalize({
       widgets: {
