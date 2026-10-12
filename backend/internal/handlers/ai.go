@@ -1152,7 +1152,7 @@ func (h *AIHandler) buildContext(ctx context.Context, userID string, scope aiCon
 	}
 
 	// === КАЛЕНДАРЬ ===
-	if scope.calendar {
+	if scope.calendar && !h.disabledSources(ctx, userID)["google_calendar"] {
 		calRows, err := h.db.Query(ctx, `
 			SELECT title, start_time, end_time, all_day, COALESCE(location, '')
 			FROM calendar_events

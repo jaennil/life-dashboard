@@ -81,9 +81,18 @@ func (h *AIHandler) runAITools(ctx context.Context, userID string, executions []
 		Sections: make([]string, 0, len(executions)),
 	}
 	seenSections := make(map[string]bool, len(executions))
+	disabled := h.disabledSources(ctx, userID)
 
 	for _, execution := range executions {
 		if execution.Run == nil && execution.Data == nil {
+			continue
+		}
+		if toolSourcesDisabled(execution.Name, disabled) {
+			h.logger.Info().
+				Str("user_id", userID).
+				Str("tool", string(execution.Name)).
+				Str("sources", disabledSourceNames(execution.Name)).
+				Msg("ai tool skipped: source disabled")
 			continue
 		}
 
