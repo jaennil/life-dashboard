@@ -145,7 +145,7 @@ func (h *NutritionHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	targets, err := loadNutritionTargets(ctx, h.db, userID)
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("load nutrition targets")
-	} else {
+	} else if targets != nil {
 		s.Targets = targets
 		s.HydrationMode = normalizeHydrationMode(targets.HydrationMode)
 	}
