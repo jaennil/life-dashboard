@@ -27,7 +27,14 @@ export type EditableWidgetDefinition<TId extends string = string> = {
   layout: Omit<EditableWidgetLayoutItem<TId>, 'id' | 'hidden'> & { hidden?: boolean }
   bounds?: Partial<EditableWidgetBounds>
   content?: ReactNode
+  // On a phone widgets grow to their content. A widget that scrolls inside
+  // itself, like a chat history, sets a height here instead.
+  phoneHeight?: string
 }
+
+// Below this width the grid is a single column. There a height chosen for a
+// row of five cards on a desktop cut the same cards off once they stacked.
+const PHONE_MAX_WIDTH = 768
 
 const DEFAULT_BOUNDS: EditableWidgetBounds = {
   minW: 2,
@@ -97,6 +104,7 @@ export function EditableWidgetGrid<TId extends string>({
     ])
   ) as EditableWidgetBoundsMap<TId>
   const labels = Object.fromEntries(widgets.map(widget => [widget.id, widget.label])) as Record<TId, string>
+  const phoneHeights = new Map(widgets.map(widget => [widget.id, widget.phoneHeight]))
   const childContent = Children.toArray(children)
   const widgetContent = new Map(widgets.map((widget, index) => [widget.id, widget.content ?? childContent[index]]))
   const [layout, setLayout] = useState(() => loadLayout(storageKey, ids, defaults, bounds))
@@ -114,6 +122,7 @@ export function EditableWidgetGrid<TId extends string>({
     [bounds, ids, normalizedLayout]
   )
   const visibleIds = visibleEditableWidgetIds(ids, normalizedLayout)
+  const stacked = gridMounted && gridWidth < PHONE_MAX_WIDTH && !editingWidgets
   const hiddenIds = ids.filter(id => normalizedLayout.widgets[id]?.hidden)
 
   function handleGridLayoutChange(gridLayout: EditableGridLayout) {
@@ -159,7 +168,25 @@ export function EditableWidgetGrid<TId extends string>({
 
       {visibleIds.length > 0 ? (
         <div ref={gridContainerRef} className="min-w-0">
-          {gridMounted ? (
+          {stacked ? (
+            <div className="flex min-w-0 flex-col gap-4">
+              {visibleIds.map(id => {
+                const height = phoneHeights.get(id)
+                return (
+                  <section
+                    key={id}
+                    data-widget-id={id}
+                    className="dashboard-grid-widget min-w-0"
+                    style={height ? { height } : undefined}
+                  >
+                    <div className={cn('dashboard-widget-content min-w-0', height && 'h-full overflow-y-auto')}>
+                      {widgetContent.get(id)}
+                    </div>
+                  </section>
+                )
+              })}
+            </div>
+          ) : gridMounted ? (
             <ResponsiveGridLayout
               className={cn('dashboard-grid', editingWidgets && 'is-editing')}
               width={gridWidth}

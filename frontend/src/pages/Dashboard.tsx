@@ -561,6 +561,9 @@ export function Dashboard() {
   ] : []
 
   const visibleWidgets = visibleWidgetIds(dashboardLayout)
+  // On a phone the grid is one column and the desktop heights cut widgets off,
+  // so outside editing the widgets simply stack at their own height.
+  const stacked = gridMounted && gridWidth < 768 && !editingWidgets
   const hiddenWidgets = DASHBOARD_WIDGETS.filter(id => dashboardLayout.widgets[id].hidden)
   const responsiveLayouts = useMemo(() => toResponsiveLayouts(dashboardLayout), [dashboardLayout])
 
@@ -739,7 +742,15 @@ export function Dashboard() {
 
       {visibleWidgets.length > 0 ? (
         <div ref={gridContainerRef} className="min-w-0">
-          {gridMounted ? (
+          {stacked ? (
+            <div className="flex min-w-0 flex-col gap-4">
+              {visibleWidgets.map(id => (
+                <section key={id} data-widget-id={id} className="dashboard-grid-widget min-w-0">
+                  <div className="dashboard-widget-content min-w-0">{widgetContent[id]}</div>
+                </section>
+              ))}
+            </div>
+          ) : gridMounted ? (
             <ResponsiveGridLayout
               className={cn('dashboard-grid', editingWidgets && 'is-editing')}
               width={gridWidth}

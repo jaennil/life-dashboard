@@ -295,7 +295,7 @@ export function AiChat() {
         storageKey="ai_widget_layout_v2"
         widgets={[
           { id: 'checkup', label: 'Checkup', layout: { x: 0, y: 0, w: 12, h: 5 }, bounds: { minW: 4, minH: 4, maxH: 12 } },
-          { id: 'messages', label: 'Сообщения', layout: { x: 0, y: 5, w: 12, h: 20 }, bounds: { minW: 5, minH: 12, maxH: 36 } },
+          { id: 'messages', label: 'Сообщения', layout: { x: 0, y: 5, w: 12, h: 20 }, bounds: { minW: 5, minH: 12, maxH: 36 }, phoneHeight: '60dvh' },
           { id: 'input', label: 'Поле ввода', layout: { x: 0, y: 25, w: 12, h: 4 }, bounds: { minW: 4, minH: 3, maxH: 8 } },
         ]}
       >
