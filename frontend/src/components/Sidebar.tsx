@@ -195,7 +195,7 @@ export function Sidebar() {
         className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 px-2 pt-2 backdrop-blur lg:hidden"
         style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
       >
-        <div className="flex gap-1 overflow-x-auto">
+        <div className="flex gap-1">
           {mobilePrimary.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
@@ -203,7 +203,7 @@ export function Sidebar() {
               end={to === '/'}
               className={({ isActive }) =>
                 cn(
-                  'flex min-w-[72px] flex-1 flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium transition-colors',
+                  'flex min-w-0 flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition-colors',
                   isActive
                     ? 'bg-primary/10 text-primary'
                     : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
@@ -219,7 +219,7 @@ export function Sidebar() {
             onClick={() => setMoreOpen(current => !current)}
             aria-expanded={moreOpen}
             className={cn(
-              'flex min-w-[72px] flex-1 flex-col items-center gap-1 rounded-lg px-2 py-2 text-[11px] font-medium transition-colors',
+              'flex min-w-0 flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition-colors',
               mobileMore.some(item => location.pathname === item.to) || moreOpen ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
             )}
           >
