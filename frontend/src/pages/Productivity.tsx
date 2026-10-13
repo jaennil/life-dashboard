@@ -690,7 +690,7 @@ export function Productivity() {
       </ExpandablePanel>
 
       <div className="@container">
-        <div className="grid grid-cols-1 gap-4 @xs:grid-cols-2 @2xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 @xs:grid-cols-2 @xl:grid-cols-4">
           <StatCard
             title="Активные"
             value={loading || !summary ? '—' : String(summary.active_total)}
