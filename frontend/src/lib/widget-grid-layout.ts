@@ -262,3 +262,24 @@ export function stackInOneColumn<T extends { y: number; h: number }>(items: T[])
     return placed
   })
 }
+
+export const EDITABLE_WIDGET_GRID_MARGIN = 16
+
+// Rows a widget needs to show pixelHeight of content without scrolling.
+export function editableRowsForPixels(pixelHeight: number) {
+  const row = EDITABLE_WIDGET_GRID_ROW_HEIGHT + EDITABLE_WIDGET_GRID_MARGIN
+  return Math.ceil((pixelHeight + EDITABLE_WIDGET_GRID_MARGIN) / row)
+}
+
+// The saved height is the least a widget gets: one whose content outgrew it
+// grows instead of cutting the content off behind an inner scrollbar.
+export function growEditableLayouts(
+  layouts: EditableGridLayouts,
+  rows: Partial<Record<string, number>>,
+): EditableGridLayouts {
+  const grow = (layout: EditableGridLayout) => layout.map(item => {
+    const needed = rows[item.i]
+    return needed && needed > item.h ? { ...item, h: needed, maxH: Math.max(item.maxH ?? needed, needed) } : item
+  })
+  return { lg: grow(layouts.lg), md: grow(layouts.md), sm: grow(layouts.sm) }
+}

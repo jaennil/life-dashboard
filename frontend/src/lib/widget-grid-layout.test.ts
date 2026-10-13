@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   applyEditableGridLayout,
   EDITABLE_WIDGET_GRID_COLS,
+  editableRowsForPixels,
+  growEditableLayouts,
   normalizeEditableWidgetLayout,
   setEditableWidgetHidden,
   toEditableResponsiveLayouts,
@@ -105,6 +107,23 @@ describe('editable widget layout model', () => {
 
     expect(md.find(item => item.i === 'alpha')).toMatchObject({ x: 0, y: 0, w: 3 })
     expect(md.find(item => item.i === 'beta')).toMatchObject({ x: 3, y: 0, w: 5 })
+  })
+
+  it('converts a content height to grid rows', () => {
+    // 5 rows are 5 * 32 + 4 * 16 = 224 px.
+    expect(editableRowsForPixels(224)).toBe(5)
+    expect(editableRowsForPixels(225)).toBe(6)
+  })
+
+  it('grows widgets to their content but never shrinks them', () => {
+    const layouts = toEditableResponsiveLayouts({ ids, layout: normalize(null), bounds })
+
+    const grown = growEditableLayouts(layouts, { alpha: 9, beta: 2 })
+
+    expect(grown.lg.find(item => item.i === 'alpha')).toMatchObject({ h: 9 })
+    expect(grown.md.find(item => item.i === 'alpha')).toMatchObject({ h: 9 })
+    expect(grown.lg.find(item => item.i === 'beta')).toMatchObject({ h: 5 })
+    expect(grown.lg.find(item => item.i === 'gamma')).toMatchObject({ h: 3 })
   })
 
   it('stacks one column in order, each widget under the previous one', () => {

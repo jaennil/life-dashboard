@@ -1,4 +1,4 @@
-import { Children, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Children, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Responsive as ResponsiveGridLayout, useContainerWidth } from 'react-grid-layout'
 import { EyeOff } from 'lucide-react'
 import 'react-grid-layout/css/styles.css'
@@ -6,7 +6,10 @@ import 'react-resizable/css/styles.css'
 import {
   applyEditableGridLayout,
   EDITABLE_WIDGET_GRID_COLS,
+  EDITABLE_WIDGET_GRID_MARGIN,
   EDITABLE_WIDGET_GRID_ROW_HEIGHT,
+  editableRowsForPixels,
+  growEditableLayouts,
   normalizeEditableWidgetLayout,
   setEditableWidgetHidden,
   toEditableResponsiveLayouts,
@@ -27,8 +30,8 @@ export type EditableWidgetDefinition<TId extends string = string> = {
   layout: Omit<EditableWidgetLayoutItem<TId>, 'id' | 'hidden'> & { hidden?: boolean }
   bounds?: Partial<EditableWidgetBounds>
   content?: ReactNode
-  // On a phone widgets grow to their content. A widget that scrolls inside
-  // itself, like a chat history, sets a height here instead.
+  // Widgets grow to their content. A widget that scrolls inside itself, like
+  // a chat history, keeps its grid height and sets a phone height here.
   phoneHeight?: string
 }
 
@@ -117,10 +120,47 @@ export function EditableWidgetGrid<TId extends string>({
     persistLayout(storageKey, normalizedLayout, ids, defaults, bounds)
   }, [bounds, defaults, ids, normalizedLayout, storageKey])
 
-  const responsiveLayouts = useMemo(
+  const savedLayouts = useMemo(
     () => toEditableResponsiveLayouts({ ids, layout: normalizedLayout, bounds }),
     [bounds, ids, normalizedLayout]
   )
+  const contentRefs = useRef(new Map<string, HTMLDivElement>())
+  // Growth only goes up, so it is kept per width and a new width starts over
+  // from the saved heights.
+  const [grown, setGrown] = useState<{ width: number; rows: Partial<Record<string, number>> }>({ width: 0, rows: {} })
+  const grownRows = useMemo(() => grown.width === gridWidth ? grown.rows : {}, [grown, gridWidth])
+  const responsiveLayouts = useMemo(
+    () => editingWidgets ? savedLayouts : growEditableLayouts(savedLayouts, grownRows),
+    [editingWidgets, grownRows, savedLayouts]
+  )
+
+  function measureOverflow() {
+    if (editingWidgets) return
+    setGrown(current => {
+      const base = current.width === gridWidth ? current.rows : {}
+      let next = base
+      contentRefs.current.forEach((content, id) => {
+        if (phoneHeights.get(id as TId)) return
+        const overflow = content.scrollHeight - content.clientHeight
+        const item = content.closest('.react-grid-item')
+        if (overflow <= 1 || !item) return
+        const rows = editableRowsForPixels(item.getBoundingClientRect().height + overflow)
+        if (rows > (next[id] ?? 0)) next = { ...next, [id]: rows }
+      })
+      return next === base && current.width === gridWidth ? current : { width: gridWidth, rows: next }
+    })
+  }
+
+  useLayoutEffect(measureOverflow)
+
+  useEffect(() => {
+    const observer = new ResizeObserver(() => measureOverflow())
+    contentRefs.current.forEach(content => {
+      observer.observe(content)
+      if (content.firstElementChild) observer.observe(content.firstElementChild)
+    })
+    return () => observer.disconnect()
+  })
   const visibleIds = visibleEditableWidgetIds(ids, normalizedLayout)
   const stacked = gridMounted && gridWidth < PHONE_MAX_WIDTH && !editingWidgets
   const hiddenIds = ids.filter(id => normalizedLayout.widgets[id]?.hidden)
@@ -194,7 +234,7 @@ export function EditableWidgetGrid<TId extends string>({
               breakpoints={{ lg: 1200, md: 768, sm: 0 }}
               cols={EDITABLE_WIDGET_GRID_COLS}
               rowHeight={EDITABLE_WIDGET_GRID_ROW_HEIGHT}
-              margin={[16, 16]}
+              margin={[EDITABLE_WIDGET_GRID_MARGIN, EDITABLE_WIDGET_GRID_MARGIN]}
               containerPadding={[0, 0]}
               dragConfig={{
                 enabled: editingWidgets,
@@ -228,7 +268,13 @@ export function EditableWidgetGrid<TId extends string>({
                         <EyeOff className="h-4 w-4" />
                       </button>
                     ) : null}
-                    <div className="dashboard-widget-content h-full min-w-0 overflow-x-hidden overflow-y-auto">
+                    <div
+                      ref={element => {
+                        if (element) contentRefs.current.set(id, element)
+                        else contentRefs.current.delete(id)
+                      }}
+                      className="dashboard-widget-content h-full min-w-0 overflow-x-hidden overflow-y-auto"
+                    >
                       {widgetContent.get(id)}
                     </div>
                   </section>
