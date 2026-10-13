@@ -3,7 +3,7 @@ import {
   applyEditableGridLayout,
   EDITABLE_WIDGET_GRID_COLS,
   editableRowsForPixels,
-  growEditableLayouts,
+  fitEditableLayouts,
   normalizeEditableWidgetLayout,
   setEditableWidgetHidden,
   toEditableResponsiveLayouts,
@@ -115,15 +115,15 @@ describe('editable widget layout model', () => {
     expect(editableRowsForPixels(225)).toBe(6)
   })
 
-  it('grows widgets to their content but never shrinks them', () => {
+  it('fits widgets to their content and keeps the rest', () => {
     const layouts = toEditableResponsiveLayouts({ ids, layout: normalize(null), bounds })
 
-    const grown = growEditableLayouts(layouts, { alpha: 9, beta: 2 })
+    const fitted = fitEditableLayouts(layouts, { alpha: 9, beta: 2 })
 
-    expect(grown.lg.find(item => item.i === 'alpha')).toMatchObject({ h: 9 })
-    expect(grown.md.find(item => item.i === 'alpha')).toMatchObject({ h: 9 })
-    expect(grown.lg.find(item => item.i === 'beta')).toMatchObject({ h: 5 })
-    expect(grown.lg.find(item => item.i === 'gamma')).toMatchObject({ h: 3 })
+    expect(fitted.lg.find(item => item.i === 'alpha')).toMatchObject({ h: 9, maxH: 10 })
+    expect(fitted.md.find(item => item.i === 'alpha')).toMatchObject({ h: 9 })
+    expect(fitted.lg.find(item => item.i === 'beta')).toMatchObject({ h: 2, minH: 2 })
+    expect(fitted.lg.find(item => item.i === 'gamma')).toMatchObject({ h: 3 })
   })
 
   it('stacks one column in order, each widget under the previous one', () => {

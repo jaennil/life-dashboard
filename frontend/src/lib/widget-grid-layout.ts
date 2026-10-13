@@ -271,15 +271,16 @@ export function editableRowsForPixels(pixelHeight: number) {
   return Math.ceil((pixelHeight + EDITABLE_WIDGET_GRID_MARGIN) / row)
 }
 
-// The saved height is the least a widget gets: one whose content outgrew it
-// grows instead of cutting the content off behind an inner scrollbar.
-export function growEditableLayouts(
+// Outside editing a widget is as tall as its content: the saved height was
+// picked for some amount of data and cut off more or left a gap under less.
+export function fitEditableLayouts(
   layouts: EditableGridLayouts,
   rows: Partial<Record<string, number>>,
 ): EditableGridLayouts {
-  const grow = (layout: EditableGridLayout) => layout.map(item => {
-    const needed = rows[item.i]
-    return needed && needed > item.h ? { ...item, h: needed, maxH: Math.max(item.maxH ?? needed, needed) } : item
+  const fit = (layout: EditableGridLayout) => layout.map(item => {
+    const h = rows[item.i]
+    if (!h || h === item.h) return item
+    return { ...item, h, minH: Math.min(item.minH ?? h, h), maxH: Math.max(item.maxH ?? h, h) }
   })
-  return { lg: grow(layouts.lg), md: grow(layouts.md), sm: grow(layouts.sm) }
+  return { lg: fit(layouts.lg), md: fit(layouts.md), sm: fit(layouts.sm) }
 }

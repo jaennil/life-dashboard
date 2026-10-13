@@ -9,7 +9,7 @@ import {
   EDITABLE_WIDGET_GRID_MARGIN,
   EDITABLE_WIDGET_GRID_ROW_HEIGHT,
   editableRowsForPixels,
-  growEditableLayouts,
+  fitEditableLayouts,
   normalizeEditableWidgetLayout,
   setEditableWidgetHidden,
   toEditableResponsiveLayouts,
@@ -30,8 +30,9 @@ export type EditableWidgetDefinition<TId extends string = string> = {
   layout: Omit<EditableWidgetLayoutItem<TId>, 'id' | 'hidden'> & { hidden?: boolean }
   bounds?: Partial<EditableWidgetBounds>
   content?: ReactNode
-  // Widgets grow to their content. A widget that scrolls inside itself, like
-  // a chat history, keeps its grid height and sets a phone height here.
+  // Widgets take the height of their content. A widget that scrolls inside
+  // itself, like a chat history, keeps its grid height and sets a phone
+  // height here.
   phoneHeight?: string
 }
 
@@ -125,39 +126,40 @@ export function EditableWidgetGrid<TId extends string>({
     [bounds, ids, normalizedLayout]
   )
   const contentRefs = useRef(new Map<string, HTMLDivElement>())
-  // Growth only goes up, so it is kept per width and a new width starts over
-  // from the saved heights.
-  const [grown, setGrown] = useState<{ width: number; rows: Partial<Record<string, number>> }>({ width: 0, rows: {} })
-  const grownRows = useMemo(() => grown.width === gridWidth ? grown.rows : {}, [grown, gridWidth])
+  const [contentRows, setContentRows] = useState<Partial<Record<string, number>>>({})
   const responsiveLayouts = useMemo(
-    () => editingWidgets ? savedLayouts : growEditableLayouts(savedLayouts, grownRows),
-    [editingWidgets, grownRows, savedLayouts]
+    () => editingWidgets ? savedLayouts : fitEditableLayouts(savedLayouts, contentRows),
+    [contentRows, editingWidgets, savedLayouts]
   )
 
-  function measureOverflow() {
+  function measureContent() {
     if (editingWidgets) return
-    setGrown(current => {
-      const base = current.width === gridWidth ? current.rows : {}
-      let next = base
+    setContentRows(current => {
+      let next = current
       contentRefs.current.forEach((content, id) => {
-        if (phoneHeights.get(id as TId)) return
-        const overflow = content.scrollHeight - content.clientHeight
         const item = content.closest('.react-grid-item')
-        if (overflow <= 1 || !item) return
-        const rows = editableRowsForPixels(item.getBoundingClientRect().height + overflow)
-        if (rows > (next[id] ?? 0)) next = { ...next, [id]: rows }
+        if (phoneHeights.get(id as TId) || !item || content.children.length === 0) return
+        const top = content.getBoundingClientRect().top - content.scrollTop
+        let bottom = top
+        for (const child of content.children) {
+          const rect = child.getBoundingClientRect()
+          bottom = Math.max(bottom, rect.bottom, rect.top + child.scrollHeight)
+        }
+        const chrome = item.getBoundingClientRect().height - content.clientHeight
+        const rows = editableRowsForPixels(bottom - top + chrome)
+        if (rows !== next[id]) next = { ...next, [id]: rows }
       })
-      return next === base && current.width === gridWidth ? current : { width: gridWidth, rows: next }
+      return next
     })
   }
 
-  useLayoutEffect(measureOverflow)
+  useLayoutEffect(measureContent)
 
   useEffect(() => {
-    const observer = new ResizeObserver(() => measureOverflow())
+    const observer = new ResizeObserver(() => measureContent())
     contentRefs.current.forEach(content => {
       observer.observe(content)
-      if (content.firstElementChild) observer.observe(content.firstElementChild)
+      for (const child of content.children) observer.observe(child)
     })
     return () => observer.disconnect()
   })
