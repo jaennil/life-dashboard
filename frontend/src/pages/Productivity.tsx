@@ -689,35 +689,37 @@ export function Productivity() {
         </div>
       </ExpandablePanel>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard
-          title="Активные"
-          value={loading || !summary ? '—' : String(summary.active_total)}
-          sub={loading || !summary ? 'Todoist и Vikunja' : summaryBySourceCaption(summary.by_source, summary.recurring_total)}
-          icon={ListTodo}
-          color="bg-blue-500"
-        />
-        <StatCard
-          title="Overdue"
-          value={loading || !summary ? '—' : String(summary.overdue_total)}
-          sub={loading || !summary ? 'Просрочено' : `${summary.stale_total} висят давно`}
-          icon={AlertTriangle}
-          color="bg-rose-500"
-        />
-        <StatCard
-          title="Сегодня"
-          value={loading || !summary ? '—' : String(summary.due_today_total)}
-          sub={loading || !summary ? 'На сегодня' : `${summary.completed_today_total} закрыто`}
-          icon={CalendarClock}
-          color="bg-amber-500"
-        />
-        <StatCard
-          title="7 дней"
-          value={loading || !summary ? '—' : String(summary.due_next_7_days_total)}
-          sub={loading || !summary ? 'Ближайшая неделя' : `${summary.completed_7_days_total} закрыто за 7 дн.`}
-          icon={CheckCircle2}
-          color="bg-emerald-500"
-        />
+      <div className="@container">
+        <div className="grid grid-cols-1 gap-4 @xs:grid-cols-2 @2xl:grid-cols-4">
+          <StatCard
+            title="Активные"
+            value={loading || !summary ? '—' : String(summary.active_total)}
+            sub={loading || !summary ? 'Todoist и Vikunja' : summaryBySourceCaption(summary.by_source, summary.recurring_total)}
+            icon={ListTodo}
+            color="bg-blue-500"
+          />
+          <StatCard
+            title="Overdue"
+            value={loading || !summary ? '—' : String(summary.overdue_total)}
+            sub={loading || !summary ? 'Просрочено' : `${summary.stale_total} висят давно`}
+            icon={AlertTriangle}
+            color="bg-rose-500"
+          />
+          <StatCard
+            title="Сегодня"
+            value={loading || !summary ? '—' : String(summary.due_today_total)}
+            sub={loading || !summary ? 'На сегодня' : `${summary.completed_today_total} закрыто`}
+            icon={CalendarClock}
+            color="bg-amber-500"
+          />
+          <StatCard
+            title="7 дней"
+            value={loading || !summary ? '—' : String(summary.due_next_7_days_total)}
+            sub={loading || !summary ? 'Ближайшая неделя' : `${summary.completed_7_days_total} закрыто за 7 дн.`}
+            icon={CheckCircle2}
+            color="bg-emerald-500"
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_1.8fr] gap-4">
