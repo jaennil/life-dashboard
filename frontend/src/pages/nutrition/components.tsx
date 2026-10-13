@@ -88,7 +88,7 @@ export function NutritionDayDetails({ day }: { day: NutritionDay }) {
         ))}
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {day.meals.map(meal => (
           <div key={meal.meal_type} className="rounded-xl border bg-background/45 p-3">
             <div className="mb-2 flex items-center justify-between gap-2">
@@ -100,9 +100,11 @@ export function NutritionDayDetails({ day }: { day: NutritionDay }) {
             <div className="flex flex-col gap-2">
               {meal.items.map((item, idx) => (
                 <div key={idx} className="rounded-lg border border-border/70 bg-background/60 px-3 py-2">
-                  <div className="flex items-center justify-between gap-3 text-xs">
-                    <span className="min-w-0 flex-1 truncate text-foreground">{item.food_name}</span>
-                    <span className="shrink-0 text-muted-foreground">{item.serving}</span>
+                  <div className="flex items-start justify-between gap-3 text-xs">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-foreground">{item.food_name}</p>
+                      {item.serving ? <p className="truncate text-muted-foreground">{item.serving}</p> : null}
+                    </div>
                     <span className="shrink-0 font-medium text-foreground">{Math.round(item.calories)} ккал</span>
                   </div>
                   {item.macros && (item.macros.protein > 0 || item.macros.carbs > 0 || item.macros.fat > 0) ? (
