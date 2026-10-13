@@ -122,7 +122,7 @@ export function QuickInput() {
         badges={[{ label: 'Текст или голос', tone: 'primary' }]}
       />
 
-      <div className="mx-auto grid w-full max-w-3xl gap-5">
+      <div className="mx-auto grid w-full max-w-3xl grid-cols-1 gap-5">
         {pushAvailable ? (
           <button
             type="button"

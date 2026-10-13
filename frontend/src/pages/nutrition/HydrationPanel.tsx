@@ -209,7 +209,7 @@ export function HydrationPanel({
               </button>
             ))}
           </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <StyledSelect
               value={customHydrationType}
               onChange={e => onCustomHydrationTypeChange(e.target.value as HydrationBeverageType)}
@@ -235,7 +235,7 @@ export function HydrationPanel({
               Добавить
             </button>
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
             <input
               type="text"
               inputMode="decimal"

@@ -347,7 +347,7 @@ export function AiChat() {
               <p className="font-medium text-foreground">Чем могу помочь?</p>
               <p className="text-sm text-muted-foreground mt-1">У меня есть доступ к финансам, активности, тренировкам и питанию</p>
             </div>
-            <div className="grid w-full gap-2 sm:flex sm:max-w-lg sm:flex-wrap sm:justify-center">
+            <div className="grid grid-cols-1 w-full gap-2 sm:flex sm:max-w-lg sm:flex-wrap sm:justify-center">
               {SUGGESTIONS.map(s => (
                 <button
                   key={s}

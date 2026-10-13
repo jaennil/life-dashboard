@@ -1338,7 +1338,7 @@ export function Finance() {
                   if (payee) openFinanceRaw({ type: 'expense', payee })
                 }}
               />
-              <div className="grid gap-2 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {topExpenses.slice(0, 3).map((expense, index) => (
                   <div key={expense.payee} className="rounded-xl border bg-background/50 px-3 py-2">
                     <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">#{index + 1}</p>
@@ -1465,7 +1465,7 @@ export function Finance() {
                 ))}
               </div>
 
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_160px]">
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_180px_160px]">
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                   <input

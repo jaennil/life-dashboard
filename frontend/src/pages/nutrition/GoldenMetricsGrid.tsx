@@ -19,7 +19,7 @@ export function GoldenMetricsGrid({
     : cards
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
       {visibleCards.map(card => (
         <NutritionGoldenMetricCard
           key={card.key}

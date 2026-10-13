@@ -21,7 +21,7 @@ export function AuthLayout({
 }) {
   return (
     <div className="relative min-h-screen overflow-hidden bg-background px-4 py-6 sm:px-6 lg:px-8">
-      <div className="relative mx-auto grid min-h-[calc(100vh-3rem)] w-full max-w-6xl overflow-hidden rounded-[28px] border bg-card shadow-xl xl:grid-cols-[1.08fr_0.92fr]">
+      <div className="relative mx-auto grid grid-cols-1 min-h-[calc(100vh-3rem)] w-full max-w-6xl overflow-hidden rounded-[28px] border bg-card shadow-xl xl:grid-cols-[1.08fr_0.92fr]">
         <aside className="hidden border-r bg-background/55 p-10 xl:flex xl:flex-col xl:justify-between">
           <div className="space-y-8">
             <div className="flex items-center gap-3">

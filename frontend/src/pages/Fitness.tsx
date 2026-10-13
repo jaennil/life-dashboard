@@ -671,7 +671,7 @@ export function Fitness() {
           },
         ]}
       >
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
         {(loading && cards.length === 0
           ? Array.from({ length: 5 }).map((_, index) => ({ key: `skeleton-${index}`, title: '—', value: '—', detail: '—', tone: 'muted' as const }))
           : cards
@@ -801,7 +801,7 @@ export function Fitness() {
         </>
       ) : (
         <>
-          <div className="grid gap-6 lg:grid-cols-[1.2fr,0.8fr] lg:items-start">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.2fr,0.8fr] lg:items-start">
             <div className="rounded-2xl border bg-card/90 p-5 shadow-sm">
               <div className="mb-4">
                 <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-foreground">

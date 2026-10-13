@@ -128,7 +128,7 @@ export function NutritionAnalysisPanel({
                 if (day) onOpenRaw({ day, meal_type: mealType })
               }}
             />
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
               {mealStats.map((stat) => (
                 <button key={stat.key} onClick={() => onOpenRaw({ meal_type: stat.key })}
                   className={cn(

@@ -625,7 +625,7 @@ function AppleHealthSection({ onChanged, reloadKey }: { onChanged: () => void; r
           <div className="h-8 animate-pulse bg-muted/30 rounded" />
         ) : apiKey ? (
           <div className="flex flex-col gap-2 border-t pt-3">
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
               <div className="flex flex-col gap-1">
                 <p className="text-xs font-medium text-foreground">Webhook URL</p>
                 <code className="text-xs bg-muted px-3 py-2 rounded-lg font-mono break-all select-all">{webhookURL}</code>
@@ -712,7 +712,7 @@ function LocationSection({ reloadKey }: { reloadKey: number }) {
           <div className="h-8 animate-pulse rounded bg-muted/30" />
         ) : apiKey ? (
           <div className="flex flex-col gap-2 border-t pt-3">
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
               <div className="flex flex-col gap-1">
                 <p className="text-xs font-medium text-foreground">Receiver Endpoint URL</p>
                 <code className="select-all break-all rounded-lg bg-muted px-3 py-2 font-mono text-xs">{receiverURL}</code>
@@ -1214,7 +1214,7 @@ export function Settings() {
         </div>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 xl:items-start">
         <div>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-foreground">Аккаунт</h2>
           <TOTPSection />
@@ -1238,7 +1238,7 @@ export function Settings() {
             ))}
           </div>
         ) : (
-          <div className="grid gap-3 xl:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
             {integrations.map(integration => (
               <IntegrationCard
                 key={integration.name}
