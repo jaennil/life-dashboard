@@ -142,9 +142,14 @@ function packGridItems<TId extends string>(
   cols: number,
 ): EditableGridLayout {
   const placed: EditableGridLayoutItem[] = []
+  const scale = cols / EDITABLE_WIDGET_GRID_COLS.lg
 
   widgets.forEach(widget => {
-    const item = toGridItem(widget, bounds, cols)
+    // Scale the widget's edges, not its width, so a row that fills the wide
+    // grid still fills the narrower one instead of wrapping or leaving a gap.
+    const left = Math.round(widget.x * scale)
+    const right = Math.round((widget.x + widget.w) * scale)
+    const item = toGridItem({ ...widget, x: left, w: Math.max(1, right - left) }, bounds, cols)
     let y = 0
 
     while (true) {

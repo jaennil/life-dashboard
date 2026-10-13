@@ -86,10 +86,25 @@ describe('editable widget layout model', () => {
 
     expect(responsive.lg.map(item => item.i)).toEqual(['beta', 'gamma'])
     expect(responsive.lg.find(item => item.i === 'beta')).toMatchObject({ x: 6, y: 0, w: 4, h: 5 })
-    expect(responsive.md.find(item => item.i === 'beta')).toMatchObject({ x: 0, y: 0, w: 4, h: 5 })
+    expect(responsive.md.find(item => item.i === 'beta')).toMatchObject({ x: 0, y: 0, w: 3, h: 5 })
     expect(responsive.md.every(item => item.x + item.w <= EDITABLE_WIDGET_GRID_COLS.md)).toBe(true)
     expectNoOverlaps(responsive.md)
     expect(responsive.sm.every(item => item.x === 0 && item.w === 1)).toBe(true)
+  })
+
+  it('keeps a full row side by side on the medium grid', () => {
+    const layout = normalize({
+      widgets: {
+        alpha: { ...defaults.alpha, x: 0, y: 0, w: 5, h: 5 },
+        beta: { ...defaults.beta, x: 5, y: 0, w: 7, h: 10 },
+        gamma: { ...defaults.gamma, hidden: true },
+      },
+    })
+
+    const md = toEditableResponsiveLayouts({ ids, layout, bounds }).md
+
+    expect(md.find(item => item.i === 'alpha')).toMatchObject({ x: 0, y: 0, w: 3 })
+    expect(md.find(item => item.i === 'beta')).toMatchObject({ x: 3, y: 0, w: 5 })
   })
 
   it('stacks one column in order, each widget under the previous one', () => {
